@@ -1,5 +1,6 @@
 hw_display_modules = {}
 
+softmmu_ss.add(files('xnu_ramfb.c'))
 softmmu_ss.add(when: 'CONFIG_DDC', if_true: files('i2c-ddc.c'))
 softmmu_ss.add(when: 'CONFIG_EDID', if_true: files('edid-generate.c', 'edid-region.c'))
 
