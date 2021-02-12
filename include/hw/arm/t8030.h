@@ -31,6 +31,7 @@
 #include "hw/boards.h"
 #include "hw/arm/boot.h"
 #include "hw/arm/xnu.h"
+#include "hw/intc/apple-aic.h"
 #include "exec/memory.h"
 #include "cpu.h"
 #include "sysemu/kvm.h"
@@ -45,9 +46,10 @@
 #define T8030_CPREG_VAR_NAME(name) cpreg_##name
 #define T8030_CPREG_VAR_DEF(name) uint64_t T8030_CPREG_VAR_NAME(name)
 
-#define MAX_CPU 1
+#define MAX_CPU 6
+#define MAX_CLUSTER 2
 #define NUM_ECORE 2
-#define NUM_PCORE 2
+#define NUM_PCORE 4
 typedef struct
 {
     MachineClass parent;
@@ -57,7 +59,14 @@ typedef struct {
     ARMCPU* cpu;
     AddressSpace* nsas;
     MemoryRegion* impl_reg;
+    MemoryRegion* coresight_reg;
+    MemoryRegion* memory;
+    MemoryRegion* sysmem;
+    MachineState* machine;
     uint32_t cpu_id;
+    uint32_t cluster_id;
+    bool is_in_ipi;
+    bool is_sleep;
     T8030_CPREG_VAR_DEF(ARM64_REG_HID11);
     T8030_CPREG_VAR_DEF(ARM64_REG_HID3);
     T8030_CPREG_VAR_DEF(ARM64_REG_HID5);
@@ -77,7 +86,6 @@ typedef struct {
     T8030_CPREG_VAR_DEF(S3_4_c15_c0_5);
     T8030_CPREG_VAR_DEF(S3_4_c15_c1_3);
     T8030_CPREG_VAR_DEF(S3_4_c15_c1_4);
-    T8030_CPREG_VAR_DEF(ARM64_REG_IPI_SR);
     T8030_CPREG_VAR_DEF(ARM64_REG_CYC_OVRD);
     T8030_CPREG_VAR_DEF(ARM64_REG_ACC_CFG);
     T8030_CPREG_VAR_DEF(ARM64_REG_VMSA_LOCK_EL1);
@@ -100,12 +108,39 @@ typedef struct {
     T8030_CPREG_VAR_DEF(UPMSR);
 } T8030CPU;
 
+#define MPIDR_AFF0_SHIFT 0
+#define MPIDR_AFF0_WIDTH 8
+#define MPIDR_AFF0_MASK  (((1 << MPIDR_AFF0_WIDTH) - 1) << MPIDR_AFF0_SHIFT)
+#define MPIDR_AFF1_SHIFT 8
+#define MPIDR_AFF1_WIDTH 8
+#define MPIDR_AFF1_MASK  (((1 << MPIDR_AFF1_WIDTH) - 1) << MPIDR_AFF1_SHIFT)
+#define MPIDR_AFF2_SHIFT 16
+#define MPIDR_AFF2_WIDTH 8
+#define MPIDR_AFF2_MASK  (((1 << MPIDR_AFF2_WIDTH) - 1) << MPIDR_AFF2_SHIFT)
+
+#define MPIDR_CPU_ID(mpidr_el1_val)             (((mpidr_el1_val) & MPIDR_AFF0_MASK) >> MPIDR_AFF0_SHIFT)
+#define MPIDR_CLUSTER_ID(mpidr_el1_val)         (((mpidr_el1_val) & MPIDR_AFF1_MASK) >> MPIDR_AFF1_SHIFT)
+
+#define IPI_RR_TARGET_CLUSTER_SHIFT 16
+#define ARM64_REG_IPI_RR_TYPE_IMMEDIATE (0 << 28)
+#define ARM64_REG_IPI_RR_TYPE_RETRACT   (1 << 28)
+#define ARM64_REG_IPI_RR_TYPE_DEFERRED  (2 << 28)
+#define ARM64_REG_IPI_RR_TYPE_NOWAKE    (3 << 28)
+
 typedef struct {
+    QemuMutex mutex;
     hwaddr base;
-    uint32_t id;
-    uint16_t type;
+    uint8_t id;
+    uint8_t type;
     MemoryRegion* mr;
+    MachineState* machine;
+    T8030CPU* cpus[MAX_CPU];
+    int deferredIPI[MAX_CPU][MAX_CPU];
+    bool noWakeIPI[MAX_CPU][MAX_CPU];
+    uint64_t tick;
 } cluster;
+
+#define kDeferredIPITimerDefault 64
 
 typedef struct
 {
@@ -116,10 +151,14 @@ typedef struct
     hwaddr soc_base_pa;
     hwaddr dram_base;
     unsigned long dram_size;
-    T8030CPU cpus[MAX_CPU];
-    cluster clusters[2];
+    T8030CPU* cpus[MAX_CPU];
+    cluster* clusters[MAX_CLUSTER];
+    QEMUTimer* ipi_deliver_timer;
+    QEMUTimer* ipicr_timer;
+    uint64_t ipi_cr;
+    bool pendingIPI[MAX_CPU];
+    AppleAICState* aic;
     MemoryRegion* sysmem;
-    MemoryRegion* tagmem;
     struct arm_boot_info bootinfo;
     char ramdisk_filename[1024];
     char kernel_filename[1024];
@@ -129,6 +168,7 @@ typedef struct
     FileMmioDev ramdisk_file_dev;
     DTBNode *device_tree;
     bool use_ramfb;
+    QemuMutex mutex;
 } T8030MachineState;
 
 typedef struct
