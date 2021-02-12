@@ -32,11 +32,15 @@
 #include "hw/loader.h"
 
 const char *KEEP_COMP[] = {"uart-1,samsung\0$",
-                           "N104AP\0iPhone12,1\0AppleARM\0$", "arm-io,t8030\0$", "apple,thunder\0ARM,v8\0$"};
+                           "N104AP\0iPhone12,1\0AppleARM\0$", "arm-io,t8030\0$", "apple,thunder\0ARM,v8\0$", "aic,1\0$"};
 
 const char *REM_NAMES[] = {"backlight\0$", "dockchannel-uart\0$"};
 
 const char *REM_DEV_TYPES[] = {"backlight\0$"};
+
+const char *REM_PROPS[] = {"function-cpu_idle", "function-enable_core", "function-error_handler"};
+//TODO: cpu-idle, enable_core needs PMGR
+//error_handler probably needs arm-io to initialize properly
 
 static void allocate_and_copy(MemoryRegion *mem, AddressSpace *as,
                               const char *name, hwaddr pa, hwaddr size,
@@ -116,7 +120,15 @@ static void macho_dtb_node_process(DTBNode *node)
             }
         }
     }
-
+    {
+        uint64_t count = sizeof(REM_PROPS) / sizeof(REM_PROPS[0]);
+        for (i = 0; i < count; i++) {
+            prop = get_dtb_prop(node, REM_PROPS[i]);
+            if(prop!=NULL){
+                remove_dtb_prop(node, prop);
+            }
+        }
+    }
     for (iter = node->child_nodes; iter != NULL; iter = iter->next) {
         child = (DTBNode *)iter->data;
         macho_dtb_node_process(child);
@@ -210,7 +222,11 @@ void macho_load_dtb(DTBNode* root, AddressSpace *as, MemoryRegion *mem,
     uint64_t data64;
     uint32_t data = 1;
     add_dtb_prop(child, "research-enabled", sizeof(data), (uint8_t *)&data);
-    
+    prop = get_dtb_prop(child, "effective-production-status-ap");
+    if(prop != NULL){
+        //disable coresight
+        *(uint32_t*)prop->value = 1;
+    }
     //update the display parameters
     uint32_t display_rotation = 0;
     prop = get_dtb_prop(child, "display-rotation");
