@@ -1,4 +1,5 @@
 softmmu_ss.add(files('intc.c'))
+softmmu_ss.add(files('apple-aic.c'))
 softmmu_ss.add(when: 'CONFIG_ARM_GIC', if_true: files(
   'arm_gic.c',
   'arm_gic_common.c',
