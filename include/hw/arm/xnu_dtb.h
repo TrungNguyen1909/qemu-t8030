@@ -25,8 +25,6 @@
 #define HW_ARM_XNU_DTB_H
 
 #include "qemu-common.h"
-#include "hw/arm/boot.h"
-#include "hw/arm/xnu_mem.h"
 
 #define DT_PROP_FLAG_PLACEHOLDER (0x80000000)
 
@@ -50,6 +48,7 @@ void delete_dtb_node(DTBNode *node);
 void save_dtb(uint8_t *buf, DTBNode *root);
 void remove_dtb_prop(DTBNode *node, DTBProp *prop);
 void add_dtb_prop(DTBNode *n, const char *name, uint32_t size, uint8_t *val);
+void add_dtb_node(DTBNode *n, const char *name);
 uint64_t get_dtb_node_buffer_size(DTBNode *node);
 DTBProp *get_dtb_prop(DTBNode *node, const char *name);
 DTBNode *get_dtb_child_node_by_name(DTBNode *node, const char *name);
