@@ -106,6 +106,8 @@ struct AppleAICState {
     qemu_irq *cpu_irqs;
     //ext irqs state
     bool *ext_irq_state;
+    //pending IPIs: 1: set; 0: unset
+    bool **pendingIPI;
     //deferred IPIs: 1: set; 0: unset
     bool **deferredIPI;
     //global cfg
