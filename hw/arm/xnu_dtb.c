@@ -201,6 +201,16 @@ void add_dtb_prop(DTBNode *n, const char *name, uint32_t size, uint8_t *val)
     n->props = g_list_append(n->props, prop);
     n->prop_count++;
 }
+void add_dtb_node(DTBNode *n, const char *name)
+{
+    if ((NULL == n) || (NULL == name)) {
+        abort();
+    }
+    DTBNode *node = g_new0(DTBNode, 1);
+    add_dtb_prop(node, "name", strlen(name), name);
+    n->child_nodes = g_list_append(n->child_nodes, node);
+    n->child_node_count ++;
+}
 
 void save_dtb(uint8_t *buf, DTBNode *root)
 {
