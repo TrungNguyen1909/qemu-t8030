@@ -114,6 +114,10 @@ T8030_CPREG_FUNCS(S3_6_c15_c9_1)
 T8030_CPREG_FUNCS(UPMPCM)
 T8030_CPREG_FUNCS(UPMCR0)
 T8030_CPREG_FUNCS(UPMSR)
+T8030_CPREG_FUNCS(ARM64_REG_CTRR_A_LWR_EL1)
+T8030_CPREG_FUNCS(ARM64_REG_CTRR_A_UPR_EL1)
+T8030_CPREG_FUNCS(ARM64_REG_CTRR_CTL_EL1)
+T8030_CPREG_FUNCS(ARM64_REG_CTRR_LOCK_EL1)
 
 //Deliver IPI, call with cluster mutex locked
 static void T8030_cluster_deliver_ipi(cluster* c, uint32_t cpu_id){
@@ -280,6 +284,10 @@ static const ARMCPRegInfo T8030_cp_reginfo_tcg[] = {
     T8030_CPREG_DEF(UPMPCM, 3, 7, 15, 5, 4, PL1_RW),
     T8030_CPREG_DEF(UPMCR0, 3, 7, 15, 0, 4, PL1_RW),
     T8030_CPREG_DEF(UPMSR, 3, 7, 15, 6, 4, PL1_RW),
+    T8030_CPREG_DEF(ARM64_REG_CTRR_A_LWR_EL1, 3, 4, 15, 2, 3, PL1_RW),
+    T8030_CPREG_DEF(ARM64_REG_CTRR_A_UPR_EL1, 3, 4, 15, 2, 4, PL1_RW),
+    T8030_CPREG_DEF(ARM64_REG_CTRR_CTL_EL1, 3, 4, 15, 2, 5, PL1_RW),
+    T8030_CPREG_DEF(ARM64_REG_CTRR_LOCK_EL1, 3, 4, 15, 2, 2, PL1_RW),
     
     //Cluster
     {                                                                        
@@ -373,15 +381,6 @@ static void T8030_create_s3c_uart(const T8030MachineState *tms, Chardev *chr)
 
 static void T8030_patch_kernel(AddressSpace *nsas)
 {
-    //KTRR
-    //rorgn_stash_range
-    address_space_rw(nsas, vtop_static(0xFFFFFFF007B4A53C),
-                     MEMTXATTRS_UNSPECIFIED, (uint8_t *)&g_ret_inst,
-                     sizeof(g_ret_inst), 1);
-    //rorgn_lockdown
-    address_space_rw(nsas, vtop_static(0xFFFFFFF007B4AECC),
-                     MEMTXATTRS_UNSPECIFIED, (uint8_t *)&g_ret_inst,
-                     sizeof(g_ret_inst), 1);
     //gxf_enable
     address_space_rw(nsas, vtop_static(0xFFFFFFF00811CE98),
                      MEMTXATTRS_UNSPECIFIED, (uint8_t *)&g_nop_inst,
