@@ -390,6 +390,11 @@ static void T8030_patch_kernel(AddressSpace *nsas)
     address_space_rw(nsas, vtop_static(0xFFFFFFF007B5A5A8),
                      MEMTXATTRS_UNSPECIFIED, (uint8_t *)&g_nop_inst,
                      sizeof(g_nop_inst), 1);
+    uint32_t value = 0;
+    //disable_kprintf_output = 0
+    address_space_rw(nsas, vtop_static(0xFFFFFFF0077142C8),
+                     MEMTXATTRS_UNSPECIFIED, (uint8_t *)&value,
+                     sizeof(value), 1);
 }
 
 static void T8030_memory_setup(MachineState *machine)
@@ -609,27 +614,31 @@ static void T8030_cpu_setup(MachineState *machine)
 
     DTBNode* root = get_dtb_child_node_by_name(tms->device_tree, "cpus");
     for(unsigned int i=0;i<machine->smp.cpus;i++){
+
+        char* cpu_name = g_malloc0(8);
+        snprintf(cpu_name, 8, "cpu%u", i);
+        DTBNode* node = get_dtb_child_node_by_name(root, cpu_name);
+        assert(node);
+        DTBProp* prop = NULL;
         Object *cpuobj = object_new(machine->cpu_type);
         tms->cpus[i] = g_new(T8030CPU, 1);
         tms->cpus[i]->cpu = ARM_CPU(cpuobj);
         tms->cpus[i]->machine = machine;
         CPUState *cs = CPU(tms->cpus[i]->cpu);
 
-        char* cpu_name = g_malloc0(8);
-        snprintf(cpu_name, 8, "cpu%u", i);
-        DTBNode* node = get_dtb_child_node_by_name(root, cpu_name);
-        assert(node != NULL);
-        DTBProp* prop = NULL;
-
         //MPIDR_EL1
         prop = get_dtb_prop(node, "cpu-id");
         assert(prop->length == 4);
         unsigned int cpu_id = *(unsigned int*)prop->value;
+        prop = get_dtb_prop(node, "reg");
+        assert(prop->length == 4);
+        unsigned int phys_id = *(unsigned int*)prop->value;
         prop = get_dtb_prop(node, "cluster-id");
         assert(prop->length == 4);
         unsigned int cluster_id = *(unsigned int*)prop->value;
-        unsigned int mpidr = cpu_id | (cluster_id << MPIDR_AFF1_SHIFT) | (tms->clusters[cluster_id]->type << MPIDR_AFF2_SHIFT) | (1 << 31);
+        uint64_t mpidr = 0LL | phys_id | (cluster_id << MPIDR_AFF1_SHIFT) | (tms->clusters[cluster_id]->type << MPIDR_AFF2_SHIFT) | (1LL << 31);
         tms->cpus[i]->cpu->mp_affinity = mpidr;
+        tms->cpus[i]->mpidr = mpidr;
         tms->cpus[cpu_id] = tms->cpus[i];
         tms->clusters[cluster_id]->cpus[cpu_id] = tms->cpus[i];
         //remove debug regs from device tree
@@ -641,7 +650,27 @@ static void T8030_cpu_setup(MachineState *machine)
         if(prop != NULL){
             remove_dtb_prop(node, prop);
         }
-
+        //need to set the cpu freqs instead of iboot
+        uint64_t freq = 24000000;
+        if (i == 0){
+            prop = get_dtb_prop(node, "state");
+            if(prop != NULL) {
+                remove_dtb_prop(node, prop);
+            }
+            add_dtb_prop(node, "state", 8, "running");
+        }
+        prop = get_dtb_prop(node, "timebase-frequency");
+        if(prop != NULL){
+            remove_dtb_prop(node, prop);
+        }
+        add_dtb_prop(node, "timebase-frequency", sizeof(uint64_t),
+                        (uint8_t *)&freq);
+        prop = get_dtb_prop(node, "fixed-frequency");
+        if(prop != NULL){
+            remove_dtb_prop(node, prop);
+        }
+        add_dtb_prop(node, "fixed-frequency", sizeof(uint64_t),
+                        (uint8_t *)&freq);
         //per cpu memory region
         tms->cpus[i]->memory = g_new(MemoryRegion, 1);
         memory_region_init(tms->cpus[i]->memory, OBJECT(machine), "cpu-memory", UINT64_MAX);
@@ -655,13 +684,14 @@ static void T8030_cpu_setup(MachineState *machine)
         object_property_set_bool(cpuobj, "has_el2", false, NULL);
 
         if(i > 0){
-            object_property_set_bool(cpuobj, "start-powered-off", true,
-                                         NULL);
+            object_property_set_bool(cpuobj, "start-powered-off", true, NULL);
+            tms->cpus[i]->is_sleep = true;
         }
 
         qdev_realize(DEVICE(cpuobj), NULL, &error_fatal);
         
         tms->cpus[i]->cpu_id = cpu_id;
+        tms->cpus[i]->phys_id = phys_id;
         tms->cpus[i]->cluster_id = cluster_id;
         tms->cpus[i]->nsas = cpu_get_address_space(cs, ARMASIdx_NS);
 
@@ -679,7 +709,7 @@ static void T8030_cpu_setup(MachineState *machine)
         prop = get_dtb_prop(node, "coresight-reg");
         assert(prop);
         assert(prop->length == 16);
-        reg = prop->value;
+        reg = (uint64_t*)prop->value;
         tms->cpus[i]->coresight_reg = g_new(MemoryRegion, 1);
         memory_region_init_io(tms->cpus[i]->coresight_reg, cpuobj, &cpu_coresight_reg_ops, tms->cpus[i], "coresight-reg", reg[1]);
 

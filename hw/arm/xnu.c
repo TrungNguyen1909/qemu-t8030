@@ -165,30 +165,6 @@ void macho_load_dtb(DTBNode* root, AddressSpace *as, MemoryRegion *mem,
     }
     remove_dtb_prop(root, prop);
 
-    //need to set the cpu freqs instead of iboot
-    uint64_t freq = 24000000;
-    child = get_dtb_child_node_by_name(root, "cpus");
-    assert(child != NULL);
-    child = get_dtb_child_node_by_name(child, "cpu0");
-    assert(child != NULL);
-    prop = get_dtb_prop(child, "state");
-    if(prop != NULL) {
-        remove_dtb_prop(child, prop);
-    }
-    add_dtb_prop(child, "state", 8, "running");
-    prop = get_dtb_prop(child, "timebase-frequency");
-    if(prop != NULL){
-        remove_dtb_prop(child, prop);
-    }
-    add_dtb_prop(child, "timebase-frequency", sizeof(uint64_t),
-                    (uint8_t *)&freq);
-    prop = get_dtb_prop(child, "fixed-frequency");
-    if(prop != NULL){
-        remove_dtb_prop(child, prop);
-    }
-    add_dtb_prop(child, "fixed-frequency", sizeof(uint64_t),
-                    (uint8_t *)&freq);
-
     //need to set the random seed insread of iboot
     uint64_t seed[8] = {0xdead000d, 0xdead000d, 0xdead000d, 0xdead000d,
                         0xdead000d, 0xdead000d, 0xdead000d, 0xdead000d};
@@ -201,9 +177,11 @@ void macho_load_dtb(DTBNode* root, AddressSpace *as, MemoryRegion *mem,
 
     add_dtb_prop(child, "dram-base", sizeof(dram_base), &dram_base);
     add_dtb_prop(child, "dram-size", sizeof(dram_base), &dram_size);
+    prop = get_dtb_prop(child, "debug-enabled");
+    *(uint32_t*)prop->value = 1;
     prop = get_dtb_prop(child, "firmware-version");
     remove_dtb_prop(child, prop);
-    add_dtb_prop(child, "firmware-version", 15, "xnu-qemu-arm64");
+    add_dtb_prop(child, "firmware-version", 15, "qemu-t8030");
     prop = get_dtb_prop(child, "nvram-total-size");
     remove_dtb_prop(child, prop);
     uint32_t nvram_total_size = 0xFFFF * 0x10;

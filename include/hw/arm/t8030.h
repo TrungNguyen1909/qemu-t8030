@@ -64,7 +64,9 @@ typedef struct {
     MemoryRegion* sysmem;
     MachineState* machine;
     uint32_t cpu_id;
+    uint32_t phys_id;
     uint32_t cluster_id;
+    uint64_t mpidr;
     bool is_in_ipi;
     bool is_sleep;
     T8030_CPREG_VAR_DEF(ARM64_REG_HID11);
@@ -103,6 +105,7 @@ typedef struct {
     T8030_CPREG_VAR_DEF(S3_6_c15_c8_2);
     T8030_CPREG_VAR_DEF(S3_6_c15_c8_3);
     T8030_CPREG_VAR_DEF(S3_6_c15_c9_1);
+    //uncore
     T8030_CPREG_VAR_DEF(UPMPCM);
     T8030_CPREG_VAR_DEF(UPMCR0);
     T8030_CPREG_VAR_DEF(UPMSR);
