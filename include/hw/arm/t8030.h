@@ -70,6 +70,8 @@ typedef struct {
     bool is_in_ipi;
     bool is_sleep;
     T8030_CPREG_VAR_DEF(ARM64_REG_HID11);
+    T8030_CPREG_VAR_DEF(ARM64_REG_HID13);
+    T8030_CPREG_VAR_DEF(ARM64_REG_HID14);
     T8030_CPREG_VAR_DEF(ARM64_REG_HID3);
     T8030_CPREG_VAR_DEF(ARM64_REG_HID5);
     T8030_CPREG_VAR_DEF(ARM64_REG_HID4);
@@ -161,10 +163,11 @@ typedef struct
     unsigned long dram_size;
     T8030CPU* cpus[MAX_CPU];
     cluster* clusters[MAX_CLUSTER];
-    QEMUTimer* ipi_deliver_timer;
+    QEMUTimer* next_tick_timer;
     QEMUTimer* ipicr_timer;
     uint64_t ipi_cr;
     bool pendingIPI[MAX_CPU];
+    bool pendingWakeup[MAX_CPU];
     AppleAICState* aic;
     MemoryRegion* sysmem;
     struct arm_boot_info bootinfo;

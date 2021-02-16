@@ -33,6 +33,7 @@
 #include "sysemu/reset.h"
 #include "qemu/error-report.h"
 #include "hw/platform-bus.h"
+#include "arm-powerctl.h"
 
 #include "hw/arm/t8030.h"
 
@@ -77,6 +78,8 @@
     }
 
 T8030_CPREG_FUNCS(ARM64_REG_HID11)
+T8030_CPREG_FUNCS(ARM64_REG_HID13)
+T8030_CPREG_FUNCS(ARM64_REG_HID14)
 T8030_CPREG_FUNCS(ARM64_REG_HID3)
 T8030_CPREG_FUNCS(ARM64_REG_HID5)
 T8030_CPREG_FUNCS(ARM64_REG_HID4)
@@ -119,25 +122,36 @@ T8030_CPREG_FUNCS(ARM64_REG_CTRR_A_UPR_EL1)
 T8030_CPREG_FUNCS(ARM64_REG_CTRR_CTL_EL1)
 T8030_CPREG_FUNCS(ARM64_REG_CTRR_LOCK_EL1)
 
+//Wake up cpus in the next tick, call with machine mutex unlocked
+static void T8030_wake_up_cpus(MachineState* machine, uint32_t cpu_mask){
+    T8030MachineState* tms = T8030_MACHINE(machine);
+    WITH_QEMU_LOCK_GUARD(&tms->mutex){
+        for(int i = 0; i < machine->smp.cpus; i++)
+        if(test_bit(i, &cpu_mask)&& tms->cpus[i]->is_sleep){
+            tms->pendingWakeup[i] = true;
+        }
+        timer_mod_ns(tms->next_tick_timer, qemu_clock_get_ns(QEMU_CLOCK_VIRTUAL) + 1);
+    }
+}
+static void T8030_wake_up_cpu(MachineState* machine, uint32_t cpu_id){
+    T8030_wake_up_cpus(machine, 1 << cpu_id);
+}
 //Deliver IPI, call with cluster mutex locked
 static void T8030_cluster_deliver_ipi(cluster* c, uint32_t cpu_id){
-    if(c->cpus[cpu_id]->is_sleep){
-        //TODO: Wake up this one
-    }
+    T8030_wake_up_cpu(c->machine, cpu_id);
     for(int k = 0; k < MAX_CPU; k++){
         //clear all pending IPIs
         c->deferredIPI[k][cpu_id] = 0;
         c->noWakeIPI[k][cpu_id] = 0;
     }
-    assert(c->cpus[cpu_id]->is_in_ipi == false);
-    c->cpus[cpu_id]->is_in_ipi = true;
+    // assert(c->cpus[cpu_id]->is_in_ipi == false);
 
-    fprintf(stderr, "Cluster %u delivering Fast IPI to CPU %u\n", c->id, cpu_id);
+    // fprintf(stderr, "Cluster %u delivering Fast IPI to CPU %u\n", c->id, cpu_id);
 
     T8030MachineState *tms = T8030_MACHINE(c->machine);
     WITH_QEMU_LOCK_GUARD(&tms->mutex){
         tms->pendingIPI[cpu_id] = true;
-        timer_mod_ns(tms->ipi_deliver_timer, qemu_clock_get_ns(QEMU_CLOCK_VIRTUAL) + 1);
+        timer_mod_ns(tms->next_tick_timer, qemu_clock_get_ns(QEMU_CLOCK_VIRTUAL) + 1);
     }
 }
 
@@ -148,26 +162,37 @@ static void T8030_ipi_rr_local(CPUARMState *env, const ARMCPRegInfo *ri,
     T8030CPU *tcpu = (T8030CPU *)ri->opaque;
     T8030MachineState *tms = T8030_MACHINE(tcpu->machine);
     WITH_QEMU_LOCK_GUARD(&tms->clusters[tcpu->cluster_id]->mutex){
-        uint32_t cpu_id = MPIDR_CPU_ID(value);
+        uint32_t phys_id = MPIDR_CPU_ID(value);
         cluster *c = tms->clusters[tcpu->cluster_id];
-        if(c->cpus[cpu_id] == NULL) return;
-        fprintf(stderr, "CPU %u sending fast IPI to local CPU %u: value: 0x%llx\n", tcpu->cpu_id, cpu_id, value);
+        uint32_t cpu_id = -1;
+        for(int i = 0; i < MAX_CPU; i++)
+        if(c->cpus[i]!=NULL){
+            if(c->cpus[i]->phys_id==phys_id){
+                cpu_id = i;
+                break;
+            }
+        }
+        // fprintf(stderr, "CPU %u sending fast IPI to local CPU %u: value: 0x%llx\n", tcpu->phys_id, phys_id, value);
+        if(cpu_id == -1 || c->cpus[cpu_id] == NULL) {
+            fprintf(stderr, "CPU %u failed to send fast IPI to local CPU %u: value: 0x%llx\n", tcpu->phys_id, phys_id, value);
+            return;
+        }
         if ((value & ARM64_REG_IPI_RR_TYPE_NOWAKE) == ARM64_REG_IPI_RR_TYPE_NOWAKE){
-            fprintf(stderr, "...nowake ipi\n");
+            // fprintf(stderr, "...nowake ipi\n");
             if(c->cpus[cpu_id]->is_sleep){
                 c->noWakeIPI[tcpu->cpu_id][cpu_id] = 1;
             } else {
                 T8030_cluster_deliver_ipi(c, cpu_id);
             }
         } else if ((value & ARM64_REG_IPI_RR_TYPE_DEFERRED) == ARM64_REG_IPI_RR_TYPE_DEFERRED){
-            fprintf(stderr, "...deferred ipi\n");
+            // fprintf(stderr, "...deferred ipi\n");
             c->deferredIPI[tcpu->cpu_id][cpu_id] = 1;
         } else if ((value & ARM64_REG_IPI_RR_TYPE_RETRACT) == ARM64_REG_IPI_RR_TYPE_RETRACT){
-            fprintf(stderr, "...retract ipi\n");
+            // fprintf(stderr, "...retract ipi\n");
             c->deferredIPI[tcpu->cpu_id][cpu_id] = 0;
             c->noWakeIPI[tcpu->cpu_id][cpu_id] = 0;
         } else if((value & ARM64_REG_IPI_RR_TYPE_IMMEDIATE) == ARM64_REG_IPI_RR_TYPE_IMMEDIATE){
-            fprintf(stderr, "...immediate ipi\n");
+            // fprintf(stderr, "...immediate ipi\n");
             T8030_cluster_deliver_ipi(c, cpu_id);
         }
     }
@@ -181,9 +206,21 @@ static void T8030_ipi_rr_global(CPUARMState *env, const ARMCPRegInfo *ri,
     uint32_t cluster_id = MPIDR_CLUSTER_ID(value >> IPI_RR_TARGET_CLUSTER_SHIFT);
     if(cluster_id >= MAX_CLUSTER || tms->clusters[cluster_id] == 0) return;
     WITH_QEMU_LOCK_GUARD(&tms->clusters[cluster_id]->mutex){
-        uint32_t cpu_id = MPIDR_CPU_ID(value);
+        uint32_t phys_id = MPIDR_CPU_ID(value);
         cluster *c = tms->clusters[cluster_id];
-        if(c->cpus[cpu_id] == NULL) return;
+        uint32_t cpu_id = -1;
+        for(int i = 0; i < MAX_CPU; i++)
+        if(c->cpus[i]!=NULL){
+            if(c->cpus[i]->phys_id==phys_id){
+                cpu_id = i;
+                break;
+            }
+        }
+        // fprintf(stderr, "CPU %u sending fast IPI to global CPU %u: value: 0x%llx\n", tcpu->phys_id, phys_id, value);
+        if(cpu_id == -1 || c->cpus[cpu_id] == NULL) {
+            fprintf(stderr, "CPU %u failed to send fast IPI to global CPU %u: value: 0x%llx\n", tcpu->phys_id, phys_id, value);
+            return;
+        };
         if ((value & ARM64_REG_IPI_RR_TYPE_NOWAKE) == ARM64_REG_IPI_RR_TYPE_NOWAKE){
             if(c->cpus[cpu_id]->is_sleep){
                 c->noWakeIPI[tcpu->cpu_id][cpu_id] = 1;
@@ -212,8 +249,7 @@ static void T8030_ipi_write_sr(CPUARMState *env, const ARMCPRegInfo *ri,
 {
     T8030CPU *tcpu = (T8030CPU *)ri->opaque;
     tcpu->is_in_ipi = false;
-    qemu_irq_lower(qdev_get_gpio_in(DEVICE(tcpu->cpu), ARM_CPU_FIQ));
-    fprintf(stderr, "CPU %u ack fast IPI\n", tcpu->cpu_id);
+    // fprintf(stderr, "CPU %u ack fast IPI\n", tcpu->cpu_id);
 }
 //Read deferred interrupt timeout (global)
 static uint64_t T8030_ipi_read_cr(CPUARMState *env, const ARMCPRegInfo *ri)
@@ -248,6 +284,8 @@ static void T8030_ipi_write_cr(CPUARMState *env, const ARMCPRegInfo *ri,
 static const ARMCPRegInfo T8030_cp_reginfo_tcg[] = {
     // Apple-specific registers
     T8030_CPREG_DEF(ARM64_REG_HID11, 3, 0, 15, 13, 0, PL1_RW),
+    T8030_CPREG_DEF(ARM64_REG_HID13, 3, 0, 15, 14, 0, PL1_RW),
+    T8030_CPREG_DEF(ARM64_REG_HID14, 3, 0, 15, 15, 0, PL1_RW),
     T8030_CPREG_DEF(ARM64_REG_HID3, 3, 0, 15, 3, 0, PL1_RW),
     T8030_CPREG_DEF(ARM64_REG_HID5, 3, 0, 15, 5, 0, PL1_RW),
     T8030_CPREG_DEF(ARM64_REG_HID4, 3, 0, 15, 4, 0, PL1_RW),
@@ -293,14 +331,14 @@ static const ARMCPRegInfo T8030_cp_reginfo_tcg[] = {
     {                                                                        
         .cp = CP_REG_ARM64_SYSREG_CP,                                        
         .name = "ARM64_REG_IPI_RR_LOCAL", .opc0 = 3, .crn = 15, .crm = 0,
-        .opc1 = 5, .opc2 = 0, .access = PL1_W, .type = ARM_CP_NO_RAW | ARM_CP_RAISES_EXC,
+        .opc1 = 5, .opc2 = 0, .access = PL1_W, .type = ARM_CP_NO_RAW,
         .state = ARM_CP_STATE_AA64,
         .writefn = T8030_ipi_rr_local
     },
     {                                                                        
         .cp = CP_REG_ARM64_SYSREG_CP,                                        
         .name = "ARM64_REG_IPI_RR_GLOBAL", .opc0 = 3, .crn = 15, .crm = 0,
-        .opc1 = 5, .opc2 = 1, .access = PL1_W, .type = ARM_CP_NO_RAW | ARM_CP_RAISES_EXC,
+        .opc1 = 5, .opc2 = 1, .access = PL1_W, .type = ARM_CP_NO_RAW,
         .state = ARM_CP_STATE_AA64,
         .writefn = T8030_ipi_rr_global
     },
@@ -576,11 +614,68 @@ static const MemoryRegionOps cpm_impl_reg_ops = {
     .write = cpm_impl_reg_write,
     .read = cpm_impl_reg_read,
 };
+static void pmgr_unk_reg_write(void *opaque,
+                  hwaddr addr,
+                  uint64_t data,
+                  unsigned size){
+    hwaddr* base = (hwaddr*) opaque;
+    //fprintf(stderr, "PMGR reg WRITE unk @ 0x" TARGET_FMT_lx " base: 0x" TARGET_FMT_lx " value: 0x" TARGET_FMT_lx "\n", base + addr, base, data);
+}
+static uint64_t pmgr_unk_reg_read(void *opaque,
+                     hwaddr addr,
+                     unsigned size){
+    hwaddr* base = (hwaddr*) opaque;
+    //fprintf(stderr, "PMGR reg READ unk @ 0x" TARGET_FMT_lx " base: 0x" TARGET_FMT_lx "\n", base + addr, base);
+    if(((uint64_t)(base+addr)&0x10e70000) == 0x10e70000){
+        return (108<<4) | 0x200000;
+    }
+    return 0;
+}
+static const MemoryRegionOps pmgr_unk_reg_ops = {
+    .write = pmgr_unk_reg_write,
+    .read = pmgr_unk_reg_read,
+};
+static void pmgr_reg_write(void *opaque,
+                  hwaddr addr,
+                  uint64_t data,
+                  unsigned size){
+    MachineState *machine = MACHINE(opaque);
+    T8030MachineState *tms = T8030_MACHINE(machine);
+    // fprintf(stderr, "PMGR reg WRITE @ 0x" TARGET_FMT_lx " value: 0x" TARGET_FMT_lx "\n", addr, data);
+    switch (addr){
+        case 0xd4004:
+            T8030_wake_up_cpus(machine, data);
+            return;
+    }
+}
+static uint64_t pmgr_reg_read(void *opaque,
+                     hwaddr addr,
+                     unsigned size){
+    // fprintf(stderr, "PMGR reg READ @ 0x" TARGET_FMT_lx "\n", addr);
+    switch(addr){
+        case 0xf0010: /* AppleT8030PMGR::commonSramCheck */
+            return 0x5000;
+        case 0x802d8:
+        case 0x80308:
+        case 0x80310:
+        case 0x80318:
+        case 0x80320:
+        case 0x80328:
+        case 0x80330:
+            return 0xf0;
+    }
+    return 0;
+}
+static const MemoryRegionOps pmgr_reg_ops = {
+    .write = pmgr_reg_write,
+    .read = pmgr_reg_read,
+};
 
 static void T8030_cluster_setup(MachineState *machine){
 
     T8030MachineState *tms = T8030_MACHINE(machine);
     tms->clusters[0] = g_new0(cluster, 1);
+    //TODO: find base through device tree
     tms->clusters[0]->base = CPM_IMPL_REG_BASE;
     tms->clusters[0]->type = '0'; // E-CORE
     tms->clusters[0]->id = 0;
@@ -590,16 +685,12 @@ static void T8030_cluster_setup(MachineState *machine){
     memory_region_init_io(tms->clusters[0]->mr, OBJECT(machine), &cpm_impl_reg_ops, tms->clusters[0], "cpm-impl-reg", 0x10000);
     memory_region_add_subregion(tms->sysmem, tms->clusters[0]->base, tms->clusters[0]->mr);
     tms->clusters[1] = g_new0(cluster, 1);
+    //TODO: find base through device tree
     tms->clusters[1]->base = CPM_IMPL_REG_BASE + 0x10000;
     tms->clusters[1]->type = '1'; // P-CORE
     tms->clusters[1]->id = 1;
     tms->clusters[1]->mr = g_new(MemoryRegion, 1);
     tms->clusters[1]->machine = machine;
-    for(int i = 0;i < MAX_CPU; i++){
-        for(int j = 0;j < MAX_CPU; j++){
-            tms->clusters[1]->deferredIPI[i][j] = -1;
-        }
-    }
     qemu_mutex_init(&tms->clusters[1]->mutex);
     memory_region_init_io(tms->clusters[1]->mr, OBJECT(machine), &cpm_impl_reg_ops, tms->clusters[1], "cpm-impl-reg", 0x10000);
     memory_region_add_subregion(tms->sysmem, tms->clusters[1]->base,tms->clusters[1]->mr);
@@ -740,24 +831,88 @@ static void T8030_create_aic(MachineState *machine){
     assert(child != NULL);
     tms->aic = apple_aic_create(tms->soc_base_pa, machine->smp.cpus, child);
     assert(tms->aic);
-    for(int i = 0; i < machine->smp.cpus; i++)
+    DTBNode* root = get_dtb_child_node_by_name(tms->device_tree, "cpus");
+
+    for(unsigned int i = 0; i < machine->smp.cpus; i++)
     {
         memory_region_add_subregion_overlap(tms->cpus[i]->memory, tms->aic->base, tms->aic->iomems[i], 0);
-        qdev_connect_gpio_out(DEVICE(tms->aic), i, qdev_get_gpio_in(DEVICE(tms->cpus[i]->cpu), ARM_CPU_FIQ));
+        qdev_connect_gpio_out(DEVICE(tms->aic), i, qdev_get_gpio_in(DEVICE(tms->cpus[i]->cpu), ARM_CPU_IRQ));
+
+        char* cpu_name = g_malloc0(8);
+        snprintf(cpu_name, 8, "cpu%u", i);
+        DTBNode* node = get_dtb_child_node_by_name(root, cpu_name);
+        assert(node);
+        DTBProp* prop = get_dtb_prop(node, "interrupts");
+        assert(prop);
+        assert(prop->length == 12);
+        uint32_t* intr = (uint32_t*)prop->value;
+        qdev_connect_gpio_out_named(DEVICE(tms->cpus[i]->cpu), "pmu-interrupt", 0, qdev_get_gpio_in(DEVICE(tms->aic), intr[1]));
     }
+}
+
+static void T8030_pmgr_setup(MachineState* machine){
+    T8030MachineState *tms = T8030_MACHINE(machine);
+    DTBNode *child = get_dtb_child_node_by_name(tms->device_tree, "arm-io");
+    assert(child != NULL);
+    child = get_dtb_child_node_by_name(child, "pmgr");
+    assert(child != NULL);
+    DTBProp *prop = get_dtb_prop(child, "reg");
+    assert(prop);
+    uint64_t* reg = (uint64_t*)prop->value;
+    for(int i = 0; i < prop->length / 8; i+=2){
+        MemoryRegion* mem = g_new(MemoryRegion, 1);
+        if(i > 0){
+            memory_region_init_io(mem, OBJECT(machine), &pmgr_unk_reg_ops, (void*)reg[i], "pmgr-unk-reg", reg[i+1]);
+        }
+        else {
+            memory_region_init_io(mem, OBJECT(machine), &pmgr_reg_ops, tms, "pmgr-reg", reg[i+1]);
+        }
+        memory_region_add_subregion(tms->sysmem, tms->soc_base_pa + reg[i], mem);
+    }
+    add_dtb_prop(child, "voltage-states0", 24, (uint8_t*)"\x01\x00\x00\x00\x71\x02\x00\x00\x01\x00\x00\x00\xa9\x02\x00\x00\x01\x00\x00\x00\xe4\x02\x00\x00");
+    add_dtb_prop(child, "voltage-states1", 40, (uint8_t*)"\x71\xbc\x01\x00\x38\x02\x00\x00\x4b\x28\x01\x00\x83\x02\x00\x00\x38\xde\x00\x00\xde\x02\x00\x00\xc7\xb1\x00\x00\x42\x03\x00\x00\x25\x94\x00\x00\xaf\x03\x00\x00");
+    add_dtb_prop(child, "voltage-states2", 24, (uint8_t*)"\x01\x00\x00\x00\x74\x02\x00\x00\x01\x00\x00\x00\xb8\x02\x00\x00\x01\x00\x00\x00\x42\x03\x00\x00");
+    add_dtb_prop(child, "voltage-states5", 64, (uint8_t*)"\x12\xda\x01\x00\x38\x02\x00\x00\xb3\x18\x01\x00\x71\x02\x00\x00\x87\xc5\x00\x00\xb8\x02\x00\x00\xa2\x89\x00\x00\x20\x03\x00\x00\x37\x75\x00\x00\x87\x03\x00\x00\xaa\x6a\x00\x00\xe8\x03\x00\x00\xc3\x62\x00\x00\x48\x04\x00\x00\x18\x60\x00\x00\x65\x04\x00\x00");
+    add_dtb_prop(child, "voltage-states8", 96, (uint8_t*)"\x00\xf4\x06\x14\xff\xff\xff\xff\x00\x2a\x75\x15\xff\xff\xff\xff\x00\x6e\x0a\x1e\xff\xff\xff\xff\x00\xbf\x2f\x20\xff\xff\xff\xff\x00\x1e\x7c\x29\xff\xff\xff\xff\x00\xa5\x0f\x2d\xff\xff\xff\xff\x00\x55\x81\x38\xff\xff\xff\xff\x00\x7e\x5f\x40\xff\xff\xff\xff\x00\xb4\xcd\x41\xff\xff\xff\xff\x00\x8c\x86\x47\xff\xff\xff\xff\x00\x64\x3f\x4d\xff\xff\xff\xff\x80\xc9\x53\x53\xff\xff\xff\xff");
+    add_dtb_prop(child, "voltage-states9", 56, (uint8_t*)"\x00\x00\x00\x00\x90\x01\x00\x00\x00\x2a\x75\x15\x3f\x02\x00\x00\xc0\x4f\xef\x1e\x7a\x02\x00\x00\x00\xcd\x56\x27\x90\x02\x00\x00\x00\x11\xec\x2f\xc8\x02\x00\x00\x00\x55\x81\x38\x16\x03\x00\x00\x80\xfe\x2a\x47\x96\x03\x00\x00");
+    add_dtb_prop(child, "voltage-states10", 24, (uint8_t*)"\x01\x00\x00\x00\x67\x02\x00\x00\x01\x00\x00\x00\x90\x02\x00\x00\x01\x00\x00\x00\xc2\x02\x00\x00");
+    add_dtb_prop(child, "voltage-states11", 24, (uint8_t*)"\x01\x00\x00\x00\x29\x02\x00\x00\x01\x00\x00\x00\x71\x02\x00\x00\x01\x00\x00\x00\xf4\x02\x00\x00");
+    add_dtb_prop(child, "bridge-settings-12", 192, (uint8_t*)"\x00\x00\x00\x00\x11\x00\x00\x00\x0c\x00\x00\x00\xe8\x7c\x18\x03\x54\x00\x00\x00\x12\x00\x00\x00\x00\x09\x00\x00\x01\x00\x01\x40\x24\x09\x00\x00\x18\x08\x08\x00\x28\x09\x00\x00\x01\x00\x00\x00\x48\x09\x00\x00\x01\x00\x00\x00\x64\x09\x00\x00\x18\x08\x08\x00\x88\x09\x00\x00\x01\x00\x00\x00\x00\x0a\x00\x00\x7f\x00\x00\x00\x00\x10\x00\x00\x01\x01\x00\x00\x00\x40\x00\x00\x03\x00\x00\x00\x04\x40\x00\x00\x03\x00\x00\x00\x08\x40\x00\x00\x03\x00\x00\x00\x0c\x40\x00\x00\x03\x00\x00\x00\x04\x41\x00\x00\x01\x00\x00\x00\x00\x43\x00\x00\x01\x00\x01\xc0\x38\x43\x00\x00\x01\x00\x00\x00\x48\x43\x00\x00\x01\x00\x00\x00\x00\x80\x00\x00\x0f\x00\x00\x00\x00\x82\x00\x00\x01\x00\x01\xc0\x28\x82\x00\x00\x01\x00\x00\x00\x38\x82\x00\x00\x01\x00\x00\x00\x48\x82\x00\x00\x01\x00\x00\x00");
+    add_dtb_prop(child, "bridge-settings-13", 64, (uint8_t*)"\x00\x00\x00\x00\x03\x00\x00\x00\x04\x00\x00\x00\x03\x00\x00\x00\x08\x00\x00\x00\x03\x00\x00\x00\x0c\x00\x00\x00\x03\x00\x00\x00\x04\x01\x00\x00\x01\x00\x00\x00\x00\x03\x00\x00\x01\x00\x01\xc0\x38\x03\x00\x00\x01\x00\x00\x00\x48\x03\x00\x00\x01\x00\x00\x00");
+    add_dtb_prop(child, "bridge-settings-14", 40, (uint8_t*)"\x00\x00\x00\x00\x0f\x00\x00\x00\x00\x02\x00\x00\x01\x00\x01\xc0\x28\x02\x00\x00\x01\x00\x00\x00\x38\x02\x00\x00\x01\x00\x00\x00\x48\x02\x00\x00\x01\x00\x00\x00");
+    add_dtb_prop(child, "bridge-settings-15", 144, (uint8_t*)"\x00\x00\x00\x00\x01\x00\x00\x00\x0c\x00\x00\x00\x98\x7e\x68\x01\x00\x0a\x00\x00\x01\x00\x01\x40\x24\x0a\x00\x00\x18\x08\x08\x00\x44\x0a\x00\x00\x18\x08\x08\x00\x64\x0a\x00\x00\x18\x08\x08\x00\x84\x0a\x00\x00\x18\x08\x08\x00\x00\x0b\x00\x00\x7f\x00\x00\x00\x00\x11\x00\x00\x01\x01\x00\x00\x00\x40\x00\x00\x03\x00\x00\x00\x04\x40\x00\x00\x03\x00\x00\x00\x08\x40\x00\x00\x03\x00\x00\x00\x0c\x40\x00\x00\x03\x00\x00\x00\x10\x40\x00\x00\x03\x00\x00\x00\x04\x41\x00\x00\x01\x00\x00\x00\x00\x43\x00\x00\x01\x00\x01\xc0\x00\x80\x00\x00\x0f\x00\x00\x00\x00\x82\x00\x00\x01\x00\x01\xc0");
+    add_dtb_prop(child, "bridge-settings-16", 56, (uint8_t*)"\x00\x00\x00\x00\x03\x00\x00\x00\x04\x00\x00\x00\x03\x00\x00\x00\x08\x00\x00\x00\x03\x00\x00\x00\x0c\x00\x00\x00\x03\x00\x00\x00\x10\x00\x00\x00\x03\x00\x00\x00\x04\x01\x00\x00\x01\x00\x00\x00\x00\x03\x00\x00\x01\x00\x01\xc0");
+    add_dtb_prop(child, "bridge-settings-17", 16, (uint8_t*)"\x00\x00\x00\x00\x0f\x00\x00\x00\x00\x02\x00\x00\x01\x00\x01\xc0");
+    add_dtb_prop(child, "bridge-settings-6", 128, (uint8_t*)"\x00\x00\x00\x00\x10\x04\x00\x00\x00\x04\x00\x00\x01\x00\x01\x40\x00\x06\x00\x00\xff\xff\xff\x01\x08\x07\x00\x00\x00\x00\x00\x02\x0c\x07\x00\x00\x80\x00\x40\x00\x10\x07\x00\x00\x80\x00\x40\x00\x14\x07\x00\x00\x80\x00\x40\x00\x18\x07\x00\x00\x80\x00\x40\x00\x1c\x07\x00\x00\x10\x00\x10\x00\x44\x07\x00\x00\x12\x00\x29\x00\x48\x07\x00\x00\x0a\x00\x40\x00\x4c\x07\x00\x00\x0a\x00\x40\x00\x50\x07\x00\x00\x0a\x00\x40\x00\x54\x07\x00\x00\x0a\x00\x40\x00\x58\x07\x00\x00\x10\x00\x40\x00\x00\x08\x00\x00\x01\x01\x00\x00");
+    add_dtb_prop(child, "bridge-settings-1", 128, (uint8_t*)"\x00\x00\x00\x00\x10\x04\x00\x00\x00\x04\x00\x00\x01\x00\x01\x40\x00\x06\x00\x00\xff\xff\xff\x01\x08\x07\x00\x00\x00\x00\x00\x02\x0c\x07\x00\x00\x80\x00\x40\x00\x10\x07\x00\x00\x80\x00\x40\x00\x14\x07\x00\x00\x80\x00\x40\x00\x18\x07\x00\x00\x80\x00\x40\x00\x1c\x07\x00\x00\x10\x00\x40\x00\x44\x07\x00\x00\x00\x00\x00\x02\x48\x07\x00\x00\x80\x00\x40\x00\x4c\x07\x00\x00\x80\x00\x40\x00\x50\x07\x00\x00\x80\x00\x40\x00\x54\x07\x00\x00\x80\x00\x40\x00\x58\x07\x00\x00\x10\x00\x40\x00\x00\x08\x00\x00\x01\x01\x00\x00");
+    add_dtb_prop(child, "bridge-settings-0", 128, (uint8_t*)"\x00\x00\x00\x00\x10\x04\x00\x00\x00\x04\x00\x00\x01\x00\x01\x40\x00\x06\x00\x00\xff\xff\xff\x01\x08\x07\x00\x00\x00\x00\x00\x02\x0c\x07\x00\x00\x80\x00\x40\x00\x10\x07\x00\x00\x80\x00\x40\x00\x14\x07\x00\x00\x80\x00\x40\x00\x18\x07\x00\x00\x80\x00\x40\x00\x1c\x07\x00\x00\x10\x00\x20\x00\x44\x07\x00\x00\x00\x00\x00\x02\x48\x07\x00\x00\x80\x00\x40\x00\x4c\x07\x00\x00\x80\x00\x40\x00\x50\x07\x00\x00\x80\x00\x40\x00\x54\x07\x00\x00\x80\x00\x40\x00\x58\x07\x00\x00\x10\x00\x40\x00\x00\x08\x00\x00\x01\x01\x00\x00");
+    add_dtb_prop(child, "bridge-settings-8", 128, (uint8_t*)"\x00\x00\x00\x00\x10\x04\x00\x00\x00\x04\x00\x00\x01\x00\x01\x40\x00\x06\x00\x00\xff\xff\xff\x01\x08\x07\x00\x00\x00\x00\x00\x02\x0c\x07\x00\x00\x80\x00\x40\x00\x10\x07\x00\x00\x80\x00\x40\x00\x14\x07\x00\x00\x80\x00\x40\x00\x18\x07\x00\x00\x80\x00\x40\x00\x1c\x07\x00\x00\x20\x00\x20\x00\x44\x07\x00\x00\x00\x00\x00\x02\x48\x07\x00\x00\x80\x00\x40\x00\x4c\x07\x00\x00\x80\x00\x40\x00\x50\x07\x00\x00\x80\x00\x40\x00\x54\x07\x00\x00\x80\x00\x40\x00\x58\x07\x00\x00\x10\x00\x80\x00\x00\x08\x00\x00\x01\x01\x00\x00");
+    add_dtb_prop(child, "bridge-settings-7", 80, (uint8_t*)"\x00\x00\x00\x00\x10\x04\x00\x00\x00\x04\x00\x00\x01\x00\x01\x40\x00\x06\x00\x00\xff\xff\xff\x01\x08\x07\x00\x00\x00\x00\x00\x02\x0c\x07\x00\x00\x80\x00\x40\x00\x10\x07\x00\x00\x80\x00\x40\x00\x14\x07\x00\x00\x80\x00\x40\x00\x18\x07\x00\x00\x80\x00\x40\x00\x1c\x07\x00\x00\x10\x00\x10\x00\x00\x08\x00\x00\x01\x01\x00\x00");
+    add_dtb_prop(child, "bridge-settings-5", 176, (uint8_t*)"\x00\x00\x00\x00\x10\x04\x00\x00\x00\x04\x00\x00\x01\x00\x00\x40\x00\x06\x00\x00\xff\xff\xff\x01\x08\x07\x00\x00\x00\x00\x00\x02\x0c\x07\x00\x00\x13\x00\xc7\x00\x10\x07\x00\x00\x13\x00\xc7\x00\x14\x07\x00\x00\x13\x00\xc7\x00\x18\x07\x00\x00\x13\x00\xc7\x00\x1c\x07\x00\x00\x10\x00\x20\x00\x44\x07\x00\x00\x00\x00\x00\x02\x48\x07\x00\x00\x80\x00\x40\x00\x4c\x07\x00\x00\x80\x00\x40\x00\x50\x07\x00\x00\x80\x00\x40\x00\x54\x07\x00\x00\x80\x00\x40\x00\x58\x07\x00\x00\x10\x00\x40\x00\x80\x07\x00\x00\x12\x00\x29\x00\x84\x07\x00\x00\x0a\x00\x40\x00\x88\x07\x00\x00\x0a\x00\x40\x00\x8c\x07\x00\x00\x0a\x00\x40\x00\x90\x07\x00\x00\x0a\x00\x40\x00\x94\x07\x00\x00\x10\x00\x30\x00\x00\x08\x00\x00\x01\x01\x00\x00");
+    add_dtb_prop(child, "bridge-settings-2", 128, (uint8_t*)"\x00\x00\x00\x00\x10\x04\x00\x00\x00\x04\x00\x00\x01\x00\x01\x40\x00\x06\x00\x00\xff\xff\xff\x01\x08\x07\x00\x00\x00\x00\x00\x02\x0c\x07\x00\x00\x80\x00\x40\x00\x10\x07\x00\x00\x80\x00\x40\x00\x14\x07\x00\x00\x80\x00\x40\x00\x18\x07\x00\x00\x80\x00\x40\x00\x1c\x07\x00\x00\x10\x00\x10\x00\x44\x07\x00\x00\x00\x00\x00\x02\x48\x07\x00\x00\x80\x00\x40\x00\x4c\x07\x00\x00\x80\x00\x40\x00\x50\x07\x00\x00\x80\x00\x40\x00\x54\x07\x00\x00\x80\x00\x40\x00\x58\x07\x00\x00\x10\x00\x39\x00\x00\x08\x00\x00\x01\x01\x00\x00");
+    add_dtb_prop(child, "bridge-settings-3", 128, (uint8_t*)"\x00\x00\x00\x00\x10\x04\x00\x00\x00\x04\x00\x00\x01\x00\x01\x40\x00\x06\x00\x00\xff\xff\xff\x01\x08\x07\x00\x00\x00\x00\x00\x02\x0c\x07\x00\x00\x80\x00\x40\x00\x10\x07\x00\x00\x80\x00\x40\x00\x14\x07\x00\x00\x80\x00\x40\x00\x18\x07\x00\x00\x80\x00\x40\x00\x1c\x07\x00\x00\x10\x00\x30\x00\x44\x07\x00\x00\x00\x00\x00\x02\x48\x07\x00\x00\x80\x00\x40\x00\x4c\x07\x00\x00\x80\x00\x40\x00\x50\x07\x00\x00\x80\x00\x40\x00\x54\x07\x00\x00\x80\x00\x40\x00\x58\x07\x00\x00\x10\x00\x37\x00\x00\x08\x00\x00\x01\x01\x00\x00");
+    add_dtb_prop(child, "bridge-settings-4", 128, (uint8_t*)"\x00\x00\x00\x00\x10\x04\x00\x00\x00\x04\x00\x00\x01\x00\x00\x40\x00\x06\x00\x00\xff\xff\xff\x01\x08\x07\x00\x00\x00\x00\x00\x02\x0c\x07\x00\x00\x10\x00\xa6\x00\x10\x07\x00\x00\x10\x00\xa6\x00\x14\x07\x00\x00\x10\x00\xa6\x00\x18\x07\x00\x00\x10\x00\xa6\x00\x1c\x07\x00\x00\x10\x00\x10\x00\x44\x07\x00\x00\x00\x00\x00\x02\x48\x07\x00\x00\x80\x00\x40\x00\x4c\x07\x00\x00\x80\x00\x40\x00\x50\x07\x00\x00\x80\x00\x40\x00\x54\x07\x00\x00\x80\x00\x40\x00\x58\x07\x00\x00\x10\x00\x80\x00\x00\x08\x00\x00\x01\x01\x00\x00");
+    add_dtb_prop(child, "voltage-states5-sram", 64, (uint8_t*)"\x00\xbf\x2f\x20\xf1\x02\x00\x00\x00\x04\x5c\x36\xf1\x02\x00\x00\x00\x64\x3f\x4d\xf1\x02\x00\x00\x00\x59\xdd\x6e\x20\x03\x00\x00\x00\x32\x2d\x82\x87\x03\x00\x00\x00\x18\x0d\x8f\xe8\x03\x00\x00\x00\xc8\x7e\x9a\x48\x04\x00\x00\x00\x6a\xc9\x9e\x65\x04\x00\x00");
+    add_dtb_prop(child, "voltage-states1-sram", 40, (uint8_t*)"\x00\x10\x55\x22\xf1\x02\x00\x00\x00\x98\x7f\x33\xf1\x02\x00\x00\x00\x20\xaa\x44\xf1\x02\x00\x00\x00\xa8\xd4\x55\x42\x03\x00\x00\x00\x30\xff\x66\xaf\x03\x00\x00");
+    add_dtb_prop(child, "voltage-states9-sram", 56, (uint8_t*)"\x00\x00\x00\x00\xf1\x02\x00\x00\x00\x2a\x75\x15\xf1\x02\x00\x00\xc0\x4f\xef\x1e\xf1\x02\x00\x00\x00\xcd\x56\x27\xf1\x02\x00\x00\x00\x11\xec\x2f\xf1\x02\x00\x00\x00\x55\x81\x38\x16\x03\x00\x00\x80\xfe\x2a\x47\x96\x03\x00\x00");
 }
 
 static void T8030_cpu_reset(void *opaque)
 {
-    T8030MachineState *tms = T8030_MACHINE((MachineState *)opaque);
-    ARMCPU *cpu = ARM_CPU(first_cpu);
-    CPUState *cs = CPU(cpu);
-    CPUARMState *env = &cpu->env;
-
-    cpu_reset(cs);
+    MachineState *machine = MACHINE(opaque);
+    T8030MachineState *tms = T8030_MACHINE(machine);
+    CPUState* cpu;
+    CPU_FOREACH(cpu) {
+            ARM_CPU(cpu)->rvbar = tms->kpc_pa & ~0xfff;
+            cpu_reset(cpu);
+        }
+    
+    CPUState *cs = CPU(first_cpu);
+    CPUARMState *env = &ARM_CPU(cs)->env;
 
     env->xregs[0] = tms->kbootargs_pa;
     env->pc = tms->kpc_pa;
+
 }
 
 static void T8030_cluster_tick(cluster* c){
@@ -765,7 +920,7 @@ static void T8030_cluster_tick(cluster* c){
         for(int i = 0; i < MAX_CPU; i++) /* target */
         if(c->cpus[i] != NULL){
             for(int j = 0; j < MAX_CPU; j++){ /* source */
-                if(c->deferredIPI[j][i]){
+                if(c->deferredIPI[j][i] || (c->noWakeIPI[j][i] && !c->cpus[i]->is_sleep)){
                     T8030_cluster_deliver_ipi(c, i);
                     break;
                 }
@@ -774,14 +929,42 @@ static void T8030_cluster_tick(cluster* c){
     }
 }
 
-static void T8030_machine_deliver_ipi(void* opaque){
+static void T8030_machine_next_tick(void* opaque){
     T8030MachineState *tms = T8030_MACHINE((MachineState *)opaque);
     WITH_QEMU_LOCK_GUARD(&tms->mutex){
+        //Wake up cpus
+        for(int i = 0; i < MAX_CPU; i++)
+        if(tms->pendingWakeup[i]){
+            fprintf(stderr, "T8030 waking up CPU %u\n", i);
+            int ret = arm_set_cpu_on_and_reset(tms->cpus[i]->mpidr);
+            if (ret != QEMU_ARM_POWERCTL_RET_SUCCESS) {
+                error_report("%s: failed to bring up CPU %d: err %d",
+                            __func__, i, ret);
+            } else {
+                tms->cpus[i]->is_sleep = false;
+                tms->pendingWakeup[i] = false;
+                //nowake IPIs
+                cluster* c = tms->clusters[tms->cpus[i]->cluster_id];
+                WITH_QEMU_LOCK_GUARD(&c->mutex){
+                    bool pendingNoWake = false;
+                    for(int j = 0; j < MAX_CPU; j++)
+                    if(c->noWakeIPI[j][i]){
+                        pendingNoWake = 1;
+                        break;
+                    }
+                    if(pendingNoWake){
+                        T8030_cluster_deliver_ipi(c, i);
+                    }
+                }
+            }
+        }
+        //deliver IPIs
         for(int i = 0; i < MAX_CPU; i++)
         if(tms->pendingIPI[i]){
-
-            fprintf(stderr, "T8030 delivering Fast IPI to CPU %u\n", i);
-            qemu_irq_raise(qdev_get_gpio_in(DEVICE(tms->cpus[i]->cpu), ARM_CPU_FIQ));
+            // fprintf(stderr, "T8030 delivering Fast IPI to CPU %u\n", i);
+            tms->cpus[i]->is_in_ipi = true;
+            tms->pendingIPI[i] = false;
+            qemu_irq_pulse(qdev_get_gpio_in(DEVICE(tms->cpus[i]->cpu), ARM_CPU_FIQ));
         }
     }
 }
@@ -796,7 +979,7 @@ static void T8030_machine_ipicr_tick(void* opaque){
 static void T8030_machine_reset(void* opaque){
     MachineState* machine = MACHINE(opaque);
     T8030MachineState *tms = T8030_MACHINE(opaque);
-    tms->ipi_deliver_timer = timer_new_ns(QEMU_CLOCK_VIRTUAL, T8030_machine_deliver_ipi, machine);
+    tms->next_tick_timer = timer_new_ns(QEMU_CLOCK_VIRTUAL, T8030_machine_next_tick, machine);
     tms->ipicr_timer = timer_new_ns(QEMU_CLOCK_VIRTUAL, T8030_machine_ipicr_tick, machine);
     timer_mod_ns(tms->ipicr_timer, kDeferredIPITimerDefault);
     T8030_cpu_reset(tms);
@@ -818,13 +1001,15 @@ static void T8030_machine_init(MachineState *machine)
 
     T8030_cpu_setup(machine);
 
-    T8030_memory_setup(machine);
-
     tms->ipi_cr = kDeferredIPITimerDefault;
 
     T8030_create_aic(machine);
     
     T8030_create_s3c_uart(tms, serial_hd(0));
+
+    T8030_pmgr_setup(machine);
+
+    T8030_memory_setup(machine);
 
     T8030_bootargs_setup(machine);
 
