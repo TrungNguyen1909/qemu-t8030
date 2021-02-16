@@ -74,6 +74,21 @@ static void macho_dtb_node_process(DTBNode *node)
     DTBProp *prop = NULL;
     uint64_t i = 0;
 
+    // prop = get_dtb_prop(node, "interrupt-parent");
+    // if(prop != NULL){
+    //     if(*(uint32_t*)prop->value == 0x1a){ /* aic */
+    //         prop = get_dtb_prop(node, "name");
+    //         fprintf(stderr, "Found device: %s with AIC as interrupt-parent\n", prop->value);
+    //         fprintf(stderr, "\tinterrupts: ");
+    //         prop = get_dtb_prop(node, "interrupts");
+    //         uint32_t* interrupts = prop->value;
+    //         for(int i=0;i<prop->length / sizeof(uint32_t);i++){
+    //             fprintf(stderr, "0x%x ", interrupts[i]);
+    //         }
+    //         fprintf(stderr, "\n");
+    //     }
+    // }
+
     //remove compatible properties
     prop = get_dtb_prop(node, "compatible");
     if (NULL != prop) {
@@ -275,7 +290,10 @@ void macho_load_dtb(DTBNode* root, AddressSpace *as, MemoryRegion *mem,
     uint8_t *buf = g_malloc0(size_n);
     save_dtb(buf, root);
     allocate_and_copy(mem, as, name, dtb_pa, size_n, buf);
-    // delete_dtb_node(root);
+    FILE* fd = fopen("deviceTree-processed", "wb");
+    assert(fd);
+    fwrite(buf, size_n, 1, fd);
+    fclose(fd);
     g_free(buf);
     *size = size_n;
 }
