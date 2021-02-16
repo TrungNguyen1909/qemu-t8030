@@ -32,15 +32,14 @@
 #include "hw/loader.h"
 
 const char *KEEP_COMP[] = {"uart-1,samsung\0$",
-                           "N104AP\0iPhone12,1\0AppleARM\0$", "arm-io,t8030\0$", "apple,thunder\0ARM,v8\0$", "aic,1\0$"};
+                           "N104AP\0iPhone12,1\0AppleARM\0$", "arm-io,t8030\0$", "apple,thunder\0ARM,v8\0$", "aic,1\0$", "pmgr1,t8030\0$"};
 
 const char *REM_NAMES[] = {"backlight\0$", "dockchannel-uart\0$"};
 
 const char *REM_DEV_TYPES[] = {"backlight\0$"};
 
-const char *REM_PROPS[] = {"function-cpu_idle", "function-enable_core", "function-error_handler"};
-//TODO: cpu-idle, enable_core needs PMGR
-//error_handler probably needs arm-io to initialize properly
+const char *REM_PROPS[] = {"function-error_handler"};
+//TODO: error_handler probably needs arm-io to initialize properly
 
 static void allocate_and_copy(MemoryRegion *mem, AddressSpace *as,
                               const char *name, hwaddr pa, hwaddr size,
