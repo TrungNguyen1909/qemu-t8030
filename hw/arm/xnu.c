@@ -241,7 +241,33 @@ void macho_load_dtb(DTBNode* root, AddressSpace *as, MemoryRegion *mem,
         add_dtb_prop(child, "TrustCache", sizeof(memmap),
                         (uint8_t *)&memmap[0]);
     }
-
+    
+    child = get_dtb_child_node_by_name(root, "chosen");
+    assert(child);
+    child = get_dtb_child_node_by_name(child, "lock-regs");
+    assert(child);
+    child = get_dtb_child_node_by_name(child, "amcc");
+    assert(child);
+    data = 0;
+    add_dtb_prop(child, "aperture-count", 4, &data);
+    add_dtb_prop(child, "aperture-size", 4, &data);
+    add_dtb_prop(child, "plane-count", 4, &data);
+    add_dtb_prop(child, "aperture-phys-addr", 0, &data);
+    add_dtb_prop(child, "cache-status-reg-offset", 4, &data);
+    add_dtb_prop(child, "cache-status-reg-mask", 4, &data);
+    add_dtb_prop(child, "cache-status-reg-value", 4, &data);
+    add_dtb_node(child, "amcc-ctrr-a");
+    child = get_dtb_child_node_by_name(child, "amcc-ctrr-a");
+    data = 14;
+    add_dtb_prop(child, "page-size-shift", 4, &data);
+    data = 0;
+    add_dtb_prop(child, "lower-limit-reg-offset", 4, &data);
+    add_dtb_prop(child, "lower-limit-reg-mask", 4, &data);
+    add_dtb_prop(child, "upper-limit-reg-offset", 4, &data);
+    add_dtb_prop(child, "upper-limit-reg-mask", 4, &data);
+    add_dtb_prop(child, "lock-reg-offset", 4, &data);
+    add_dtb_prop(child, "lock-reg-mask", 4, &data);
+    add_dtb_prop(child, "lock-reg-value", 4, &data);
     macho_dtb_node_process(root);
 
     uint64_t size_n = get_dtb_node_buffer_size(root);
