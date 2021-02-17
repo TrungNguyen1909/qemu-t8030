@@ -14,14 +14,13 @@ static unsigned int apple_aic_find_irq_cpu(AppleAICState* s, unsigned int cpu_id
     // check for IPI
     for(int i = 0; i < s->numCPU; i++){ /* source */
         int j = cpu_id; /* target */
-        if(!s->cpus[j]->interrupted && s->pendingIPI[i][j]){
+        if(s->pendingIPI[i][j]){
             bool isMasked = s->ipi_mask[j] & (i == j ?  REG_IPI_FLAG_SELF : REG_IPI_FLAG_OTHER);
             if(!isMasked){
-                s->cpus[j]->interrupted = true;
+                s->cpus[j]->state = AIC_CPU_STATE_PROCESSING;
                 s->cpus[j]->is_ipi = true;
                 s->cpus[j]->ipi_source = i;
                 s->cpus[j]->ack = (i == j ? REG_ACK_IPI_SELF : REG_ACK_IPI_OTHER);
-                s->pendingIPI[i][j] = 0;
                 return s->cpus[j]->ack;
             }
         }
@@ -29,21 +28,15 @@ static unsigned int apple_aic_find_irq_cpu(AppleAICState* s, unsigned int cpu_id
     // check for IRQ
     for(int i = 0; i < s->numIRQ;i++)
     if(s->ext_irq_state[i]){
-        if(!test_bit(i, (unsigned long*)s->ipid_mask)){
-            //find a cpu to interrupt
-            int cpu = -1;
-            if(!s->cpus[cpu_id]->interrupted && test_bit(cpu_id, (unsigned long*)&s->irq_affinity[i])){
-                cpu = cpu_id;
-            }
-            if(cpu == -1) continue;
-            s->cpus[cpu]->interrupted = true;
-            s->cpus[cpu]->is_ipi = false;
-            s->cpus[cpu]->irq_source = i;
-            s->cpus[cpu]->ack = i | REG_ACK_TYPE_IRQ;
-            s->ext_irq_state[i] = 0;
-            return s->cpus[cpu]->ack;
+        if(!test_bit(i, (unsigned long*)s->ipid_mask) && test_bit(cpu_id, (unsigned long*)&s->irq_affinity[i])){
+            s->cpus[cpu_id]->state = AIC_CPU_STATE_PROCESSING;
+            s->cpus[cpu_id]->is_ipi = false;
+            s->cpus[cpu_id]->irq_source = i;
+            s->cpus[cpu_id]->ack = i | REG_ACK_TYPE_IRQ;
+            return s->cpus[cpu_id]->ack;
         }
     }
+    s->cpus[cpu_id]->state = AIC_CPU_STATE_NONE;
     return REG_ACK_TYPE_NONE;
 }
 //update aic and dispatch pendings, call with mutex locked
@@ -54,14 +47,13 @@ static void apple_aic_update(AppleAICState* s){
     // check for IPI
     for(int i = 0; i < s->numCPU; i++) /* source */
         for(int j = 0; j < s->numCPU; j++) /* target */
-            if(!s->cpus[j]->interrupted && s->pendingIPI[i][j]){
+            if(s->cpus[j]->state == AIC_CPU_STATE_NONE && s->pendingIPI[i][j]){
                 bool isMasked = s->ipi_mask[j] & (i == j ?  REG_IPI_FLAG_SELF : REG_IPI_FLAG_OTHER);
                 if(!isMasked){
-                    s->cpus[j]->interrupted = true;
+                    s->cpus[j]->state = AIC_CPU_STATE_PROCESSING;
                     s->cpus[j]->is_ipi = true;
                     s->cpus[j]->ipi_source = i;
                     s->cpus[j]->ack = (i == j ? REG_ACK_IPI_SELF : REG_ACK_IPI_OTHER);
-                    s->pendingIPI[i][j] = 0;
                     qemu_irq_raise(s->cpu_irqs[j]);
                 }
             }
@@ -72,16 +64,15 @@ static void apple_aic_update(AppleAICState* s){
             //find a cpu to interrupt
             int cpu = -1;
             for(int j = 0; j < s->numCPU; j++)
-            if(!s->cpus[j]->interrupted && test_bit(j, (unsigned long*)&s->irq_affinity[i])){
+            if(s->cpus[j]->state == AIC_CPU_STATE_NONE && test_bit(j, (unsigned long*)&s->irq_affinity[i])){
                 cpu = j;
                 break;
             }
             if(cpu == -1) continue;
-            s->cpus[cpu]->interrupted = true;
+            s->cpus[cpu]->state = AIC_CPU_STATE_PROCESSING;
             s->cpus[cpu]->is_ipi = false;
             s->cpus[cpu]->irq_source = i;
             s->cpus[cpu]->ack = i;
-            s->ext_irq_state[i] = false;
             qemu_irq_raise(s->cpu_irqs[cpu]);
         }
     }
@@ -164,8 +155,6 @@ static void apple_aic_write(void *opaque,
             //if the vector-th bit is set in ipid-mask, [0, 4) in most dtree, this will be sent
             //on t8030, only wdt (watch dog timer) is affected by this
             //for wdt device, when IRQ 0 is raised, the device panics
-            if(!o->interrupted) return;
-            o->interrupted = false;
             // fprintf(stderr, "AIC: Received IRQ ack\n");
             return;
         } else if (addr >= 0x3000) { /* REG_IRQ_AFFINITY */
@@ -216,7 +205,9 @@ static void apple_aic_write(void *opaque,
                     apple_aic_update(s);
                     return;
                 case REG_IPI_CLEAR:
-                    //TODO: Implement
+                    if(o->is_ipi){
+                       s->pendingIPI[o->ipi_source][o->cpu_id] = 0;
+                    }
                     return;
             }
         }
@@ -275,19 +266,10 @@ static uint64_t apple_aic_read(void *opaque,
                 case REG_TSTAMP_HI:
                     return (uint32_t)((s->tick)>>32);
                 case REG_ACK:
-                    //TODO : implement
-                    if(!o->interrupted){
-                        int ack = apple_aic_find_irq_cpu(s, o->cpu_id);
-                        if(o->interrupted){
-                            if(!o->is_ipi && o->irq_source > 3){
-                                o->interrupted = false;
-                            }
-                        }
-                        return ack;
-                    }
-                    o->interrupted = false;
                     qemu_irq_lower(s->cpu_irqs[o->cpu_id]);
-                    return o->ack;
+                    if(o->state == AIC_CPU_STATE_NONE) return REG_ACK_TYPE_NONE;
+                    int ack = apple_aic_find_irq_cpu(s, o->cpu_id);
+                    return ack;
                 default:
                     break;
             }

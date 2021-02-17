@@ -813,8 +813,6 @@ static void T8030_cpu_setup(MachineState *machine)
         
         object_unref(cpuobj);
     }
-    //currently support only a single CPU and thus
-    //use no interrupt controller and wire IRQs from devices directly to the CPU
 }
 
 static void T8030_bootargs_setup(MachineState *machine)
