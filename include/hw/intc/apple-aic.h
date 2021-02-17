@@ -71,13 +71,19 @@ conviniently, 0x240/18 = 32 (bits)
 #define kDeferredIPITimerDefault 1536
 
 /*
-Apparently, t8030 uses fast IPI, which does not rely on AIC but cluster to do IPIs
+Apparently, t8030 uses fast IPI on p-core, which does not rely on AIC but cluster to do IPIs
 */
 
+typedef enum {
+    //CPU not in AppleInterruptController::handleInterrupt loop
+    AIC_CPU_STATE_NONE = 0,
+    //CPU is/will be in ::handleInterrupt loop
+    AIC_CPU_STATE_PROCESSING,
+} AICCpuState;
 typedef struct  {
     void *aic;
     unsigned int cpu_id;
-    unsigned int interrupted;
+    unsigned int state;
     unsigned int ack;
     unsigned int is_ipi;
     unsigned int ipi_source;
