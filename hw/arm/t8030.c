@@ -38,6 +38,7 @@
 #include "hw/arm/t8030.h"
 
 #include "hw/irq.h"
+#include "hw/or-irq.h"
 #include "hw/intc/apple-aic.h"
 
 #include "hw/arm/exynos4210.h"
@@ -57,15 +58,15 @@
     static uint64_t T8030_cpreg_read_##name(CPUARMState *env,                      \
                                             const ARMCPRegInfo *ri)                \
     {                                                                              \
-        T8030CPU *tcpu = (T8030CPU *)ri->opaque;                  \
+        T8030CPUState *tcpu = T8030_cs_from_env(env);                  \
         return tcpu->T8030_CPREG_VAR_NAME(name);                                    \
     }                                                                              \
     static void T8030_cpreg_write_##name(CPUARMState *env, const ARMCPRegInfo *ri, \
                                          uint64_t value)                           \
     {                                                                              \
-        T8030CPU *tcpu = (T8030CPU *)ri->opaque;                  \
+        T8030CPUState *tcpu = T8030_cs_from_env(env);                  \
         tcpu->T8030_CPREG_VAR_NAME(name) = value;                                   \
-        /* if(value != 0) fprintf(stderr, "T8030CPU REG WRITE " #name " = 0x%llx\n", value);*/ \
+        /* if(value != 0) fprintf(stderr, "T8030CPUState REG WRITE " #name " = 0x%llx\n", value);*/ \
     }
 
 #define T8030_CPREG_DEF(p_name, p_op0, p_op1, p_crn, p_crm, p_op2, p_access) \
@@ -76,6 +77,7 @@
         .state = ARM_CP_STATE_AA64, .readfn = T8030_cpreg_read_##p_name,     \
         .writefn = T8030_cpreg_write_##p_name                                \
     }
+static T8030CPUState *T8030_cs_from_env(CPUARMState *env);
 
 T8030_CPREG_FUNCS(ARM64_REG_HID11)
 T8030_CPREG_FUNCS(ARM64_REG_HID13)
@@ -122,47 +124,62 @@ T8030_CPREG_FUNCS(ARM64_REG_CTRR_A_UPR_EL1)
 T8030_CPREG_FUNCS(ARM64_REG_CTRR_CTL_EL1)
 T8030_CPREG_FUNCS(ARM64_REG_CTRR_LOCK_EL1)
 
-//Wake up cpus in the next tick, call with machine mutex unlocked
+static void T8030_set_cs(CPUState *cpu, T8030CPUState *s)
+{
+    ARMCPU *arm_cpu = ARM_CPU(cpu);
+    CPUARMState *env = &arm_cpu->env;
+
+    env->gicv3state = (void *)s;
+};
+
+static T8030CPUState *T8030_cs_from_env(CPUARMState *env)
+{
+    return env->gicv3state;
+}
+
+static inline bool T8030CPU_is_sleep(T8030CPUState* tcpu){
+    return CPU(tcpu->cpu)->halted;
+}
+
+//Wake up cpus, call with machine mutex unlocked
 static void T8030_wake_up_cpus(MachineState* machine, uint32_t cpu_mask){
     T8030MachineState* tms = T8030_MACHINE(machine);
     WITH_QEMU_LOCK_GUARD(&tms->mutex){
         for(int i = 0; i < machine->smp.cpus; i++)
-        if(test_bit(i, &cpu_mask)&& tms->cpus[i]->is_sleep){
-            tms->pendingWakeup[i] = true;
+        if(test_bit(i, (unsigned long*)&cpu_mask) && T8030CPU_is_sleep(tms->cpus[i])){
+            int ret = QEMU_ARM_POWERCTL_RET_SUCCESS;
+            if(tms->cpus[i]->cpu->power_state != PSCI_ON){
+                ret = arm_set_cpu_on_and_reset(tms->cpus[i]->mpidr);
+            }
+            if (ret != QEMU_ARM_POWERCTL_RET_SUCCESS) {
+                error_report("%s: failed to bring up CPU %d: err %d",
+                            __func__, i, ret);
+            }
         }
-        timer_mod_ns(tms->next_tick_timer, qemu_clock_get_ns(QEMU_CLOCK_VIRTUAL) + 1);
     }
 }
 static void T8030_wake_up_cpu(MachineState* machine, uint32_t cpu_id){
     T8030_wake_up_cpus(machine, 1 << cpu_id);
 }
 //Deliver IPI, call with cluster mutex locked
-static void T8030_cluster_deliver_ipi(cluster* c, uint32_t cpu_id){
+static void T8030_cluster_deliver_ipi(cluster* c, uint64_t cpu_id, uint64_t src_cpu, uint64_t flag){
     T8030_wake_up_cpu(c->machine, cpu_id);
-    for(int k = 0; k < MAX_CPU; k++){
-        //clear all pending IPIs
-        c->deferredIPI[k][cpu_id] = 0;
-        c->noWakeIPI[k][cpu_id] = 0;
-    }
-    // assert(c->cpus[cpu_id]->is_in_ipi == false);
-
-    // fprintf(stderr, "Cluster %u delivering Fast IPI to CPU %u\n", c->id, cpu_id);
-
     T8030MachineState *tms = T8030_MACHINE(c->machine);
-    WITH_QEMU_LOCK_GUARD(&tms->mutex){
-        tms->pendingIPI[cpu_id] = true;
-        timer_mod_ns(tms->next_tick_timer, qemu_clock_get_ns(QEMU_CLOCK_VIRTUAL) + 1);
-    }
+
+    if(tms->cpus[cpu_id]->ipi_sr) return;
+    // fprintf(stderr, "Cluster %u delivering Fast IPI from CPU %x to CPU %x\n", c->id, src_cpu, cpu_id);
+    tms->cpus[cpu_id]->ipi_sr = 1LL | (src_cpu << IPI_SR_SRC_CPU_SHIFT) | flag;
+    qemu_irq_raise(tms->cpus[cpu_id]->fast_ipi);
 }
 
 //Deliver intercluster IPI
 static void T8030_ipi_rr_local(CPUARMState *env, const ARMCPRegInfo *ri,
                                          uint64_t value)
 {
-    T8030CPU *tcpu = (T8030CPU *)ri->opaque;
+    T8030CPUState *tcpu = T8030_cs_from_env(env);
     T8030MachineState *tms = T8030_MACHINE(tcpu->machine);
     WITH_QEMU_LOCK_GUARD(&tms->clusters[tcpu->cluster_id]->mutex){
-        uint32_t phys_id = MPIDR_CPU_ID(value);
+        uint32_t phys_id = MPIDR_CPU_ID(value) | (tcpu->cluster_id << 8);
         cluster *c = tms->clusters[tcpu->cluster_id];
         uint32_t cpu_id = -1;
         for(int i = 0; i < MAX_CPU; i++)
@@ -172,17 +189,17 @@ static void T8030_ipi_rr_local(CPUARMState *env, const ARMCPRegInfo *ri,
                 break;
             }
         }
-        // fprintf(stderr, "CPU %u sending fast IPI to local CPU %u: value: 0x%llx\n", tcpu->phys_id, phys_id, value);
+        // fprintf(stderr, "CPU %x sending fast IPI to local CPU %x: value: 0x%llx\n", tcpu->phys_id, phys_id, value);
         if(cpu_id == -1 || c->cpus[cpu_id] == NULL) {
-            fprintf(stderr, "CPU %u failed to send fast IPI to local CPU %u: value: 0x%llx\n", tcpu->phys_id, phys_id, value);
+            fprintf(stderr, "CPU %x failed to send fast IPI to local CPU %x: value: 0x%llx\n", tcpu->phys_id, phys_id, value);
             return;
         }
         if ((value & ARM64_REG_IPI_RR_TYPE_NOWAKE) == ARM64_REG_IPI_RR_TYPE_NOWAKE){
             // fprintf(stderr, "...nowake ipi\n");
-            if(c->cpus[cpu_id]->is_sleep){
+            if(T8030CPU_is_sleep(c->cpus[cpu_id])){
                 c->noWakeIPI[tcpu->cpu_id][cpu_id] = 1;
             } else {
-                T8030_cluster_deliver_ipi(c, cpu_id);
+                T8030_cluster_deliver_ipi(c, cpu_id, tcpu->cpu_id, ARM64_REG_IPI_RR_TYPE_IMMEDIATE);
             }
         } else if ((value & ARM64_REG_IPI_RR_TYPE_DEFERRED) == ARM64_REG_IPI_RR_TYPE_DEFERRED){
             // fprintf(stderr, "...deferred ipi\n");
@@ -193,7 +210,7 @@ static void T8030_ipi_rr_local(CPUARMState *env, const ARMCPRegInfo *ri,
             c->noWakeIPI[tcpu->cpu_id][cpu_id] = 0;
         } else if((value & ARM64_REG_IPI_RR_TYPE_IMMEDIATE) == ARM64_REG_IPI_RR_TYPE_IMMEDIATE){
             // fprintf(stderr, "...immediate ipi\n");
-            T8030_cluster_deliver_ipi(c, cpu_id);
+            T8030_cluster_deliver_ipi(c, cpu_id, tcpu->cpu_id, ARM64_REG_IPI_RR_TYPE_IMMEDIATE);
         }
     }
 }
@@ -201,12 +218,12 @@ static void T8030_ipi_rr_local(CPUARMState *env, const ARMCPRegInfo *ri,
 static void T8030_ipi_rr_global(CPUARMState *env, const ARMCPRegInfo *ri,
                                          uint64_t value)
 {
-    T8030CPU *tcpu = (T8030CPU *)ri->opaque;
+    T8030CPUState *tcpu = T8030_cs_from_env(env);
     T8030MachineState *tms = T8030_MACHINE(tcpu->machine);
     uint32_t cluster_id = MPIDR_CLUSTER_ID(value >> IPI_RR_TARGET_CLUSTER_SHIFT);
     if(cluster_id >= MAX_CLUSTER || tms->clusters[cluster_id] == 0) return;
     WITH_QEMU_LOCK_GUARD(&tms->clusters[cluster_id]->mutex){
-        uint32_t phys_id = MPIDR_CPU_ID(value);
+        uint32_t phys_id = MPIDR_CPU_ID(value) | cluster_id << 8;
         cluster *c = tms->clusters[cluster_id];
         uint32_t cpu_id = -1;
         for(int i = 0; i < MAX_CPU; i++)
@@ -216,16 +233,16 @@ static void T8030_ipi_rr_global(CPUARMState *env, const ARMCPRegInfo *ri,
                 break;
             }
         }
-        // fprintf(stderr, "CPU %u sending fast IPI to global CPU %u: value: 0x%llx\n", tcpu->phys_id, phys_id, value);
+        // fprintf(stderr, "CPU %x sending fast IPI to global CPU %x: value: 0x%llx\n", tcpu->phys_id, phys_id, value);
         if(cpu_id == -1 || c->cpus[cpu_id] == NULL) {
-            fprintf(stderr, "CPU %u failed to send fast IPI to global CPU %u: value: 0x%llx\n", tcpu->phys_id, phys_id, value);
+            fprintf(stderr, "CPU %x failed to send fast IPI to global CPU %x: value: 0x%llx\n", tcpu->phys_id, phys_id, value);
             return;
         };
         if ((value & ARM64_REG_IPI_RR_TYPE_NOWAKE) == ARM64_REG_IPI_RR_TYPE_NOWAKE){
-            if(c->cpus[cpu_id]->is_sleep){
+            if(T8030CPU_is_sleep(c->cpus[cpu_id])){
                 c->noWakeIPI[tcpu->cpu_id][cpu_id] = 1;
             } else {
-                T8030_cluster_deliver_ipi(c, cpu_id);
+                T8030_cluster_deliver_ipi(c, cpu_id, tcpu->cpu_id, ARM64_REG_IPI_RR_TYPE_IMMEDIATE);
             }
         } else if ((value & ARM64_REG_IPI_RR_TYPE_DEFERRED) == ARM64_REG_IPI_RR_TYPE_DEFERRED){
             c->deferredIPI[tcpu->cpu_id][cpu_id] = 1;
@@ -233,39 +250,49 @@ static void T8030_ipi_rr_global(CPUARMState *env, const ARMCPRegInfo *ri,
             c->deferredIPI[tcpu->cpu_id][cpu_id] = 0;
             c->noWakeIPI[tcpu->cpu_id][cpu_id] = 0;
         } else if((value & ARM64_REG_IPI_RR_TYPE_IMMEDIATE) == ARM64_REG_IPI_RR_TYPE_IMMEDIATE){
-            T8030_cluster_deliver_ipi(c, cpu_id);
+            T8030_cluster_deliver_ipi(c, cpu_id, tcpu->cpu_id, ARM64_REG_IPI_RR_TYPE_IMMEDIATE);
         } 
     }
 }
 //Receiving IPI
 static uint64_t T8030_ipi_read_sr(CPUARMState *env, const ARMCPRegInfo *ri)
 {
-    T8030CPU *tcpu = (T8030CPU *)ri->opaque;
-    return tcpu->is_in_ipi;
+    T8030CPUState *tcpu = T8030_cs_from_env(env);
+    assert(env_archcpu(env)->mp_affinity == tcpu->mpidr);
+    return tcpu->ipi_sr;
 }
 //Acknowledge received IPI
 static void T8030_ipi_write_sr(CPUARMState *env, const ARMCPRegInfo *ri,
                                          uint64_t value)
 {
-    T8030CPU *tcpu = (T8030CPU *)ri->opaque;
-    tcpu->is_in_ipi = false;
-    // fprintf(stderr, "CPU %u ack fast IPI\n", tcpu->cpu_id);
+    T8030CPUState *tcpu = T8030_cs_from_env(env);
+    T8030MachineState *tms = T8030_MACHINE(tcpu->machine);
+    cluster *c = tms->clusters[tcpu->cluster_id];
+    uint64_t src_cpu = IPI_SR_SRC_CPU(value);
+    tcpu->ipi_sr = 0;
+    qemu_irq_lower(tcpu->fast_ipi);
+    WITH_QEMU_LOCK_GUARD(&c->mutex){
+        if ((value & ARM64_REG_IPI_RR_TYPE_NOWAKE) == ARM64_REG_IPI_RR_TYPE_NOWAKE){
+            c->noWakeIPI[src_cpu][tcpu->cpu_id] = 0;
+        } else if ((value & ARM64_REG_IPI_RR_TYPE_DEFERRED) == ARM64_REG_IPI_RR_TYPE_DEFERRED){
+            c->deferredIPI[src_cpu][tcpu->cpu_id] = 0;
+        }
+    }
+    // fprintf(stderr, "CPU %x ack fast IPI from CPU %llu\n", tcpu->cpu_id, src_cpu);
 }
 //Read deferred interrupt timeout (global)
 static uint64_t T8030_ipi_read_cr(CPUARMState *env, const ARMCPRegInfo *ri)
 {
-    T8030CPU *tcpu = (T8030CPU *)ri->opaque;
+    T8030CPUState *tcpu = T8030_cs_from_env(env);
     T8030MachineState *tms = T8030_MACHINE(tcpu->machine);
-    WITH_QEMU_LOCK_GUARD(&tms->mutex){
-        return tms->ipi_cr;
-    }
+    return tms->ipi_cr;
 }
 //Set deferred interrupt timeout (global)
 static void T8030_ipi_write_cr(CPUARMState *env, const ARMCPRegInfo *ri,
                                          uint64_t value)
 {
     fprintf(stderr, "T8030 adjusting deferred IPI timeout to %llu\n", value);
-    T8030CPU *tcpu = (T8030CPU *)ri->opaque;
+    T8030CPUState *tcpu = T8030_cs_from_env(env);
     T8030MachineState *tms = T8030_MACHINE(tcpu->machine);
     WITH_QEMU_LOCK_GUARD(&tms->mutex){
         if(value == 0) value = kDeferredIPITimerDefault;
@@ -331,21 +358,23 @@ static const ARMCPRegInfo T8030_cp_reginfo_tcg[] = {
     {                                                                        
         .cp = CP_REG_ARM64_SYSREG_CP,                                        
         .name = "ARM64_REG_IPI_RR_LOCAL", .opc0 = 3, .crn = 15, .crm = 0,
-        .opc1 = 5, .opc2 = 0, .access = PL1_W, .type = ARM_CP_NO_RAW,
+        .opc1 = 5, .opc2 = 0, .access = PL1_W, .type = ARM_CP_IO | ARM_CP_NO_RAW,
         .state = ARM_CP_STATE_AA64,
+        .readfn = arm_cp_read_zero,
         .writefn = T8030_ipi_rr_local
     },
     {                                                                        
         .cp = CP_REG_ARM64_SYSREG_CP,                                        
         .name = "ARM64_REG_IPI_RR_GLOBAL", .opc0 = 3, .crn = 15, .crm = 0,
-        .opc1 = 5, .opc2 = 1, .access = PL1_W, .type = ARM_CP_NO_RAW,
+        .opc1 = 5, .opc2 = 1, .access = PL1_W, .type = ARM_CP_IO | ARM_CP_NO_RAW,
         .state = ARM_CP_STATE_AA64,
+        .readfn = arm_cp_read_zero,
         .writefn = T8030_ipi_rr_global
     },
     {                                                                        
         .cp = CP_REG_ARM64_SYSREG_CP,                                        
         .name = "ARM64_REG_IPI_SR", .opc0 = 3, .crn = 15, .crm = 1,
-        .opc1 = 5, .opc2 = 1, .access = PL1_RW, .type = ARM_CP_IO,
+        .opc1 = 5, .opc2 = 1, .access = PL1_RW, .type = ARM_CP_IO | ARM_CP_NO_RAW,
         .state = ARM_CP_STATE_AA64,
         .readfn = T8030_ipi_read_sr,
         .writefn = T8030_ipi_write_sr
@@ -367,7 +396,7 @@ static uint32_t g_mov_x13_0_inst = MOV_X13_0_INST;
 static uint32_t g_ret_inst = RET_INST;
 static uint32_t g_retab_inst = RETAB_INST;
 
-static void T8030_add_cpregs(T8030CPU* tcpu)
+static void T8030_add_cpregs(T8030CPUState* tcpu)
 {
     ARMCPU *cpu = tcpu->cpu;
 
@@ -385,7 +414,15 @@ static void T8030_add_cpregs(T8030CPU* tcpu)
     tcpu->T8030_CPREG_VAR_NAME(ARM64_REG_APCTL_EL1) = 2;
     tcpu->T8030_CPREG_VAR_NAME(ARM64_REG_KERNELKEYLO_EL1) = 0;
     tcpu->T8030_CPREG_VAR_NAME(ARM64_REG_KERNELKEYHI_EL1) = 0;
-    define_arm_cp_regs_with_opaque(cpu, T8030_cp_reginfo_tcg, tcpu);
+    /* Note that we can't just use the T8030CPUState as an opaque pointer
+     * in define_arm_cp_regs_with_opaque(), because when we're called back
+     * it might be with code translated by CPU 0 but run by CPU 1, in
+     * which case we'd get the wrong value.
+     * So instead we define the regs with no ri->opaque info, and
+     * get back to the T8030CPUState from the CPUARMState.
+     */
+    T8030_set_cs(CPU(cpu), tcpu);
+    define_arm_cp_regs(cpu, T8030_cp_reginfo_tcg);
 }
 
 static void T8030_create_s3c_uart(const T8030MachineState *tms, Chardev *chr)
@@ -542,7 +579,7 @@ static void T8030_memory_setup(MachineState *machine)
 
     fprintf(stderr, "mem_size: 0x" TARGET_FMT_lx "\n", mem_size);
     fprintf(stderr, "dram-base: 0x" TARGET_FMT_lx "\n", tms->dram_base);
-    fprintf(stderr, "dram-size: 0x" TARGET_FMT_lx "\n", tms->dram_size);
+    fprintf(stderr, "dram-size: 0x%lx\n", tms->dram_size);
 
     macho_load_dtb(tms->device_tree, nsas, sysmem, "dtb.T8030",
                    dtb_pa, &dtb_size,
@@ -563,14 +600,14 @@ static void cpu_impl_reg_write(void *opaque,
                   hwaddr addr,
                   uint64_t data,
                   unsigned size){
-    T8030CPU* cpu = (T8030CPU*) opaque;
-    fprintf(stderr, "CPU %u cpu-impl-reg WRITE @ 0x" TARGET_FMT_lx " value: 0x" TARGET_FMT_lx "\n", cpu->cpu_id, addr, data);
+    T8030CPUState* cpu = (T8030CPUState*) opaque;
+    fprintf(stderr, "CPU %x cpu-impl-reg WRITE @ 0x" TARGET_FMT_lx " value: 0x" TARGET_FMT_lx "\n", cpu->cpu_id, addr, data);
 }
 static uint64_t cpu_impl_reg_read(void *opaque,
                      hwaddr addr,
                      unsigned size){
-    T8030CPU* cpu = (T8030CPU*) opaque;
-    fprintf(stderr, "CPU %u cpu-impl-reg READ @ 0x" TARGET_FMT_lx "\n", cpu->cpu_id, addr);
+    T8030CPUState* cpu = (T8030CPUState*) opaque;
+    fprintf(stderr, "CPU %x cpu-impl-reg READ @ 0x" TARGET_FMT_lx "\n", cpu->cpu_id, addr);
     return 0;
 }
 
@@ -583,12 +620,10 @@ static void cpu_coresight_reg_write(void *opaque,
                   hwaddr addr,
                   uint64_t data,
                   unsigned size){
-    T8030CPU* cpu = (T8030CPU*) opaque;
 }
 static uint64_t cpu_coresight_reg_read(void *opaque,
                      hwaddr addr,
                      unsigned size){
-    T8030CPU* cpu = (T8030CPU*) opaque;
     return 0;
 }
 static const MemoryRegionOps cpu_coresight_reg_ops = {
@@ -711,7 +746,7 @@ static void T8030_cpu_setup(MachineState *machine)
         assert(node);
         DTBProp* prop = NULL;
         Object *cpuobj = object_new(machine->cpu_type);
-        tms->cpus[i] = g_new(T8030CPU, 1);
+        tms->cpus[i] = g_new(T8030CPUState, 1);
         tms->cpus[i]->cpu = ARM_CPU(cpuobj);
         tms->cpus[i]->machine = machine;
         CPUState *cs = CPU(tms->cpus[i]->cpu);
@@ -726,10 +761,12 @@ static void T8030_cpu_setup(MachineState *machine)
         prop = get_dtb_prop(node, "cluster-id");
         assert(prop->length == 4);
         unsigned int cluster_id = *(unsigned int*)prop->value;
-        uint64_t mpidr = 0LL | phys_id | (cluster_id << MPIDR_AFF1_SHIFT) | (tms->clusters[cluster_id]->type << MPIDR_AFF2_SHIFT) | (1LL << 31);
-        tms->cpus[i]->cpu->mp_affinity = mpidr;
+        uint64_t mpidr = 0LL | phys_id | (tms->clusters[cluster_id]->type << MPIDR_AFF2_SHIFT) | (1LL << 31);
+        object_property_set_int(cpuobj, "mp-affinity", mpidr, &error_fatal);
         tms->cpus[i]->mpidr = mpidr;
-        tms->cpus[cpu_id] = tms->cpus[i];
+        tms->cpus[i]->cpu_id = cpu_id;
+        tms->cpus[i]->phys_id = phys_id;
+        tms->cpus[i]->cluster_id = cluster_id;
         tms->clusters[cluster_id]->cpus[cpu_id] = tms->cpus[i];
         //remove debug regs from device tree
         prop = get_dtb_prop(node, "reg-private");
@@ -747,7 +784,7 @@ static void T8030_cpu_setup(MachineState *machine)
             if(prop != NULL) {
                 remove_dtb_prop(node, prop);
             }
-            add_dtb_prop(node, "state", 8, "running");
+            add_dtb_prop(node, "state", 8, (uint8_t*)"running");
         }
         prop = get_dtb_prop(node, "timebase-frequency");
         if(prop != NULL){
@@ -775,14 +812,10 @@ static void T8030_cpu_setup(MachineState *machine)
 
         if(i > 0){
             object_property_set_bool(cpuobj, "start-powered-off", true, NULL);
-            tms->cpus[i]->is_sleep = true;
         }
 
         qdev_realize(DEVICE(cpuobj), NULL, &error_fatal);
         
-        tms->cpus[i]->cpu_id = cpu_id;
-        tms->cpus[i]->phys_id = phys_id;
-        tms->cpus[i]->cluster_id = cluster_id;
         tms->cpus[i]->nsas = cpu_get_address_space(cs, ARMASIdx_NS);
 
         prop = get_dtb_prop(node, "cpu-impl-reg");
@@ -807,8 +840,16 @@ static void T8030_cpu_setup(MachineState *machine)
 
         memory_region_add_subregion(tms->sysmem, cpu_coresight_reg_addr, tms->cpus[i]->coresight_reg);
         
-        qdev_connect_gpio_out(DEVICE(cpuobj), GTIMER_VIRT,
-                          qdev_get_gpio_in(DEVICE(cpuobj), ARM_CPU_FIQ));
+        DeviceState *fiq_or = qdev_new(TYPE_OR_IRQ);
+        object_property_add_child(cpuobj, "fiq-or", OBJECT(fiq_or));
+        qdev_prop_set_uint16(fiq_or, "num-lines", 16);
+        qdev_realize_and_unref(fiq_or, NULL, &error_fatal);
+
+        qdev_connect_gpio_out(fiq_or, 0, qdev_get_gpio_in(DEVICE(cpuobj), ARM_CPU_FIQ));
+
+        qdev_connect_gpio_out(DEVICE(cpuobj), GTIMER_VIRT, qdev_get_gpio_in(fiq_or, 0));
+        tms->cpus[i]->fast_ipi = qdev_get_gpio_in(fiq_or, 1);
+
         T8030_add_cpregs(tms->cpus[i]);
         
         object_unref(cpuobj);
@@ -902,70 +943,36 @@ static void T8030_cpu_reset(void *opaque)
     CPUState* cpu;
     CPU_FOREACH(cpu) {
             ARM_CPU(cpu)->rvbar = tms->kpc_pa & ~0xfff;
-            cpu_reset(cpu);
         }
     
     CPUState *cs = CPU(first_cpu);
     CPUARMState *env = &ARM_CPU(cs)->env;
-
+    cpu_reset(cs);
     env->xregs[0] = tms->kbootargs_pa;
     env->pc = tms->kpc_pa;
 
 }
 
 static void T8030_cluster_tick(cluster* c){
+    T8030MachineState *tms = T8030_MACHINE(c->machine);
     WITH_QEMU_LOCK_GUARD(&c->mutex){
-        for(int i = 0; i < MAX_CPU; i++) /* target */
-        if(c->cpus[i] != NULL){
-            for(int j = 0; j < MAX_CPU; j++){ /* source */
-                if(c->deferredIPI[j][i] || (c->noWakeIPI[j][i] && !c->cpus[i]->is_sleep)){
-                    T8030_cluster_deliver_ipi(c, i);
+        for(int i = 0; i < MAX_CPU; i++) /* source */
+            for(int j = 0; j < MAX_CPU; j++){ /* target */
+                if(c->cpus[j] != NULL && c->deferredIPI[i][j]){
+                    T8030_cluster_deliver_ipi(c, j, i, ARM64_REG_IPI_RR_TYPE_DEFERRED);
                     break;
                 }
             }
-        }
+        for(int i = 0; i < MAX_CPU; i++) /* source */
+            for(int j = 0; j < MAX_CPU; j++){ /* target */
+                if(c->cpus[j] != NULL && c->noWakeIPI[i][j] && !T8030CPU_is_sleep(c->cpus[j])){
+                    T8030_cluster_deliver_ipi(c, j, i, ARM64_REG_IPI_RR_TYPE_NOWAKE);
+                    break;
+                }
+            }
     }
 }
 
-static void T8030_machine_next_tick(void* opaque){
-    T8030MachineState *tms = T8030_MACHINE((MachineState *)opaque);
-    WITH_QEMU_LOCK_GUARD(&tms->mutex){
-        //Wake up cpus
-        for(int i = 0; i < MAX_CPU; i++)
-        if(tms->pendingWakeup[i]){
-            fprintf(stderr, "T8030 waking up CPU %u\n", i);
-            int ret = arm_set_cpu_on_and_reset(tms->cpus[i]->mpidr);
-            if (ret != QEMU_ARM_POWERCTL_RET_SUCCESS) {
-                error_report("%s: failed to bring up CPU %d: err %d",
-                            __func__, i, ret);
-            } else {
-                tms->cpus[i]->is_sleep = false;
-                tms->pendingWakeup[i] = false;
-                //nowake IPIs
-                cluster* c = tms->clusters[tms->cpus[i]->cluster_id];
-                WITH_QEMU_LOCK_GUARD(&c->mutex){
-                    bool pendingNoWake = false;
-                    for(int j = 0; j < MAX_CPU; j++)
-                    if(c->noWakeIPI[j][i]){
-                        pendingNoWake = 1;
-                        break;
-                    }
-                    if(pendingNoWake){
-                        T8030_cluster_deliver_ipi(c, i);
-                    }
-                }
-            }
-        }
-        //deliver IPIs
-        for(int i = 0; i < MAX_CPU; i++)
-        if(tms->pendingIPI[i]){
-            // fprintf(stderr, "T8030 delivering Fast IPI to CPU %u\n", i);
-            tms->cpus[i]->is_in_ipi = true;
-            tms->pendingIPI[i] = false;
-            qemu_irq_pulse(qdev_get_gpio_in(DEVICE(tms->cpus[i]->cpu), ARM_CPU_FIQ));
-        }
-    }
-}
 static void T8030_machine_ipicr_tick(void* opaque){
     T8030MachineState *tms = T8030_MACHINE((MachineState *)opaque);
     for(int i = 0; i < MAX_CLUSTER; i++){
@@ -977,7 +984,6 @@ static void T8030_machine_ipicr_tick(void* opaque){
 static void T8030_machine_reset(void* opaque){
     MachineState* machine = MACHINE(opaque);
     T8030MachineState *tms = T8030_MACHINE(opaque);
-    tms->next_tick_timer = timer_new_ns(QEMU_CLOCK_VIRTUAL, T8030_machine_next_tick, machine);
     tms->ipicr_timer = timer_new_ns(QEMU_CLOCK_VIRTUAL, T8030_machine_ipicr_tick, machine);
     timer_mod_ns(tms->ipicr_timer, kDeferredIPITimerDefault);
     T8030_cpu_reset(tms);

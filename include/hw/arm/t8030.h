@@ -55,7 +55,7 @@ typedef struct
     MachineClass parent;
 } T8030MachineClass;
 
-typedef struct {
+typedef struct T8030CPUState{
     ARMCPU* cpu;
     AddressSpace* nsas;
     MemoryRegion* impl_reg;
@@ -67,8 +67,8 @@ typedef struct {
     uint32_t phys_id;
     uint32_t cluster_id;
     uint64_t mpidr;
-    bool is_in_ipi;
-    bool is_sleep;
+    uint64_t ipi_sr;
+    qemu_irq fast_ipi;
     T8030_CPREG_VAR_DEF(ARM64_REG_HID11);
     T8030_CPREG_VAR_DEF(ARM64_REG_HID13);
     T8030_CPREG_VAR_DEF(ARM64_REG_HID14);
@@ -116,7 +116,7 @@ typedef struct {
     T8030_CPREG_VAR_DEF(ARM64_REG_CTRR_A_UPR_EL1);
     T8030_CPREG_VAR_DEF(ARM64_REG_CTRR_CTL_EL1);
     T8030_CPREG_VAR_DEF(ARM64_REG_CTRR_LOCK_EL1);
-} T8030CPU;
+} T8030CPUState;
 
 #define MPIDR_AFF0_SHIFT 0
 #define MPIDR_AFF0_WIDTH 8
@@ -131,6 +131,11 @@ typedef struct {
 #define MPIDR_CPU_ID(mpidr_el1_val)             (((mpidr_el1_val) & MPIDR_AFF0_MASK) >> MPIDR_AFF0_SHIFT)
 #define MPIDR_CLUSTER_ID(mpidr_el1_val)         (((mpidr_el1_val) & MPIDR_AFF1_MASK) >> MPIDR_AFF1_SHIFT)
 
+#define IPI_SR_SRC_CPU_SHIFT 8
+#define IPI_SR_SRC_CPU_WIDTH 8
+#define IPI_SR_SRC_CPU_MASK  (((1 << IPI_SR_SRC_CPU_WIDTH) - 1) << IPI_SR_SRC_CPU_SHIFT)
+#define IPI_SR_SRC_CPU(ipi_sr_val)         (((ipi_sr_val) & IPI_SR_SRC_CPU_MASK) >> IPI_SR_SRC_CPU_SHIFT)
+
 #define IPI_RR_TARGET_CLUSTER_SHIFT 16
 #define ARM64_REG_IPI_RR_TYPE_IMMEDIATE (0 << 28)
 #define ARM64_REG_IPI_RR_TYPE_RETRACT   (1 << 28)
@@ -144,13 +149,13 @@ typedef struct {
     uint8_t type;
     MemoryRegion* mr;
     MachineState* machine;
-    T8030CPU* cpus[MAX_CPU];
+    T8030CPUState* cpus[MAX_CPU];
     int deferredIPI[MAX_CPU][MAX_CPU];
-    bool noWakeIPI[MAX_CPU][MAX_CPU];
+    int noWakeIPI[MAX_CPU][MAX_CPU];
     uint64_t tick;
 } cluster;
 
-#define kDeferredIPITimerDefault 64
+#define kDeferredIPITimerDefault 1536
 
 typedef struct
 {
@@ -161,12 +166,12 @@ typedef struct
     hwaddr soc_base_pa;
     hwaddr dram_base;
     unsigned long dram_size;
-    T8030CPU* cpus[MAX_CPU];
+    T8030CPUState* cpus[MAX_CPU];
     cluster* clusters[MAX_CLUSTER];
-    QEMUTimer* next_tick_timer;
     QEMUTimer* ipicr_timer;
     uint64_t ipi_cr;
-    bool pendingIPI[MAX_CPU];
+    //store the pending IPI_SR value
+    uint64_t pendingIPI[MAX_CPU];
     bool pendingWakeup[MAX_CPU];
     AppleAICState* aic;
     MemoryRegion* sysmem;
