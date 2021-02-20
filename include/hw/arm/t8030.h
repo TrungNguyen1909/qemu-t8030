@@ -164,6 +164,7 @@ typedef struct
     hwaddr kpc_pa;
     hwaddr kbootargs_pa;
     hwaddr soc_base_pa;
+    hwaddr soc_size;
     hwaddr dram_base;
     unsigned long dram_size;
     T8030CPUState* cpus[MAX_CPU];

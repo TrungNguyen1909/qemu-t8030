@@ -34,7 +34,7 @@
 // pexpert/pexpert/arm64/boot.h
 #define xnu_arm64_kBootArgsRevision2 2 /* added boot_args.bootFlags */
 #define xnu_arm64_kBootArgsVersion2 2
-#define xnu_arm64_BOOT_LINE_LENGTH 256
+#define xnu_arm64_BOOT_LINE_LENGTH 608
 
 #define LC_SEGMENT_64   0x19
 #define LC_UNIXTHREAD   0x5
@@ -107,8 +107,7 @@ struct xnu_arm64_boot_args {
     uint64_t           memSizeActual;                              /* Actual size of memory */
 };
 
-void macho_file_highest_lowest_base(const char *filename, hwaddr phys_base,
-                                    hwaddr *virt_base, hwaddr *lowest,
+void macho_file_highest_lowest(const char *filename, hwaddr *lowest,
                                     hwaddr *highest);
 
 void macho_tz_setup_bootargs(const char *name, AddressSpace *as,
@@ -125,8 +124,7 @@ void macho_setup_bootargs(const char *name, AddressSpace *as,
                           char *kern_args);
 
 void arm_load_macho(char *filename, AddressSpace *as, MemoryRegion *mem,
-                    const char *name, hwaddr phys_base, hwaddr virt_base,
-                    hwaddr low_virt_addr, hwaddr high_virt_addr, hwaddr *pc);
+                    const char *name, hwaddr phys_base, hwaddr virt_base, hwaddr *pc);
 
 void macho_map_raw_file(const char *filename, AddressSpace *as, MemoryRegion *mem,
                          const char *name, hwaddr file_pa, uint64_t *size);
