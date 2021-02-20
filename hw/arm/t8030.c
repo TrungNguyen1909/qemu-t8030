@@ -43,8 +43,7 @@
 
 #include "hw/arm/exynos4210.h"
 
-#define T8030_SECURE_RAM_SIZE (0x100000)
-#define T8030_PHYS_BASE (0x40000000)
+#define T8030_PHYS_BASE (0x800000000)
 #define CPU_IMPL_REG_BASE (0x210050000)
 #define CPM_IMPL_REG_BASE (0x210e40000)
 #define T8030_MAX_DEVICETREE_SIZE (0x40000)
@@ -487,7 +486,6 @@ static void T8030_memory_setup(MachineState *machine)
     hwaddr allocated_ram_pa;
     hwaddr phys_ptr;
     hwaddr phys_pc;
-    hwaddr ramfb_pa = 0;
     video_boot_args v_bootargs = {0};
     T8030MachineState *tms = T8030_MACHINE(machine);
     MemoryRegion* sysmem = tms->sysmem;
@@ -503,10 +501,9 @@ static void T8030_memory_setup(MachineState *machine)
     //After that we have the kernel boot args
     //After that we have the rest of the RAM
 
-    macho_file_highest_lowest_base(tms->kernel_filename, T8030_PHYS_BASE,
-                                   &virt_base, &kernel_low, &kernel_high);
+    macho_file_highest_lowest(tms->kernel_filename, &kernel_low, &kernel_high);
 
-    g_virt_base = virt_base;
+    g_virt_base = virt_base = align_64k_low(kernel_low);
     g_phys_base = T8030_PHYS_BASE;
     phys_ptr = T8030_PHYS_BASE;
     fprintf(stderr, "g_virt_base: 0x" TARGET_FMT_lx "\ng_phys_base: 0x" TARGET_FMT_lx "\n", g_virt_base, g_phys_base);
@@ -517,15 +514,14 @@ static void T8030_memory_setup(MachineState *machine)
     hwaddr trustcache_pa = phys_ptr;
     hwaddr trustcache_size = 0;
     macho_load_raw_file("static_tc", nsas, sysmem,
-                        "trustcache.T8030", trustcache_pa,
+                        "TrustCache", trustcache_pa,
                         &trustcache_size);
-    fprintf(stderr, "trustcache_addr: 0x%llx\ntrustcache_size: 0x%llx\n", trustcache_pa, trustcache_size);
     phys_ptr += align_64k_high(trustcache_size);
 
+    used_ram_for_blobs += align_64k_high(trustcache_size);
     //now account for the loaded kernel
-    arm_load_macho(tms->kernel_filename, nsas, sysmem, "kernel.T8030",
-                   T8030_PHYS_BASE, virt_base, kernel_low,
-                   kernel_high, &phys_pc);
+    arm_load_macho(tms->kernel_filename, nsas, sysmem, "Kernel",
+                   T8030_PHYS_BASE, virt_base, &phys_pc);
     tms->kpc_pa = phys_pc;
     used_ram_for_blobs += (align_64k_high(kernel_high) - kernel_low);
 
@@ -546,13 +542,12 @@ static void T8030_memory_setup(MachineState *machine)
     {
         tms->ramdisk_file_dev.pa = phys_ptr;
         macho_map_raw_file(tms->ramdisk_filename, nsas, sysmem,
-                           "ramdisk_raw_file.T8030", tms->ramdisk_file_dev.pa,
+                           "RamDisk", tms->ramdisk_file_dev.pa,
                            &tms->ramdisk_file_dev.size);
         tms->ramdisk_file_dev.size = align_64k_high(tms->ramdisk_file_dev.size);
         ramdisk_size = tms->ramdisk_file_dev.size;
         phys_ptr += tms->ramdisk_file_dev.size;
-        fprintf(stderr, "ramdisk addr: 0x" TARGET_FMT_lx "\n", tms->ramdisk_file_dev.pa);
-        fprintf(stderr, "ramdisk size: 0x" TARGET_FMT_lx "\n", tms->ramdisk_file_dev.size);
+        used_ram_for_blobs += tms->ramdisk_file_dev.size;
     }
     
     //now account for kernel boot args
@@ -561,39 +556,28 @@ static void T8030_memory_setup(MachineState *machine)
     tms->kbootargs_pa = kbootargs_pa;
     phys_ptr += align_64k_high(sizeof(struct xnu_arm64_boot_args));
     tms->extra_data_pa = phys_ptr;
+
+    top_of_kernel_data_pa = phys_ptr;
     allocated_ram_pa = phys_ptr;
     
-    if (tms->use_ramfb)
-    {
-        ramfb_pa = ((hwaddr) & ((AllocatedData *)tms->extra_data_pa)->ramfb[0]);
-        xnu_define_ramfb_device(nsas, ramfb_pa);
-        xnu_get_video_bootargs(&v_bootargs, ramfb_pa);
-    }
-
-    phys_ptr += align_64k_high(sizeof(AllocatedData));
-    top_of_kernel_data_pa = phys_ptr;
-    remaining_mem_size = machine->ram_size - used_ram_for_blobs;
-    mem_size = allocated_ram_pa - T8030_PHYS_BASE + remaining_mem_size;
+    remaining_mem_size = T8030_PHYS_BASE + machine->ram_size - allocated_ram_pa;
+    mem_size = machine->ram_size;
     tms->dram_base = T8030_PHYS_BASE;
-    tms->dram_size = mem_size;
+    tms->dram_size = machine->ram_size;
 
-    fprintf(stderr, "mem_size: 0x" TARGET_FMT_lx "\n", mem_size);
-    fprintf(stderr, "dram-base: 0x" TARGET_FMT_lx "\n", tms->dram_base);
-    fprintf(stderr, "dram-size: 0x%lx\n", tms->dram_size);
-
-    macho_load_dtb(tms->device_tree, nsas, sysmem, "dtb.T8030",
+    macho_load_dtb(tms->device_tree, nsas, sysmem, "DeviceTree",
                    dtb_pa, &dtb_size,
                    tms->ramdisk_file_dev.pa, ramdisk_size,
                    trustcache_pa, trustcache_size,
                    tms->dram_base, tms->dram_size);
     assert(dtb_size <= T8030_MAX_DEVICETREE_SIZE);
 
-    macho_setup_bootargs("k_bootargs.T8030", nsas, sysmem, kbootargs_pa,
+    macho_setup_bootargs("BootArgs", nsas, sysmem, kbootargs_pa,
                          virt_base, T8030_PHYS_BASE, mem_size,
                          top_of_kernel_data_pa, dtb_va, dtb_size,
                          v_bootargs, tms->kern_args);
 
-    allocate_ram(sysmem, "T8030.ram", allocated_ram_pa, remaining_mem_size);
+    allocate_ram(sysmem, "RAM", allocated_ram_pa, remaining_mem_size);
 }
 
 static void cpu_impl_reg_write(void *opaque,
@@ -906,7 +890,7 @@ static void T8030_pmgr_setup(MachineState* machine){
         else {
             memory_region_init_io(mem, OBJECT(machine), &pmgr_reg_ops, tms, "pmgr-reg", reg[i+1]);
         }
-        memory_region_add_subregion(tms->sysmem, tms->soc_base_pa + reg[i], mem);
+        memory_region_add_subregion(tms->sysmem, reg[i] < tms->soc_size ? tms->soc_base_pa + reg[i] : reg[i], mem);
     }
     add_dtb_prop(child, "voltage-states0", 24, (uint8_t*)"\x01\x00\x00\x00\x71\x02\x00\x00\x01\x00\x00\x00\xa9\x02\x00\x00\x01\x00\x00\x00\xe4\x02\x00\x00");
     add_dtb_prop(child, "voltage-states1", 40, (uint8_t*)"\x71\xbc\x01\x00\x38\x02\x00\x00\x4b\x28\x01\x00\x83\x02\x00\x00\x38\xde\x00\x00\xde\x02\x00\x00\xc7\xb1\x00\x00\x42\x03\x00\x00\x25\x94\x00\x00\xaf\x03\x00\x00");
@@ -1002,6 +986,7 @@ static void T8030_machine_init(MachineState *machine)
     assert(prop != NULL);
     hwaddr *ranges = (hwaddr *)prop->value;
     tms->soc_base_pa = ranges[1];
+    tms->soc_size = ranges[2];
 
     T8030_cpu_setup(machine);
 
