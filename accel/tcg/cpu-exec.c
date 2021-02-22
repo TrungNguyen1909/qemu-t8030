@@ -154,7 +154,7 @@ static inline tcg_target_ulong cpu_tb_exec(CPUState *cpu, TranslationBlock *itb)
 
     qemu_log_mask_and_addr(CPU_LOG_EXEC, itb->pc,
                            "Trace %d: %p ["
-                           TARGET_FMT_lx "/" TARGET_FMT_lx "/%#llx] %s\n",
+                           TARGET_FMT_lx "/" TARGET_FMT_lx "/%#lx] %s\n",
                            cpu->cpu_index, itb->tc.ptr,
                            itb->cs_base, itb->pc, itb->flags,
                            lookup_symbol(itb->pc));

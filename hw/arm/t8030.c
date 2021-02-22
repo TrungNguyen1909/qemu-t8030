@@ -186,7 +186,7 @@ static void T8030_ipi_rr_local(CPUARMState *env, const ARMCPRegInfo *ri,
         }
         // fprintf(stderr, "CPU %x sending fast IPI to local CPU %x: value: 0x%llx\n", tcpu->phys_id, phys_id, value);
         if(cpu_id == -1 || c->cpus[cpu_id] == NULL) {
-            fprintf(stderr, "CPU %x failed to send fast IPI to local CPU %x: value: 0x%llx\n", tcpu->phys_id, phys_id, value);
+            fprintf(stderr, "CPU %x failed to send fast IPI to local CPU %x: value: 0x%lx\n", tcpu->phys_id, phys_id, value);
             return;
         }
         if ((value & ARM64_REG_IPI_RR_TYPE_NOWAKE) == ARM64_REG_IPI_RR_TYPE_NOWAKE){
@@ -230,7 +230,7 @@ static void T8030_ipi_rr_global(CPUARMState *env, const ARMCPRegInfo *ri,
         }
         // fprintf(stderr, "CPU %x sending fast IPI to global CPU %x: value: 0x%llx\n", tcpu->phys_id, phys_id, value);
         if(cpu_id == -1 || c->cpus[cpu_id] == NULL) {
-            fprintf(stderr, "CPU %x failed to send fast IPI to global CPU %x: value: 0x%llx\n", tcpu->phys_id, phys_id, value);
+            fprintf(stderr, "CPU %x failed to send fast IPI to global CPU %x: value: 0x%lx\n", tcpu->phys_id, phys_id, value);
             return;
         };
         if ((value & ARM64_REG_IPI_RR_TYPE_NOWAKE) == ARM64_REG_IPI_RR_TYPE_NOWAKE){
@@ -286,7 +286,7 @@ static uint64_t T8030_ipi_read_cr(CPUARMState *env, const ARMCPRegInfo *ri)
 static void T8030_ipi_write_cr(CPUARMState *env, const ARMCPRegInfo *ri,
                                          uint64_t value)
 {
-    fprintf(stderr, "T8030 adjusting deferred IPI timeout to %llu\n", value);
+    fprintf(stderr, "T8030 adjusting deferred IPI timeout to %lu\n", value);
     T8030CPUState *tcpu = T8030_cs_from_env(env);
     T8030MachineState *tms = T8030_MACHINE(tcpu->machine);
     WITH_QEMU_LOCK_GUARD(&tms->mutex){
@@ -418,12 +418,6 @@ static const ARMCPRegInfo T8030_cp_reginfo_tcg[] = {
     },
     REGINFO_SENTINEL,
 };
-
-static uint32_t g_nop_inst = NOP_INST;
-static uint32_t g_mov_w0_01_inst = MOV_W0_01_INST;
-static uint32_t g_mov_x13_0_inst = MOV_X13_0_INST;
-static uint32_t g_ret_inst = RET_INST;
-static uint32_t g_retab_inst = RETAB_INST;
 
 static void T8030_add_cpregs(T8030CPUState* tcpu)
 {
@@ -656,7 +650,7 @@ static void pmgr_unk_reg_write(void *opaque,
                   hwaddr addr,
                   uint64_t data,
                   unsigned size){
-    hwaddr* base = (hwaddr*) opaque;
+    //hwaddr* base = (hwaddr*) opaque;
     //fprintf(stderr, "PMGR reg WRITE unk @ 0x" TARGET_FMT_lx " base: 0x" TARGET_FMT_lx " value: 0x" TARGET_FMT_lx "\n", base + addr, base, data);
 }
 static uint64_t pmgr_unk_reg_read(void *opaque,
@@ -678,7 +672,6 @@ static void pmgr_reg_write(void *opaque,
                   uint64_t data,
                   unsigned size){
     MachineState *machine = MACHINE(opaque);
-    T8030MachineState *tms = T8030_MACHINE(machine);
     // fprintf(stderr, "PMGR reg WRITE @ 0x" TARGET_FMT_lx " value: 0x" TARGET_FMT_lx "\n", addr, data);
     switch (addr){
         case 0xd4004:
@@ -957,7 +950,6 @@ static void T8030_cpu_reset(void *opaque)
 }
 
 static void T8030_cluster_tick(cluster* c){
-    T8030MachineState *tms = T8030_MACHINE(c->machine);
     WITH_QEMU_LOCK_GUARD(&c->mutex){
         for(int i = 0; i < MAX_CPU; i++) /* source */
             for(int j = 0; j < MAX_CPU; j++){ /* target */
