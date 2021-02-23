@@ -128,12 +128,12 @@ static void T8030_set_cs(CPUState *cpu, T8030CPUState *s)
     ARMCPU *arm_cpu = ARM_CPU(cpu);
     CPUARMState *env = &arm_cpu->env;
 
-    env->gicv3state = (void *)s;
+    env->t8030state = (void *)s;
 };
 
 static T8030CPUState *T8030_cs_from_env(CPUARMState *env)
 {
-    return env->gicv3state;
+    return env->t8030state;
 }
 
 static inline bool T8030CPU_is_sleep(T8030CPUState* tcpu){
