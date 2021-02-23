@@ -2019,7 +2019,7 @@ static void vbar_el1_write(CPUARMState *env, const ARMCPRegInfo *ri,
     if (env->gxf.guarded) {
         env->gxf.vbar_gl[1] = value & ~0x1FULL;
     } else {
-        if (env->cp15.vmsa_lock_el1 & VMSA_LOCK_VBAR_EL1){
+        if (!env->gxf.guarded && env->cp15.vmsa_lock_el1 & VMSA_LOCK_VBAR_EL1){
             return;
         }
         raw_write(env, ri, value & ~0x1FULL);
@@ -4000,7 +4000,7 @@ static void vmsa_tcr_el12_write(CPUARMState *env, const ARMCPRegInfo *ri,
 static void vmsa_tcr_el1_write(CPUARMState *env, const ARMCPRegInfo *ri,
                                uint64_t value)
 {
-    if (env->cp15.vmsa_lock_el1 & VMSA_LOCK_TCR_EL1) {
+    if (!env->gxf.guarded && env->cp15.vmsa_lock_el1 & VMSA_LOCK_TCR_EL1) {
         return;
     }
     vmsa_tcr_el12_write(env, ri, value);
@@ -4020,7 +4020,7 @@ static void vmsa_ttbr_write(CPUARMState *env, const ARMCPRegInfo *ri,
 static void vmsa_ttbr0_el1_write(CPUARMState *env, const ARMCPRegInfo *ri,
                             uint64_t value)
 {
-    if (env->cp15.vmsa_lock_el1 & VMSA_LOCK_TTBR0_EL1) {
+    if (!env->gxf.guarded && env->cp15.vmsa_lock_el1 & VMSA_LOCK_TTBR0_EL1) {
         return;
     }
     vmsa_ttbr_write(env, ri, value);
@@ -4028,7 +4028,7 @@ static void vmsa_ttbr0_el1_write(CPUARMState *env, const ARMCPRegInfo *ri,
 static void vmsa_ttbr1_el1_write(CPUARMState *env, const ARMCPRegInfo *ri,
                             uint64_t value)
 {
-    if (env->cp15.vmsa_lock_el1 & VMSA_LOCK_TTBR1_EL1) {
+    if (!env->gxf.guarded && env->cp15.vmsa_lock_el1 & VMSA_LOCK_TTBR1_EL1) {
         return;
     }
     vmsa_ttbr_write(env, ri, value);
@@ -4865,14 +4865,12 @@ static void sctlr_write(CPUARMState *env, const ARMCPRegInfo *ri,
 static void sctlr_el1_write(CPUARMState *env, const ARMCPRegInfo *ri,
                         uint64_t value)
 {
-    ARMCPU *cpu = env_archcpu(env);
-
-    if (env->cp15.vmsa_lock_el1 & VMSA_LOCK_SCTLR_EL1) {
+    if (!env->gxf.guarded && env->cp15.vmsa_lock_el1 & VMSA_LOCK_SCTLR_EL1) {
         return;
     }
 
-    if (env->cp15.vmsa_lock_el1 & VMSA_LOCK_SCTLR_M_BIT){
-            value &= raw_read(env, ri) & SCTLR_M;
+    if (!env->gxf.guarded && env->cp15.vmsa_lock_el1 & VMSA_LOCK_SCTLR_M_BIT){
+        value = (value & ~(SCTLR_M)) | (raw_read(env, ri) & SCTLR_M);
     }
     sctlr_write(env, ri, value);
 }
