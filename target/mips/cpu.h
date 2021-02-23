@@ -1300,7 +1300,7 @@ void itc_reconfigure(struct MIPSITUState *tag);
 target_ulong exception_resume_pc(CPUMIPSState *env);
 
 static inline void cpu_get_tb_cpu_state(CPUMIPSState *env, target_ulong *pc,
-                                        target_ulong *cs_base, uint32_t *flags)
+                                        target_ulong *cs_base, uint64_t *flags)
 {
     *pc = env->active_tc.PC;
     *cs_base = 0;

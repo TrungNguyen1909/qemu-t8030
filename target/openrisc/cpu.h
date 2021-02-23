@@ -373,7 +373,7 @@ static inline void cpu_set_gpr(CPUOpenRISCState *env, int i, uint32_t val)
 
 static inline void cpu_get_tb_cpu_state(CPUOpenRISCState *env,
                                         target_ulong *pc,
-                                        target_ulong *cs_base, uint32_t *flags)
+                                        target_ulong *cs_base, uint64_t *flags)
 {
     *pc = env->pc;
     *cs_base = 0;

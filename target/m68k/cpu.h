@@ -549,7 +549,7 @@ typedef M68kCPU ArchCPU;
 #define TB_FLAGS_DFC_S          (1 << TB_FLAGS_DFC_S_BIT)
 
 static inline void cpu_get_tb_cpu_state(CPUM68KState *env, target_ulong *pc,
-                                        target_ulong *cs_base, uint32_t *flags)
+                                        target_ulong *cs_base, uint64_t *flags)
 {
     *pc = env->pc;
     *cs_base = 0;

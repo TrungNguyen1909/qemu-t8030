@@ -150,7 +150,7 @@ int cpu_tilegx_signal_handler(int host_signum, void *pinfo, void *puc);
 #define cpu_signal_handler cpu_tilegx_signal_handler
 
 static inline void cpu_get_tb_cpu_state(CPUTLGState *env, target_ulong *pc,
-                                        target_ulong *cs_base, uint32_t *flags)
+                                        target_ulong *cs_base, uint64_t *flags)
 {
     *pc = env->pc;
     *cs_base = 0;

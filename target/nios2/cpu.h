@@ -238,7 +238,7 @@ typedef Nios2CPU ArchCPU;
 #include "exec/cpu-all.h"
 
 static inline void cpu_get_tb_cpu_state(CPUNios2State *env, target_ulong *pc,
-                                        target_ulong *cs_base, uint32_t *flags)
+                                        target_ulong *cs_base, uint64_t *flags)
 {
     *pc = env->regs[R_PC];
     *cs_base = 0;

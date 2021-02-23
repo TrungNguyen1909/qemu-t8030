@@ -775,7 +775,7 @@ trap_state* cpu_tsptr(CPUSPARCState* env);
 #define TB_FLAG_ASI_SHIFT    24
 
 static inline void cpu_get_tb_cpu_state(CPUSPARCState *env, target_ulong *pc,
-                                        target_ulong *cs_base, uint32_t *pflags)
+                                        target_ulong *cs_base, uint64_t *pflags)
 {
     uint32_t flags;
     *pc = env->pc;

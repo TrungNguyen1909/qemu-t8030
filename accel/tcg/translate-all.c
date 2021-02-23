@@ -2131,7 +2131,7 @@ static bool tb_invalidate_phys_page(tb_page_addr_t addr, uintptr_t pc)
     int current_tb_modified = 0;
     target_ulong current_pc = 0;
     target_ulong current_cs_base = 0;
-    uint32_t current_flags = 0;
+    uint64_t current_flags = 0;
 #endif
 
     assert_memory_lock();

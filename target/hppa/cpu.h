@@ -269,7 +269,7 @@ static inline target_ulong hppa_form_gva(CPUHPPAState *env, uint64_t spc,
 
 static inline void cpu_get_tb_cpu_state(CPUHPPAState *env, target_ulong *pc,
                                         target_ulong *cs_base,
-                                        uint32_t *pflags)
+                                        uint64_t *pflags)
 {
     uint32_t flags = env->psw_n * PSW_N;
 
