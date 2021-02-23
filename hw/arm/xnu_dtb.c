@@ -207,7 +207,7 @@ void add_dtb_node(DTBNode *n, const char *name)
         abort();
     }
     DTBNode *node = g_new0(DTBNode, 1);
-    add_dtb_prop(node, "name", strlen(name), name);
+    add_dtb_prop(node, "name", strlen(name), (uint8_t*)name);
     n->child_nodes = g_list_append(n->child_nodes, node);
     n->child_node_count ++;
 }
@@ -344,7 +344,7 @@ void overwrite_dtb_prop_name(DTBProp *prop, uint8_t chr)
 }
 
 void overwrite_dtb_prop(DTBNode *n, const char *name, uint32_t size, uint8_t *val){
-    DTBNode* prop = get_dtb_prop(n, name);
+    DTBProp* prop = get_dtb_prop(n, name);
     if (prop!=NULL){
         remove_dtb_prop(n, prop);
     }

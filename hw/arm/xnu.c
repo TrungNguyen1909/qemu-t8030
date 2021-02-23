@@ -190,28 +190,23 @@ void macho_load_dtb(DTBNode* root, AddressSpace *as, MemoryRegion *mem,
     remove_dtb_prop(child, prop);
     add_dtb_prop(child, "random-seed", sizeof(seed), (uint8_t *)&seed[0]);
 
-    add_dtb_prop(child, "dram-base", sizeof(dram_base), &dram_base);
-    add_dtb_prop(child, "dram-size", sizeof(dram_base), &dram_size);
-    prop = get_dtb_prop(child, "debug-enabled");
-    *(uint32_t*)prop->value = 1;
+    add_dtb_prop(child, "dram-base", sizeof(dram_base), (uint8_t*)&dram_base);
+    add_dtb_prop(child, "dram-size", sizeof(dram_base), (uint8_t*)&dram_size);
+    // prop = get_dtb_prop(child, "debug-enabled");
+    // *(uint32_t*)prop->value = 1;
     prop = get_dtb_prop(child, "firmware-version");
     remove_dtb_prop(child, prop);
-    add_dtb_prop(child, "firmware-version", 15, "qemu-t8030");
+    add_dtb_prop(child, "firmware-version", 15, (uint8_t*)"qemu-t8030");
     prop = get_dtb_prop(child, "nvram-total-size");
     remove_dtb_prop(child, prop);
     uint32_t nvram_total_size = 0xFFFF * 0x10;
-    add_dtb_prop(child, "nvram-total-size", 4, &nvram_total_size);
-
-    uint8_t *nvram_file_data = NULL;
-    unsigned long nvram_fsize;
+    add_dtb_prop(child, "nvram-total-size", 4, (uint8_t*)&nvram_total_size);
     
     char nvram_proxy_data[] = "0000common\0     nonce-seeds=aaaabbbbccccddddaaaabbbbccccdddd\0\0\0";
     prop = get_dtb_prop(child, "nvram-proxy-data");
     remove_dtb_prop(child, prop);
-    add_dtb_prop(child, "nvram-proxy-data", sizeof(nvram_proxy_data), nvram_proxy_data);
-    g_free(nvram_file_data);
+    add_dtb_prop(child, "nvram-proxy-data", sizeof(nvram_proxy_data), (uint8_t*)nvram_proxy_data);
 
-    uint64_t data64;
     uint32_t data = 1;
     add_dtb_prop(child, "research-enabled", sizeof(data), (uint8_t *)&data);
     prop = get_dtb_prop(child, "effective-production-status-ap");
@@ -264,25 +259,25 @@ void macho_load_dtb(DTBNode* root, AddressSpace *as, MemoryRegion *mem,
     child = get_dtb_child_node_by_name(child, "amcc");
     assert(child);
     data = 0;
-    add_dtb_prop(child, "aperture-count", 4, &data);
-    add_dtb_prop(child, "aperture-size", 4, &data);
-    add_dtb_prop(child, "plane-count", 4, &data);
-    add_dtb_prop(child, "aperture-phys-addr", 0, &data);
-    add_dtb_prop(child, "cache-status-reg-offset", 4, &data);
-    add_dtb_prop(child, "cache-status-reg-mask", 4, &data);
-    add_dtb_prop(child, "cache-status-reg-value", 4, &data);
+    add_dtb_prop(child, "aperture-count", 4, (uint8_t*)&data);
+    add_dtb_prop(child, "aperture-size", 4, (uint8_t*)&data);
+    add_dtb_prop(child, "plane-count", 4, (uint8_t*)&data);
+    add_dtb_prop(child, "aperture-phys-addr", 0, (uint8_t*)&data);
+    add_dtb_prop(child, "cache-status-reg-offset", 4, (uint8_t*)&data);
+    add_dtb_prop(child, "cache-status-reg-mask", 4, (uint8_t*)&data);
+    add_dtb_prop(child, "cache-status-reg-value", 4, (uint8_t*)&data);
     add_dtb_node(child, "amcc-ctrr-a");
     child = get_dtb_child_node_by_name(child, "amcc-ctrr-a");
     data = 14;
-    add_dtb_prop(child, "page-size-shift", 4, &data);
+    add_dtb_prop(child, "page-size-shift", 4, (uint8_t*)&data);
     data = 0;
-    add_dtb_prop(child, "lower-limit-reg-offset", 4, &data);
-    add_dtb_prop(child, "lower-limit-reg-mask", 4, &data);
-    add_dtb_prop(child, "upper-limit-reg-offset", 4, &data);
-    add_dtb_prop(child, "upper-limit-reg-mask", 4, &data);
-    add_dtb_prop(child, "lock-reg-offset", 4, &data);
-    add_dtb_prop(child, "lock-reg-mask", 4, &data);
-    add_dtb_prop(child, "lock-reg-value", 4, &data);
+    add_dtb_prop(child, "lower-limit-reg-offset", 4, (uint8_t*)&data);
+    add_dtb_prop(child, "lower-limit-reg-mask", 4, (uint8_t*)&data);
+    add_dtb_prop(child, "upper-limit-reg-offset", 4, (uint8_t*)&data);
+    add_dtb_prop(child, "upper-limit-reg-mask", 4, (uint8_t*)&data);
+    add_dtb_prop(child, "lock-reg-offset", 4, (uint8_t*)&data);
+    add_dtb_prop(child, "lock-reg-mask", 4, (uint8_t*)&data);
+    add_dtb_prop(child, "lock-reg-value", 4, (uint8_t*)&data);
     macho_dtb_node_process(root);
 
     uint64_t size_n = get_dtb_node_buffer_size(root);
@@ -290,12 +285,29 @@ void macho_load_dtb(DTBNode* root, AddressSpace *as, MemoryRegion *mem,
     uint8_t *buf = g_malloc0(size_n);
     save_dtb(buf, root);
     allocate_and_copy(mem, as, name, dtb_pa, size_n, buf);
-    FILE* fd = fopen("deviceTree-processed", "wb");
-    assert(fd);
-    fwrite(buf, size_n, 1, fd);
-    fclose(fd);
     g_free(buf);
     *size = size_n;
+}
+
+void macho_load_trustcache(const char *filename, AddressSpace *as, MemoryRegion *mem,
+                            hwaddr pa, uint64_t *size) {
+    uint32_t* trustcache_data = NULL;
+    uint64_t trustcache_size = 0;
+    uint8_t* file_data = NULL;
+    unsigned long file_size = 0;
+    if (g_file_get_contents(filename, (char **)&file_data, &file_size, NULL)) {
+        trustcache_size = file_size + 8;
+        trustcache_data = (uint32_t*)g_malloc(trustcache_size);
+        trustcache_data[0] = 1; //#trustcaches
+        trustcache_data[1] = 8; //offset
+        memcpy(&trustcache_data[2], file_data, file_size);
+        allocate_and_copy(mem, as, "TrustCache", pa, trustcache_size, trustcache_data);
+        *size = trustcache_size;
+        g_free(file_data);
+        g_free(trustcache_data);
+    } else {
+        abort();
+    }
 }
 
 void macho_map_raw_file(const char *filename, AddressSpace *as, MemoryRegion *mem,

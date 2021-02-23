@@ -139,4 +139,7 @@ void macho_load_dtb(DTBNode *root, AddressSpace *as, MemoryRegion *mem,
                     hwaddr ramdisk_addr, hwaddr ramdisk_size,
                     hwaddr trustcache_addr, hwaddr trustcache_size,
                     hwaddr dram_base, unsigned long dram_size);
+
+void macho_load_trustcache(const char *filename, AddressSpace *as, MemoryRegion *mem,
+                            hwaddr pa, uint64_t *size);
 #endif

@@ -65,7 +65,7 @@
     {                                                                              \
         T8030CPUState *tcpu = T8030_cs_from_env(env);                  \
         tcpu->T8030_CPREG_VAR_NAME(name) = value;                                   \
-        /* if(value != 0) fprintf(stderr, "T8030CPUState REG WRITE " #name " = 0x%llx\n", value);*/ \
+        /* if(value != 0) fprintf(stderr, "T8030CPUState REG WRITE " #name " = 0x%llx at PC 0x%llx\n", value, env->pc); */ \
     }
 
 #define T8030_CPREG_DEF(p_name, p_op0, p_op1, p_crn, p_crm, p_op2, p_access) \
@@ -533,10 +533,8 @@ static void T8030_memory_setup(MachineState *machine)
     // //now account for the trustcache
     phys_ptr += align_64k_high(0x2000000);
     hwaddr trustcache_pa = phys_ptr;
-    hwaddr trustcache_size = 0;
-    macho_load_raw_file("static_tc", nsas, sysmem,
-                        "TrustCache", trustcache_pa,
-                        &trustcache_size);
+    uint64_t trustcache_size = 0;
+    macho_load_trustcache(tms->trustcache_filename, nsas, sysmem, trustcache_pa, &trustcache_size);
     phys_ptr += align_64k_high(trustcache_size);
 
     used_ram_for_blobs += align_64k_high(trustcache_size);
@@ -1068,6 +1066,20 @@ static char *T8030_get_dtb_filename(Object *obj, Error **errp)
     return g_strdup(tms->dtb_filename);
 }
 
+static void T8030_set_trustcache_filename(Object *obj, const char *value,
+                                   Error **errp)
+{
+    T8030MachineState *tms = T8030_MACHINE(obj);
+
+    g_strlcpy(tms->trustcache_filename, value, sizeof(tms->trustcache_filename));
+}
+
+static char *T8030_get_trustcache_filename(Object *obj, Error **errp)
+{
+    T8030MachineState *tms = T8030_MACHINE(obj);
+    return g_strdup(tms->trustcache_filename);
+}
+
 static void T8030_set_kern_args(Object *obj, const char *value,
                                 Error **errp)
 {
@@ -1121,6 +1133,10 @@ static void T8030_instance_init(Object *obj)
     object_property_add_str(obj, "dtb-filename", T8030_get_dtb_filename, T8030_set_dtb_filename);
     object_property_set_description(obj, "dtb-filename",
                                     "Set the dev tree filename to be loaded");
+
+    object_property_add_str(obj, "trustcache-filename", T8030_get_trustcache_filename, T8030_set_trustcache_filename);
+    object_property_set_description(obj, "trustcache-filename",
+                                    "Set the trustcache filename to be loaded");
 
     object_property_add_str(obj, "kern-cmd-args", T8030_get_kern_args,
                             T8030_set_kern_args);
