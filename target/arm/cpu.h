@@ -507,6 +507,7 @@ typedef struct CPUARMState {
         uint64_t tfsr_el[4]; /* tfsre0_el1 is index 0.  */
         uint64_t gcr_el1;
         uint64_t rgsr_el1;
+        uint64_t vmsa_lock_el1;
     } cp15;
 
     struct {
@@ -1332,6 +1333,13 @@ void pmu_init(ARMCPU *cpu);
 #define PSTATE_MODE_EL1h 5
 #define PSTATE_MODE_EL1t 4
 #define PSTATE_MODE_EL0t 0
+/* VMSA_LOCK_EL1 */
+#define VMSA_LOCK_VBAR_EL1      (1ULL << 0)
+#define VMSA_LOCK_SCTLR_EL1     (1ULL << 1)
+#define VMSA_LOCK_TCR_EL1       (1ULL << 2)
+#define VMSA_LOCK_TTBR0_EL1     (1ULL << 3)
+#define VMSA_LOCK_TTBR1_EL1     (1ULL << 4)
+#define VMSA_LOCK_SCTLR_M_BIT   (1ULL << 63)
 
 /* Write a new value to v7m.exception, thus transitioning into or out
  * of Handler mode; this may result in a change of active stack pointer.
