@@ -2243,8 +2243,13 @@ static void disas_uncond_b_reg(DisasContext *s, uint32_t insn)
                 goto do_unallocated;
             }
             dst = tcg_temp_new_i64();
-            tcg_gen_ld_i64(dst, cpu_env,
-                           offsetof(CPUARMState, elr_el[s->current_el]));
+            if (s->guarded) {
+                tcg_gen_ld_i64(dst, cpu_env,
+                            offsetof(CPUARMState, gxf.elr_gl[s->current_el]));
+            } else {
+                tcg_gen_ld_i64(dst, cpu_env,
+                            offsetof(CPUARMState, elr_el[s->current_el]));
+            }
             break;
 
         case 2: /* ERETAA */
@@ -2256,8 +2261,13 @@ static void disas_uncond_b_reg(DisasContext *s, uint32_t insn)
                 goto do_unallocated;
             }
             dst = tcg_temp_new_i64();
-            tcg_gen_ld_i64(dst, cpu_env,
-                           offsetof(CPUARMState, elr_el[s->current_el]));
+            if (s->guarded) {
+                tcg_gen_ld_i64(dst, cpu_env,
+                            offsetof(CPUARMState, gxf.elr_gl[s->current_el]));
+            } else {
+                tcg_gen_ld_i64(dst, cpu_env,
+                            offsetof(CPUARMState, elr_el[s->current_el]));
+            }
             if (s->pauth_active) {
                 modifier = cpu_X[31];
                 if (op3 == 2) {
@@ -14582,6 +14592,31 @@ static bool btype_destination_ok(uint32_t insn, bool bt, int btype)
     return false;
 }
 
+static void disas_gxf_insn(DisasContext *s, uint32_t insn){
+    
+    switch (insn){
+        case 0x00201420: /* GENTER */
+            if (s->current_el == 0 || s->guarded) {
+                unallocated_encoding(s);
+                break;
+            }
+            gen_a64_set_pc_im(s->pc_curr);
+            gen_ss_advance(s);
+            gen_exception_insn(s, s->base.pc_next, EXCP_GENTER, syn_uncategorized(), s->current_el);
+            break;
+        case 0x00201400: /* GEXIT */
+            if (s->current_el == 0 || !s->guarded) {
+                unallocated_encoding(s);
+                break;
+            }
+            gen_helper_gexit(cpu_env);
+            s->base.is_jmp = DISAS_EXIT;
+            break;
+        default:
+            unallocated_encoding(s);
+    }
+}
+
 /* C3.1 A64 instruction index by encoding */
 static void disas_a64_insn(CPUARMState *env, DisasContext *s)
 {
@@ -14634,7 +14669,10 @@ static void disas_a64_insn(CPUARMState *env, DisasContext *s)
     }
 
     switch (extract32(insn, 25, 4)) {
-    case 0x0: case 0x1: case 0x3: /* UNALLOCATED */
+    case 0x0:
+        disas_gxf_insn(s, insn);
+        break;
+    case 0x1: case 0x3: /* UNALLOCATED */
         unallocated_encoding(s);
         break;
     case 0x2:
@@ -14711,6 +14749,7 @@ static void aarch64_tr_init_disas_context(DisasContextBase *dcbase,
 #if !defined(CONFIG_USER_ONLY)
     dc->user = (dc->current_el == 0);
 #endif
+    dc->guarded = FIELD_EX64(tb_flags, TBFLAG_A64, GUARDED);
     dc->fp_excp_el = FIELD_EX64(tb_flags, TBFLAG_ANY, FPEXC_EL);
     dc->sve_excp_el = FIELD_EX64(tb_flags, TBFLAG_A64, SVEEXC_EL);
     dc->sve_len = (FIELD_EX64(tb_flags, TBFLAG_A64, ZCR_LEN) + 1) * 16;

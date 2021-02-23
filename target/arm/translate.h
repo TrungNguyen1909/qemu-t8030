@@ -52,6 +52,8 @@ typedef struct DisasContext {
     uint32_t svc_imm;
     int aarch64;
     int current_el;
+    /* True if in GXF */
+    bool guarded;
     /* Debug target exception level for single-step exceptions */
     int debug_target_el;
     GHashTable *cp_regs;

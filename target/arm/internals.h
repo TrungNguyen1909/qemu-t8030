@@ -185,7 +185,11 @@ int arm_rmode_to_sf(int rmode);
 static inline void aarch64_save_sp(CPUARMState *env, int el)
 {
     if (env->pstate & PSTATE_SP) {
-        env->sp_el[el] = env->xregs[31];
+        if (env->gxf.guarded) {
+            env->gxf.sp_gl[el] = env->xregs[31];
+        } else {
+            env->sp_el[el] = env->xregs[31];
+        }
     } else {
         env->sp_el[0] = env->xregs[31];
     }
@@ -194,7 +198,11 @@ static inline void aarch64_save_sp(CPUARMState *env, int el)
 static inline void aarch64_restore_sp(CPUARMState *env, int el)
 {
     if (env->pstate & PSTATE_SP) {
-        env->xregs[31] = env->sp_el[el];
+        if (env->gxf.guarded) {
+            env->xregs[31] = env->gxf.sp_gl[el];
+        } else {
+            env->xregs[31] = env->sp_el[el];
+        }
     } else {
         env->xregs[31] = env->sp_el[0];
     }

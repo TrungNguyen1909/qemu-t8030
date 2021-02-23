@@ -108,13 +108,11 @@ T8030_CPREG_FUNCS(S3_6_c15_c1_2)
 T8030_CPREG_FUNCS(S3_6_c15_c1_5)
 T8030_CPREG_FUNCS(S3_6_c15_c1_6)
 T8030_CPREG_FUNCS(S3_6_c15_c1_7)
-T8030_CPREG_FUNCS(S3_6_c15_c3_0)
+T8030_CPREG_FUNCS(APRR_EL1)
 T8030_CPREG_FUNCS(S3_6_c15_c3_1)
 T8030_CPREG_FUNCS(S3_6_c15_c8_0)
-T8030_CPREG_FUNCS(S3_6_c15_c8_1)
 T8030_CPREG_FUNCS(S3_6_c15_c8_2)
 T8030_CPREG_FUNCS(S3_6_c15_c8_3)
-T8030_CPREG_FUNCS(S3_6_c15_c9_1)
 T8030_CPREG_FUNCS(UPMPCM)
 T8030_CPREG_FUNCS(UPMCR0)
 T8030_CPREG_FUNCS(UPMSR)
@@ -338,13 +336,11 @@ static const ARMCPRegInfo T8030_cp_reginfo_tcg[] = {
     T8030_CPREG_DEF(S3_6_c15_c1_5, 3, 6, 15, 1, 5, PL1_RW),
     T8030_CPREG_DEF(S3_6_c15_c1_6, 3, 6, 15, 1, 6, PL1_RW),
     T8030_CPREG_DEF(S3_6_c15_c1_7, 3, 6, 15, 1, 7, PL1_RW),
-    T8030_CPREG_DEF(S3_6_c15_c3_0, 3, 6, 15, 3, 0, PL1_RW),
+    T8030_CPREG_DEF(APRR_EL1, 3, 6, 15, 3, 0, PL1_RW),
     T8030_CPREG_DEF(S3_6_c15_c3_1, 3, 6, 15, 3, 1, PL1_RW),
     T8030_CPREG_DEF(S3_6_c15_c8_0, 3, 6, 15, 8, 0, PL1_RW),
-    T8030_CPREG_DEF(S3_6_c15_c8_1, 3, 6, 15, 8, 1, PL1_RW),
     T8030_CPREG_DEF(S3_6_c15_c8_2, 3, 6, 15, 8, 2, PL1_RW),
     T8030_CPREG_DEF(S3_6_c15_c8_3, 3, 6, 15, 8, 3, PL1_RW),
-    T8030_CPREG_DEF(S3_6_c15_c9_1, 3, 6, 15, 9, 1, PL1_RW),
     T8030_CPREG_DEF(UPMPCM, 3, 7, 15, 5, 4, PL1_RW),
     T8030_CPREG_DEF(UPMCR0, 3, 7, 15, 0, 4, PL1_RW),
     T8030_CPREG_DEF(UPMSR, 3, 7, 15, 6, 4, PL1_RW),
@@ -356,35 +352,72 @@ static const ARMCPRegInfo T8030_cp_reginfo_tcg[] = {
     //Cluster
     {                                                                        
         .cp = CP_REG_ARM64_SYSREG_CP,                                        
-        .name = "ARM64_REG_IPI_RR_LOCAL", .opc0 = 3, .crn = 15, .crm = 0,
-        .opc1 = 5, .opc2 = 0, .access = PL1_W, .type = ARM_CP_IO | ARM_CP_NO_RAW,
+        .name = "ARM64_REG_IPI_RR_LOCAL",
+        .opc0 = 3, .opc1 = 5, .crn = 15, .crm = 0, .opc2 = 0,
+        .access = PL1_W, .type = ARM_CP_IO | ARM_CP_NO_RAW,
         .state = ARM_CP_STATE_AA64,
         .readfn = arm_cp_read_zero,
         .writefn = T8030_ipi_rr_local
     },
     {                                                                        
         .cp = CP_REG_ARM64_SYSREG_CP,                                        
-        .name = "ARM64_REG_IPI_RR_GLOBAL", .opc0 = 3, .crn = 15, .crm = 0,
-        .opc1 = 5, .opc2 = 1, .access = PL1_W, .type = ARM_CP_IO | ARM_CP_NO_RAW,
+        .name = "ARM64_REG_IPI_RR_GLOBAL",
+        .opc0 = 3, .opc1 = 5, .crn = 15, .crm = 0, .opc2 = 1,
+        .access = PL1_W, .type = ARM_CP_IO | ARM_CP_NO_RAW,
         .state = ARM_CP_STATE_AA64,
         .readfn = arm_cp_read_zero,
         .writefn = T8030_ipi_rr_global
     },
     {                                                                        
         .cp = CP_REG_ARM64_SYSREG_CP,                                        
-        .name = "ARM64_REG_IPI_SR", .opc0 = 3, .crn = 15, .crm = 1,
-        .opc1 = 5, .opc2 = 1, .access = PL1_RW, .type = ARM_CP_IO | ARM_CP_NO_RAW,
+        .name = "ARM64_REG_IPI_SR",
+        .opc0 = 3, .opc1 = 5, .crn = 15, .crm = 1, .opc2 = 1,
+        .access = PL1_RW, .type = ARM_CP_IO | ARM_CP_NO_RAW,
         .state = ARM_CP_STATE_AA64,
         .readfn = T8030_ipi_read_sr,
         .writefn = T8030_ipi_write_sr
     },
     {                                                                        
         .cp = CP_REG_ARM64_SYSREG_CP,                                        
-        .name = "ARM64_REG_IPI_CR", .opc0 = 3, .crn = 15, .crm = 3,
-        .opc1 = 5, .opc2 = 1, .access = PL1_RW, .type = ARM_CP_IO,
+        .name = "ARM64_REG_IPI_CR",
+        .opc0 = 3, .opc1 = 5, .crn = 15, .crm = 3, .opc2 = 1,
+        .access = PL1_RW, .type = ARM_CP_IO,
         .state = ARM_CP_STATE_AA64,
         .readfn = T8030_ipi_read_cr,
         .writefn = T8030_ipi_write_cr
+    },
+    //GXF
+    {                                                                        
+        .cp = CP_REG_ARM64_SYSREG_CP,                                        
+        .name = "GXF_ENTRY_EL1",
+        .opc0 = 3, .opc1 = 6, .crn = 15, .crm = 8, .opc2 = 1,
+        .access = PL1_RW, .resetvalue = 0,
+        .state = ARM_CP_STATE_AA64,
+        .fieldoffset = offsetof(CPUARMState, gxf.gxf_entry_el[1])
+    },  
+    {                                                                        
+        .cp = CP_REG_ARM64_SYSREG_CP,                                        
+        .name = "TPIDR_GL11",
+        .opc0 = 3, .opc1 = 6, .crn = 15, .crm = 9, .opc2 = 1,
+        .access = PL1_RW, .resetvalue = 0,
+        .state = ARM_CP_STATE_AA64,
+        .fieldoffset = offsetof(CPUARMState, cp15.tpidr_el[1])
+    },
+    {                                                                        
+        .cp = CP_REG_ARM64_SYSREG_CP,                                        
+        .name = "ESR_GL11",
+        .opc0 = 3, .opc1 = 6, .crn = 15, .crm = 9, .opc2 = 5,
+        .access = PL1_RW, .resetvalue = 0,
+        .state = ARM_CP_STATE_AA64,
+        .fieldoffset = offsetof(CPUARMState, cp15.esr_el[1])
+    },
+    {                                                                        
+        .cp = CP_REG_ARM64_SYSREG_CP,                                        
+        .name = "FAR_GL11",
+        .opc0 = 3, .opc1 = 6, .crn = 15, .crm = 9, .opc2 = 7,
+        .access = PL1_RW, .resetvalue = 0,
+        .state = ARM_CP_STATE_AA64,
+        .fieldoffset = offsetof(CPUARMState, cp15.far_el[1])
     },
     REGINFO_SENTINEL,
 };
@@ -455,14 +488,6 @@ static void T8030_create_s3c_uart(const T8030MachineState *tms, Chardev *chr)
 
 static void T8030_patch_kernel(AddressSpace *nsas)
 {
-    //gxf_enable
-    address_space_rw(nsas, vtop_static(0xFFFFFFF00811CE98),
-                     MEMTXATTRS_UNSPECIFIED, (uint8_t *)&g_nop_inst,
-                     sizeof(g_nop_inst), 1);
-    //pmap_ppl_locked_down = 1
-    address_space_rw(nsas, vtop_static(0xFFFFFFF007B5A5A8),
-                     MEMTXATTRS_UNSPECIFIED, (uint8_t *)&g_nop_inst,
-                     sizeof(g_nop_inst), 1);
     uint32_t value = 0;
     //disable_kprintf_output = 0
     address_space_rw(nsas, vtop_static(0xFFFFFFF0077142C8),

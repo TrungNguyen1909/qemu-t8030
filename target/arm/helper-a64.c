@@ -949,7 +949,12 @@ void HELPER(exception_return)(CPUARMState *env, uint64_t new_pc)
 {
     int cur_el = arm_current_el(env);
     unsigned int spsr_idx = aarch64_banked_spsr_index(cur_el);
-    uint32_t mask, spsr = env->banked_spsr[spsr_idx];
+    uint32_t mask, spsr = 0;
+    if (env->gxf.guarded) { 
+        spsr = env->gxf.spsr_gl[cur_el];
+    } else {
+        spsr = env->banked_spsr[spsr_idx];
+    }
     int new_el;
     bool return_to_aa64 = (spsr & PSTATE_nRW) == 0;
 
@@ -1086,6 +1091,30 @@ illegal_return:
     }
     qemu_log_mask(LOG_GUEST_ERROR, "Illegal exception return at EL%d: "
                   "resuming execution at 0x%" PRIx64 "\n", cur_el, env->pc);
+}
+
+void HELPER(gexit)(CPUARMState *env){
+    int cur_el = arm_current_el(env);
+    uint32_t spsr = env->gxf.spsr_gl[cur_el];
+    //TODO: Illegal gexit?
+
+    aarch64_save_sp(env, cur_el);
+    if (arm_generate_debug_exceptions(env)) {
+        spsr &= ~PSTATE_SS;
+    }
+    spsr &= aarch64_pstate_valid_mask(&env_archcpu(env)->isar);
+    pstate_write(env, spsr);
+    if (!arm_singlestep_active(env)) {
+        env->pstate &= ~PSTATE_SS;
+    }
+    env->gxf.guarded = false;
+    aarch64_restore_sp(env, cur_el);
+    env->pc = env->gxf.elr_gl[cur_el];
+    helper_rebuild_hflags_a64(env, cur_el);
+    qemu_log_mask(CPU_LOG_INT, "Guarded execution exit from AArch64 GL%d to "
+                      "AArch64 EL%d PC 0x%" PRIx64 "\n",
+                      cur_el, cur_el, env->pc);
+    return;
 }
 
 /*
