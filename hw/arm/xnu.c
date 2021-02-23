@@ -158,7 +158,8 @@ DTBNode* load_dtb_from_file(char *filename){
         DTBNode *root = load_dtb(file_data);
         return root;
     } else {
-        abort();
+        error_report("Could not load data from file %s", filename);
+        exit(EXIT_FAILURE);
     }
     g_free(file_data);
 }
@@ -306,7 +307,8 @@ void macho_load_trustcache(const char *filename, AddressSpace *as, MemoryRegion 
         g_free(file_data);
         g_free(trustcache_data);
     } else {
-        abort();
+        error_report("Could not load trustcache file %s", filename);
+        exit(EXIT_FAILURE);
     }
 }
 
@@ -351,7 +353,8 @@ void macho_load_raw_file(const char *filename, AddressSpace *as, MemoryRegion *m
         allocate_and_copy(mem, as, name, file_pa, *size, file_data);
         g_free(file_data);
     } else {
-        abort();
+        error_report("Could not load macho file %s", filename);
+        exit(EXIT_FAILURE);
     }
 }
 
@@ -448,7 +451,8 @@ void macho_file_highest_lowest(const char *filename, hwaddr *lowest,
     gsize len;
     uint8_t *data = NULL;
     if (!g_file_get_contents(filename, (char **)&data, &len, NULL)) {
-        abort();
+        error_report("Could not load macho file %s", filename);
+        exit(EXIT_FAILURE);
     }
     struct mach_header_64* mh = (struct mach_header_64*)data;
     macho_highest_lowest(mh, lowest, highest);
