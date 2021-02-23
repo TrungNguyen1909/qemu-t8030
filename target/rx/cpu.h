@@ -150,7 +150,7 @@ void rx_cpu_unpack_psw(CPURXState *env, uint32_t psw, int rte);
 #define RX_CPU_FIR 1
 
 static inline void cpu_get_tb_cpu_state(CPURXState *env, target_ulong *pc,
-                                        target_ulong *cs_base, uint32_t *flags)
+                                        target_ulong *cs_base, uint64_t *flags)
 {
     *pc = env->pc;
     *cs_base = 0;

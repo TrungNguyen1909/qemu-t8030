@@ -730,7 +730,7 @@ typedef XtensaCPU ArchCPU;
 #include "exec/cpu-all.h"
 
 static inline void cpu_get_tb_cpu_state(CPUXtensaState *env, target_ulong *pc,
-        target_ulong *cs_base, uint32_t *flags)
+        target_ulong *cs_base, uint64_t *flags)
 {
     CPUState *cs = env_cpu(env);
 

@@ -395,7 +395,7 @@ static inline uint32_t vext_get_vlmax(RISCVCPU *cpu, target_ulong vtype)
 }
 
 static inline void cpu_get_tb_cpu_state(CPURISCVState *env, target_ulong *pc,
-                                        target_ulong *cs_base, uint32_t *pflags)
+                                        target_ulong *cs_base, uint64_t *pflags)
 {
     uint32_t flags = 0;
 

@@ -196,9 +196,9 @@ enum {
 };
 
 static inline void cpu_get_tb_cpu_state(CPUAVRState *env, target_ulong *pc,
-                                        target_ulong *cs_base, uint32_t *pflags)
+                                        target_ulong *cs_base, uint64_t *pflags)
 {
-    uint32_t flags = 0;
+    uint64_t flags = 0;
 
     *pc = env->pc_w * 2;
     *cs_base = 0;
