@@ -2011,9 +2011,17 @@ static void vbar_write(CPUARMState *env, const ARMCPRegInfo *ri,
      * contexts. (ARMv8 would permit us to do no masking at all, but ARMv7
      * requires the bottom five bits to be RAZ/WI because they're UNK/SBZP.)
      */
+    raw_write(env, ri, value & ~0x1FULL);
+}
+static void vbar_el1_write(CPUARMState *env, const ARMCPRegInfo *ri,
+                       uint64_t value)
+{
     if (env->gxf.guarded) {
         env->gxf.vbar_gl[1] = value & ~0x1FULL;
     } else {
+        if (env->cp15.vmsa_lock_el1 & VMSA_LOCK_VBAR_EL1){
+            return;
+        }
         raw_write(env, ri, value & ~0x1FULL);
     }
 }
@@ -3989,6 +3997,14 @@ static void vmsa_tcr_el12_write(CPUARMState *env, const ARMCPRegInfo *ri,
     tlb_flush(CPU(cpu));
     tcr->raw_tcr = value;
 }
+static void vmsa_tcr_el1_write(CPUARMState *env, const ARMCPRegInfo *ri,
+                               uint64_t value)
+{
+    if (env->cp15.vmsa_lock_el1 & VMSA_LOCK_TCR_EL1) {
+        return;
+    }
+    vmsa_tcr_el12_write(env, ri, value);
+}
 
 static void vmsa_ttbr_write(CPUARMState *env, const ARMCPRegInfo *ri,
                             uint64_t value)
@@ -4000,6 +4016,22 @@ static void vmsa_ttbr_write(CPUARMState *env, const ARMCPRegInfo *ri,
         tlb_flush(CPU(cpu));
     }
     raw_write(env, ri, value);
+}
+static void vmsa_ttbr0_el1_write(CPUARMState *env, const ARMCPRegInfo *ri,
+                            uint64_t value)
+{
+    if (env->cp15.vmsa_lock_el1 & VMSA_LOCK_TTBR0_EL1) {
+        return;
+    }
+    vmsa_ttbr_write(env, ri, value);
+}
+static void vmsa_ttbr1_el1_write(CPUARMState *env, const ARMCPRegInfo *ri,
+                            uint64_t value)
+{
+    if (env->cp15.vmsa_lock_el1 & VMSA_LOCK_TTBR1_EL1) {
+        return;
+    }
+    vmsa_ttbr_write(env, ri, value);
 }
 
 static void vmsa_tcr_ttbr_el2_write(CPUARMState *env, const ARMCPRegInfo *ri,
@@ -4100,19 +4132,19 @@ static const ARMCPRegInfo vmsa_cp_reginfo[] = {
     { .name = "TTBR0_EL1", .state = ARM_CP_STATE_BOTH,
       .opc0 = 3, .opc1 = 0, .crn = 2, .crm = 0, .opc2 = 0,
       .access = PL1_RW, .accessfn = access_tvm_trvm,
-      .writefn = vmsa_ttbr_write, .resetvalue = 0,
+      .writefn = vmsa_ttbr0_el1_write, .resetvalue = 0,
       .bank_fieldoffsets = { offsetof(CPUARMState, cp15.ttbr0_s),
                              offsetof(CPUARMState, cp15.ttbr0_ns) } },
     { .name = "TTBR1_EL1", .state = ARM_CP_STATE_BOTH,
       .opc0 = 3, .opc1 = 0, .crn = 2, .crm = 0, .opc2 = 1,
       .access = PL1_RW, .accessfn = access_tvm_trvm,
-      .writefn = vmsa_ttbr_write, .resetvalue = 0,
+      .writefn = vmsa_ttbr1_el1_write, .resetvalue = 0,
       .bank_fieldoffsets = { offsetof(CPUARMState, cp15.ttbr1_s),
                              offsetof(CPUARMState, cp15.ttbr1_ns) } },
     { .name = "TCR_EL1", .state = ARM_CP_STATE_AA64,
       .opc0 = 3, .crn = 2, .crm = 0, .opc1 = 0, .opc2 = 2,
       .access = PL1_RW, .accessfn = access_tvm_trvm,
-      .writefn = vmsa_tcr_el12_write,
+      .writefn = vmsa_tcr_el1_write,
       .resetfn = vmsa_ttbcr_reset, .raw_writefn = raw_write,
       .fieldoffset = offsetof(CPUARMState, cp15.tcr_el[1]) },
     { .name = "TTBCR", .cp = 15, .crn = 2, .crm = 0, .opc1 = 0, .opc2 = 2,
@@ -4829,6 +4861,26 @@ static void sctlr_write(CPUARMState *env, const ARMCPRegInfo *ri,
          */
         arm_rebuild_hflags(env);
     }
+}
+static void sctlr_el1_write(CPUARMState *env, const ARMCPRegInfo *ri,
+                        uint64_t value)
+{
+    ARMCPU *cpu = env_archcpu(env);
+
+    if (env->cp15.vmsa_lock_el1 & VMSA_LOCK_SCTLR_EL1) {
+        return;
+    }
+
+    if (env->cp15.vmsa_lock_el1 & VMSA_LOCK_SCTLR_M_BIT){
+            value &= raw_read(env, ri) & SCTLR_M;
+    }
+    sctlr_write(env, ri, value);
+}
+
+static void vmsa_lock_el1_write(CPUARMState *env, const ARMCPRegInfo *ri,
+                        uint64_t value){
+    //don't unlock any after locked
+    raw_write(env, ri, raw_read(env, ri) | value);
 }
 
 static CPAccessResult fpexc32_access(CPUARMState *env, const ARMCPRegInfo *ri,
@@ -8199,7 +8251,7 @@ void register_cp_regs_for_features(ARMCPU *cpu)
             { .name = "VBAR", .state = ARM_CP_STATE_BOTH,
               .opc0 = 3, .crn = 12, .crm = 0, .opc1 = 0, .opc2 = 0,
               .access = PL1_RW,
-              .readfn = vbar_read, .writefn = vbar_write,
+              .readfn = vbar_read, .writefn = vbar_el1_write,
               .bank_fieldoffsets = { offsetof(CPUARMState, cp15.vbar_s),
                                      offsetof(CPUARMState, cp15.vbar_ns) },
               .resetvalue = 0 },
@@ -8216,7 +8268,7 @@ void register_cp_regs_for_features(ARMCPU *cpu)
             .access = PL1_RW, .accessfn = access_tvm_trvm,
             .bank_fieldoffsets = { offsetof(CPUARMState, cp15.sctlr_s),
                                    offsetof(CPUARMState, cp15.sctlr_ns) },
-            .writefn = sctlr_write, .resetvalue = cpu->reset_sctlr,
+            .writefn = sctlr_el1_write, .resetvalue = cpu->reset_sctlr,
             .raw_writefn = raw_write,
         };
         if (arm_feature(env, ARM_FEATURE_XSCALE)) {
@@ -8227,6 +8279,16 @@ void register_cp_regs_for_features(ARMCPU *cpu)
             sctlr.type |= ARM_CP_SUPPRESS_TB_END;
         }
         define_one_arm_cp_reg(cpu, &sctlr);
+    }
+    if (arm_feature(env, ARM_FEATURE_AARCH64)) {
+        ARMCPRegInfo vmsa_lock_el1 = {
+            .name = "VMSA_LOCK_EL1", .state = ARM_CP_STATE_AA64,
+            .opc0 = 3, .opc1 = 4, .crn = 15, .crm = 1, .opc2 = 2,
+            .access = PL1_RW, .fieldoffset = offsetof(CPUARMState, cp15.vmsa_lock_el1),
+            .writefn = vmsa_lock_el1_write, .resetvalue = 0,
+            .raw_writefn = raw_write,
+        };
+        define_one_arm_cp_reg(cpu, &vmsa_lock_el1);
     }
 
     if (cpu_isar_feature(aa64_lor, cpu)) {
