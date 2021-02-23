@@ -1995,6 +1995,13 @@ static void pmintenclr_write(CPUARMState *env, const ARMCPRegInfo *ri,
     pmu_update_irq(env);
 }
 
+static uint64_t vbar_read(CPUARMState *env, const ARMCPRegInfo *ri) {
+    if (env->gxf.guarded) {
+        return env->gxf.vbar_gl[1];
+    } else {
+        return raw_read(env, ri);
+    }
+}
 static void vbar_write(CPUARMState *env, const ARMCPRegInfo *ri,
                        uint64_t value)
 {
@@ -2004,7 +2011,11 @@ static void vbar_write(CPUARMState *env, const ARMCPRegInfo *ri,
      * contexts. (ARMv8 would permit us to do no masking at all, but ARMv7
      * requires the bottom five bits to be RAZ/WI because they're UNK/SBZP.)
      */
-    raw_write(env, ri, value & ~0x1FULL);
+    if (env->gxf.guarded) {
+        env->gxf.vbar_gl[1] = value & ~0x1FULL;
+    } else {
+        raw_write(env, ri, value & ~0x1FULL);
+    }
 }
 
 static void scr_write(CPUARMState *env, const ARMCPRegInfo *ri, uint64_t value)
@@ -2442,6 +2453,21 @@ static const ARMCPRegInfo t2ee_cp_reginfo[] = {
     REGINFO_SENTINEL
 };
 
+static uint64_t tpidr_el1_read(CPUARMState *env, const ARMCPRegInfo *ri){
+    if (env->gxf.guarded) {
+        return env->gxf.tpidr_gl[1];
+    } else {
+        return env->cp15.tpidr_el[1];
+    }
+}
+static void tpidr_el1_write(CPUARMState *env, const ARMCPRegInfo *ri, uint64_t value){
+    if (env->gxf.guarded) {
+        env->gxf.tpidr_gl[1] = value;
+    } else {
+        env->cp15.tpidr_el[1] = value;
+    }
+}
+
 static const ARMCPRegInfo v6k_cp_reginfo[] = {
     { .name = "TPIDR_EL0", .state = ARM_CP_STATE_AA64,
       .opc0 = 3, .opc1 = 3, .opc2 = 2, .crn = 13, .crm = 0,
@@ -2465,7 +2491,8 @@ static const ARMCPRegInfo v6k_cp_reginfo[] = {
     { .name = "TPIDR_EL1", .state = ARM_CP_STATE_AA64,
       .opc0 = 3, .opc1 = 0, .opc2 = 4, .crn = 13, .crm = 0,
       .access = PL1_RW,
-      .fieldoffset = offsetof(CPUARMState, cp15.tpidr_el[1]), .resetvalue = 0 },
+      .readfn = tpidr_el1_read, .writefn = tpidr_el1_write,
+      .resetvalue = 0 },
     { .name = "TPIDRPRW", .opc1 = 0, .cp = 15, .crn = 13, .crm = 0, .opc2 = 4,
       .access = PL1_RW,
       .bank_fieldoffsets = { offsetoflow32(CPUARMState, cp15.tpidrprw_s),
@@ -4013,6 +4040,21 @@ static void vttbr_write(CPUARMState *env, const ARMCPRegInfo *ri,
     }
 }
 
+static uint64_t far_el1_read(CPUARMState *env, const ARMCPRegInfo *ri){
+    if (env->gxf.guarded) {
+        return env->gxf.far_gl[1];
+    } else {
+        return env->cp15.far_el[1];
+    }
+}
+static void far_el1_write(CPUARMState *env, const ARMCPRegInfo *ri, uint64_t value){
+    if (env->gxf.guarded) {
+        env->gxf.far_gl[1] = value;
+    } else {
+        env->cp15.far_el[1] = value;
+    }
+}
+
 static const ARMCPRegInfo vmsa_pmsa_cp_reginfo[] = {
     { .name = "DFSR", .cp = 15, .crn = 5, .crm = 0, .opc1 = 0, .opc2 = 0,
       .access = PL1_RW, .accessfn = access_tvm_trvm, .type = ARM_CP_ALIAS,
@@ -4029,16 +4071,32 @@ static const ARMCPRegInfo vmsa_pmsa_cp_reginfo[] = {
     { .name = "FAR_EL1", .state = ARM_CP_STATE_AA64,
       .opc0 = 3, .crn = 6, .crm = 0, .opc1 = 0, .opc2 = 0,
       .access = PL1_RW, .accessfn = access_tvm_trvm,
-      .fieldoffset = offsetof(CPUARMState, cp15.far_el[1]),
+      .readfn = far_el1_read, .writefn = far_el1_write,
       .resetvalue = 0, },
     REGINFO_SENTINEL
 };
+
+static uint64_t esr_el1_read(CPUARMState *env, const ARMCPRegInfo *ri){
+    if (env->gxf.guarded) {
+        return env->gxf.esr_gl[1];
+    } else {
+        return env->cp15.esr_el[1];
+    }
+}
+static void esr_el1_write(CPUARMState *env, const ARMCPRegInfo *ri, uint64_t value){
+    if (env->gxf.guarded) {
+        env->gxf.esr_gl[1] = value;
+    } else {
+        env->cp15.esr_el[1] = value;
+    }
+}
 
 static const ARMCPRegInfo vmsa_cp_reginfo[] = {
     { .name = "ESR_EL1", .state = ARM_CP_STATE_AA64,
       .opc0 = 3, .crn = 5, .crm = 2, .opc1 = 0, .opc2 = 0,
       .access = PL1_RW, .accessfn = access_tvm_trvm,
-      .fieldoffset = offsetof(CPUARMState, cp15.esr_el[1]), .resetvalue = 0, },
+      .readfn = esr_el1_read, .writefn = esr_el1_write,
+      .resetvalue = 0, },
     { .name = "TTBR0_EL1", .state = ARM_CP_STATE_BOTH,
       .opc0 = 3, .opc1 = 0, .crn = 2, .crm = 0, .opc2 = 0,
       .access = PL1_RW, .accessfn = access_tvm_trvm,
@@ -4791,6 +4849,49 @@ static void sdcr_write(CPUARMState *env, const ARMCPRegInfo *ri,
     env->cp15.mdcr_el3 = value & SDCR_VALID_MASK;
 }
 
+static uint64_t elr_el1_read(CPUARMState *env, const ARMCPRegInfo *ri){
+    if (env->gxf.guarded) {
+        return env->gxf.elr_gl[1];
+    } else {
+        return env->elr_el[1];
+    }
+}
+static void elr_el1_write(CPUARMState *env, const ARMCPRegInfo *ri, uint64_t value){
+    if (env->gxf.guarded) {
+        env->gxf.elr_gl[1] = value;
+    } else {
+        env->elr_el[1] = value;
+    }
+}
+static uint64_t spsr_el1_read(CPUARMState *env, const ARMCPRegInfo *ri){
+    if (env->gxf.guarded) {
+        return env->gxf.spsr_gl[1];
+    } else {
+        return env->banked_spsr[BANK_SVC];
+    }
+}
+static void spsr_el1_write(CPUARMState *env, const ARMCPRegInfo *ri, uint64_t value){
+    if (env->gxf.guarded) {
+        env->gxf.spsr_gl[1] = value;
+    } else {
+        env->banked_spsr[BANK_SVC] = value;
+    }
+}
+static uint64_t sp_el1_read(CPUARMState *env, const ARMCPRegInfo *ri){
+    if (env->gxf.guarded) {
+        return env->gxf.sp_gl[1];
+    } else {
+        return env->sp_el[1];
+    }
+}
+static void sp_el1_write(CPUARMState *env, const ARMCPRegInfo *ri, uint64_t value){
+    if (env->gxf.guarded) {
+        env->gxf.sp_gl[1] = value;
+    } else {
+        env->sp_el[1] = value;
+    }
+}
+
 static const ARMCPRegInfo v8_cp_reginfo[] = {
     /* Minimal set of EL0-visible registers. This will need to be expanded
      * significantly for system emulation of AArch64 CPUs.
@@ -5073,12 +5174,12 @@ static const ARMCPRegInfo v8_cp_reginfo[] = {
       .type = ARM_CP_ALIAS,
       .opc0 = 3, .opc1 = 0, .crn = 4, .crm = 0, .opc2 = 1,
       .access = PL1_RW,
-      .fieldoffset = offsetof(CPUARMState, elr_el[1]) },
+      .readfn = elr_el1_read, .writefn = elr_el1_write },
     { .name = "SPSR_EL1", .state = ARM_CP_STATE_AA64,
       .type = ARM_CP_ALIAS,
       .opc0 = 3, .opc1 = 0, .crn = 4, .crm = 0, .opc2 = 0,
       .access = PL1_RW,
-      .fieldoffset = offsetof(CPUARMState, banked_spsr[BANK_SVC]) },
+      .readfn = spsr_el1_read, .writefn = spsr_el1_write },
     /* We rely on the access checks not allowing the guest to write to the
      * state field when SPSel indicates that it's being used as the stack
      * pointer.
@@ -5091,7 +5192,7 @@ static const ARMCPRegInfo v8_cp_reginfo[] = {
     { .name = "SP_EL1", .state = ARM_CP_STATE_AA64,
       .opc0 = 3, .opc1 = 4, .crn = 4, .crm = 1, .opc2 = 0,
       .access = PL2_RW, .type = ARM_CP_ALIAS,
-      .fieldoffset = offsetof(CPUARMState, sp_el[1]) },
+      .readfn = sp_el1_read, .writefn = sp_el1_write },
     { .name = "SPSel", .state = ARM_CP_STATE_AA64,
       .opc0 = 3, .opc1 = 0, .crn = 4, .crm = 2, .opc2 = 0,
       .type = ARM_CP_NO_RAW,
@@ -8097,7 +8198,8 @@ void register_cp_regs_for_features(ARMCPU *cpu)
         ARMCPRegInfo vbar_cp_reginfo[] = {
             { .name = "VBAR", .state = ARM_CP_STATE_BOTH,
               .opc0 = 3, .crn = 12, .crm = 0, .opc1 = 0, .opc2 = 0,
-              .access = PL1_RW, .writefn = vbar_write,
+              .access = PL1_RW,
+              .readfn = vbar_read, .writefn = vbar_write,
               .bank_fieldoffsets = { offsetof(CPUARMState, cp15.vbar_s),
                                      offsetof(CPUARMState, cp15.vbar_ns) },
               .resetvalue = 0 },
@@ -9110,6 +9212,7 @@ void arm_log_exception(int idx)
             [EXCP_LAZYFP] = "v7M exception during lazy FP stacking",
             [EXCP_LSERR] = "v8M LSERR UsageFault",
             [EXCP_UNALIGNED] = "v7M UNALIGNED UsageFault",
+            [EXCP_GENTER] = "Guarded execution enter",
         };
 
         if (idx >= 0 && idx < ARRAY_SIZE(excnames)) {
@@ -9711,7 +9814,13 @@ static void arm_cpu_do_interrupt_aarch64(CPUState *cs)
     ARMCPU *cpu = ARM_CPU(cs);
     CPUARMState *env = &cpu->env;
     unsigned int new_el = env->exception.target_el;
-    target_ulong addr = env->cp15.vbar_el[new_el];
+    target_ulong addr = 0;
+    if (env->gxf.guarded) {
+        addr = env->gxf.vbar_gl[new_el];
+    } else {
+        addr = env->cp15.vbar_el[new_el];
+    }
+    bool genter = false;
     unsigned int new_mode = aarch64_pstate_mode(new_el, true);
     unsigned int old_mode;
     unsigned int cur_el = arm_current_el(env);
@@ -9760,9 +9869,15 @@ static void arm_cpu_do_interrupt_aarch64(CPUState *cs)
     switch (cs->exception_index) {
     case EXCP_PREFETCH_ABORT:
     case EXCP_DATA_ABORT:
-        env->cp15.far_el[new_el] = env->exception.vaddress;
-        qemu_log_mask(CPU_LOG_INT, "...with FAR 0x%" PRIx64 "\n",
-                      env->cp15.far_el[new_el]);
+        if (env->gxf.guarded) {
+            env->gxf.far_gl[new_el] = env->exception.vaddress;
+            qemu_log_mask(CPU_LOG_INT, "...with FAR 0x%" PRIx64 "\n",
+                        env->gxf.far_gl[new_el]);
+        } else {
+            env->cp15.far_el[new_el] = env->exception.vaddress;
+            qemu_log_mask(CPU_LOG_INT, "...with FAR 0x%" PRIx64 "\n",
+                        env->cp15.far_el[new_el]);
+        }
         /* fall through */
     case EXCP_BKPT:
     case EXCP_UDEF:
@@ -9808,7 +9923,11 @@ static void arm_cpu_do_interrupt_aarch64(CPUState *cs)
                                                 10, 5, rt);
             break;
         }
-        env->cp15.esr_el[new_el] = env->exception.syndrome;
+        if (env->gxf.guarded) {
+            env->gxf.esr_gl[new_el] = env->exception.syndrome;
+        } else {
+            env->cp15.esr_el[new_el] = env->exception.syndrome;
+        }
         break;
     case EXCP_IRQ:
     case EXCP_VIRQ:
@@ -9818,6 +9937,10 @@ static void arm_cpu_do_interrupt_aarch64(CPUState *cs)
     case EXCP_VFIQ:
         addr += 0x100;
         break;
+    case EXCP_GENTER:
+        addr = env->gxf.gxf_entry_el[new_el];
+        genter = true;
+        break;
     default:
         cpu_abort(cs, "Unhandled exception 0x%x\n", cs->exception_index);
     }
@@ -9825,7 +9948,11 @@ static void arm_cpu_do_interrupt_aarch64(CPUState *cs)
     if (is_a64(env)) {
         old_mode = pstate_read(env);
         aarch64_save_sp(env, arm_current_el(env));
-        env->elr_el[new_el] = env->pc;
+        if(genter || env->gxf.guarded) {
+            env->gxf.elr_gl[new_el] = env->pc;
+        } else {
+            env->elr_el[new_el] = env->pc;
+        }
     } else {
         old_mode = cpsr_read(env);
         env->elr_el[new_el] = env->regs[15];
@@ -9834,11 +9961,19 @@ static void arm_cpu_do_interrupt_aarch64(CPUState *cs)
 
         env->condexec_bits = 0;
     }
-    env->banked_spsr[aarch64_banked_spsr_index(new_el)] = old_mode;
+    if (genter || env->gxf.guarded){
+        env->gxf.spsr_gl[new_el] = old_mode;
+    } else {
+        env->banked_spsr[aarch64_banked_spsr_index(new_el)] = old_mode;
+    }
 
-    qemu_log_mask(CPU_LOG_INT, "...with ELR 0x%" PRIx64 "\n",
-                  env->elr_el[new_el]);
-
+    if (genter || env->gxf.guarded) {
+        qemu_log_mask(CPU_LOG_INT, "...with ELR 0x%" PRIx64 "\n",
+                    env->gxf.elr_gl[new_el]);
+    } else {
+        qemu_log_mask(CPU_LOG_INT, "...with ELR 0x%" PRIx64 "\n",
+                    env->elr_el[new_el]);
+    }
     if (cpu_isar_feature(aa64_pan, cpu)) {
         /* The value of PSTATE.PAN is normally preserved, except when ... */
         new_mode |= old_mode & PSTATE_PAN;
@@ -9864,8 +9999,10 @@ static void arm_cpu_do_interrupt_aarch64(CPUState *cs)
     }
 
     pstate_write(env, PSTATE_DAIF | new_mode);
+    env->gxf.guarded |= genter;
     env->aarch64 = 1;
     aarch64_restore_sp(env, new_el);
+    //TODO: MMU in GXF?
     helper_rebuild_hflags_a64(env, new_el);
 
     env->pc = addr;
@@ -12883,6 +13020,10 @@ static uint64_t rebuild_hflags_a64(CPUARMState *env, int el, int fp_el,
         if (sctlr & (SCTLR_EnIA | SCTLR_EnIB | SCTLR_EnDA | SCTLR_EnDB)) {
             flags = FIELD_DP64(flags, TBFLAG_A64, PAUTH_ACTIVE, 1);
         }
+    }
+
+    if(env->gxf.guarded) {
+        flags = FIELD_DP64(flags, TBFLAG_A64, GUARDED, 1);
     }
 
     if (cpu_isar_feature(aa64_bti, env_archcpu(env))) {

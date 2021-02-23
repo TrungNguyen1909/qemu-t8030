@@ -54,6 +54,7 @@
 #define EXCP_LAZYFP         20   /* v7M fault during lazy FP stacking */
 #define EXCP_LSERR          21   /* v8M LSERR SecureFault */
 #define EXCP_UNALIGNED      22   /* v7M UNALIGNED UsageFault */
+#define EXCP_GENTER         23
 /* NB: add new EXCP_ defines to the array in arm_log_exception() too */
 
 #define ARMV7M_EXCP_RESET   1
@@ -507,6 +508,20 @@ typedef struct CPUARMState {
         uint64_t gcr_el1;
         uint64_t rgsr_el1;
     } cp15;
+
+    struct {
+        uint64_t gxf_entry_el[3];
+        uint64_t gxf_config_el[3];
+        uint64_t gxf_pabentry_el[3];
+        uint64_t sp_gl[3];
+        uint64_t tpidr_gl[3];
+        uint64_t vbar_gl[3];
+        uint64_t elr_gl[3];
+        uint64_t esr_gl[3];
+        uint64_t far_gl[3];
+        uint64_t spsr_gl[3];
+        bool guarded;
+    } gxf;
 
     struct {
         /* M profile has up to 4 stack pointers:
@@ -3300,6 +3315,7 @@ FIELD(TBFLAG_A64, ATA, 15, 1)
 FIELD(TBFLAG_A64, TCMA, 16, 2)
 FIELD(TBFLAG_A64, MTE_ACTIVE, 18, 1)
 FIELD(TBFLAG_A64, MTE0_ACTIVE, 19, 1)
+FIELD(TBFLAG_A64, GUARDED, 20, 1)
 
 /**
  * cpu_mmu_index:
