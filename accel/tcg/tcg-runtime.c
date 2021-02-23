@@ -150,7 +150,7 @@ void *HELPER(lookup_tb_ptr)(CPUArchState *env)
     CPUState *cpu = env_cpu(env);
     TranslationBlock *tb;
     target_ulong cs_base, pc;
-    uint32_t flags;
+    uint64_t flags;
 
     tb = tb_lookup__cpu_state(cpu, &pc, &cs_base, &flags, curr_cflags());
     if (tb == NULL) {
@@ -158,7 +158,7 @@ void *HELPER(lookup_tb_ptr)(CPUArchState *env)
     }
     qemu_log_mask_and_addr(CPU_LOG_EXEC, pc,
                            "Chain %d: %p ["
-                           TARGET_FMT_lx "/" TARGET_FMT_lx "/%#x] %s\n",
+                           TARGET_FMT_lx "/" TARGET_FMT_lx "/%#llx] %s\n",
                            cpu->cpu_index, tb->tc.ptr, cs_base, pc, flags,
                            lookup_symbol(pc));
     return tb->tc.ptr;
