@@ -1673,7 +1673,7 @@ tb_link_page(TranslationBlock *tb, tb_page_addr_t phys_pc,
 /* Called with mmap_lock held for user mode emulation.  */
 TranslationBlock *tb_gen_code(CPUState *cpu,
                               target_ulong pc, target_ulong cs_base,
-                              uint32_t flags, int cflags)
+                              uint64_t flags, int cflags)
 {
     CPUArchState *env = cpu->env_ptr;
     TranslationBlock *tb, *existing_tb;
@@ -1943,7 +1943,7 @@ tb_invalidate_phys_page_range__locked(struct page_collection *pages,
     TranslationBlock *current_tb = NULL;
     target_ulong current_pc = 0;
     target_ulong current_cs_base = 0;
-    uint32_t current_flags = 0;
+    uint64_t current_flags = 0;
 #endif /* TARGET_HAS_PRECISE_SMC */
 
     assert_page_locked(p);
@@ -2200,7 +2200,7 @@ void tb_check_watchpoint(CPUState *cpu, uintptr_t retaddr)
         CPUArchState *env = cpu->env_ptr;
         target_ulong pc, cs_base;
         tb_page_addr_t addr;
-        uint32_t flags;
+        uint64_t flags;
 
         cpu_get_tb_cpu_state(env, &pc, &cs_base, &flags);
         addr = get_page_addr_code(env, pc);

@@ -154,7 +154,7 @@ static inline tcg_target_ulong cpu_tb_exec(CPUState *cpu, TranslationBlock *itb)
 
     qemu_log_mask_and_addr(CPU_LOG_EXEC, itb->pc,
                            "Trace %d: %p ["
-                           TARGET_FMT_lx "/" TARGET_FMT_lx "/%#x] %s\n",
+                           TARGET_FMT_lx "/" TARGET_FMT_lx "/%#llx] %s\n",
                            cpu->cpu_index, itb->tc.ptr,
                            itb->cs_base, itb->pc, itb->flags,
                            lookup_symbol(itb->pc));
@@ -241,7 +241,7 @@ void cpu_exec_step_atomic(CPUState *cpu)
     CPUClass *cc = CPU_GET_CLASS(cpu);
     TranslationBlock *tb;
     target_ulong cs_base, pc;
-    uint32_t flags;
+    uint64_t flags;
     uint32_t cflags = 1;
     uint32_t cf_mask = cflags & CF_HASH_MASK;
 
@@ -293,7 +293,7 @@ struct tb_desc {
     target_ulong cs_base;
     CPUArchState *env;
     tb_page_addr_t phys_page1;
-    uint32_t flags;
+    uint64_t flags;
     uint32_t cf_mask;
     uint32_t trace_vcpu_dstate;
 };
@@ -327,7 +327,7 @@ static bool tb_lookup_cmp(const void *p, const void *d)
 }
 
 TranslationBlock *tb_htable_lookup(CPUState *cpu, target_ulong pc,
-                                   target_ulong cs_base, uint32_t flags,
+                                   target_ulong cs_base, uint64_t flags,
                                    uint32_t cf_mask)
 {
     tb_page_addr_t phys_pc;
@@ -406,7 +406,7 @@ static inline TranslationBlock *tb_find(CPUState *cpu,
 {
     TranslationBlock *tb;
     target_ulong cs_base, pc;
-    uint32_t flags;
+    uint64_t flags;
 
     tb = tb_lookup__cpu_state(cpu, &pc, &cs_base, &flags, cf_mask);
     if (tb == NULL) {

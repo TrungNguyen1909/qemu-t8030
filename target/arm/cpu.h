@@ -246,7 +246,7 @@ typedef struct CPUARMState {
     uint32_t aarch64; /* 1 if CPU is in aarch64 state; inverse of PSTATE.nRW */
 
     /* Cached TBFLAGS state.  See below for which bits are included.  */
-    uint32_t hflags;
+    uint64_t hflags;
 
     /* Frequently accessed CPSR bits are stored separately for efficiency.
        This contains all the other bits.  Use cpsr_{read,write} to access
@@ -3220,7 +3220,7 @@ typedef ARMCPU ArchCPU;
  * We put flags which are shared between 32 and 64 bit mode at the top
  * of the word, and flags which apply to only one mode at the bottom.
  *
- *  31          20    18    14          9              0
+ *  63          32    18    14          9              0
  * +--------------+-----+-----+----------+--------------+
  * |              |     |   TBFLAG_A32   |              |
  * |              |     +-----+----------+  TBFLAG_AM32 |
@@ -3228,19 +3228,19 @@ typedef ARMCPU ArchCPU;
  * |              +-----------+----------+--------------|
  * |              |            TBFLAG_A64               |
  * +--------------+-------------------------------------+
- *  31          20                                     0
+ *  63          32                                     0
  *
  * Unless otherwise noted, these bits are cached in env->hflags.
  */
-FIELD(TBFLAG_ANY, AARCH64_STATE, 31, 1)
-FIELD(TBFLAG_ANY, SS_ACTIVE, 30, 1)
-FIELD(TBFLAG_ANY, PSTATE_SS, 29, 1)     /* Not cached. */
-FIELD(TBFLAG_ANY, BE_DATA, 28, 1)
-FIELD(TBFLAG_ANY, MMUIDX, 24, 4)
+FIELD(TBFLAG_ANY, AARCH64_STATE, 63, 1)
+FIELD(TBFLAG_ANY, SS_ACTIVE, 62, 1)
+FIELD(TBFLAG_ANY, PSTATE_SS, 61, 1)     /* Not cached. */
+FIELD(TBFLAG_ANY, BE_DATA, 60, 1)
+FIELD(TBFLAG_ANY, MMUIDX, 56, 4)
 /* Target EL if we take a floating-point-disabled exception */
-FIELD(TBFLAG_ANY, FPEXC_EL, 22, 2)
+FIELD(TBFLAG_ANY, FPEXC_EL, 54, 2)
 /* For A-profile only, target EL for debug exceptions.  */
-FIELD(TBFLAG_ANY, DEBUG_TARGET_EL, 20, 2)
+FIELD(TBFLAG_ANY, DEBUG_TARGET_EL, 52, 2)
 
 /*
  * Bit usage when in AArch32 state, both A- and M-profile.
@@ -3310,7 +3310,7 @@ FIELD(TBFLAG_A64, MTE0_ACTIVE, 19, 1)
  */
 static inline int cpu_mmu_index(CPUARMState *env, bool ifetch)
 {
-    return FIELD_EX32(env->hflags, TBFLAG_ANY, MMUIDX);
+    return FIELD_EX64(env->hflags, TBFLAG_ANY, MMUIDX);
 }
 
 static inline bool bswap_code(bool sctlr_b)
@@ -3345,7 +3345,7 @@ static inline bool arm_cpu_bswap_data(CPUARMState *env)
 #endif
 
 void cpu_get_tb_cpu_state(CPUARMState *env, target_ulong *pc,
-                          target_ulong *cs_base, uint32_t *flags);
+                          target_ulong *cs_base, uint64_t *flags);
 
 enum {
     QEMU_PSCI_CONDUIT_DISABLED = 0,

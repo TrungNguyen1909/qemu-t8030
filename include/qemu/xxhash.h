@@ -49,6 +49,64 @@
  * contiguous in memory.
  */
 static inline uint32_t
+qemu_xxhash8(uint64_t ab, uint64_t cd, uint64_t ef, uint32_t g, uint32_t h)
+{
+    uint32_t v1 = QEMU_XXHASH_SEED + PRIME32_1 + PRIME32_2;
+    uint32_t v2 = QEMU_XXHASH_SEED + PRIME32_2;
+    uint32_t v3 = QEMU_XXHASH_SEED + 0;
+    uint32_t v4 = QEMU_XXHASH_SEED - PRIME32_1;
+    uint32_t a = ab;
+    uint32_t b = ab >> 32;
+    uint32_t c = cd;
+    uint32_t d = cd >> 32;
+    uint32_t e = ef;
+    uint32_t f = ef >> 32;
+    uint32_t h32;
+
+    v1 += a * PRIME32_2;
+    v1 = rol32(v1, 13);
+    v1 *= PRIME32_1;
+
+    v2 += b * PRIME32_2;
+    v2 = rol32(v2, 13);
+    v2 *= PRIME32_1;
+
+    v3 += c * PRIME32_2;
+    v3 = rol32(v3, 13);
+    v3 *= PRIME32_1;
+
+    v4 += d * PRIME32_2;
+    v4 = rol32(v4, 13);
+    v4 *= PRIME32_1;
+
+    v1 += e * PRIME32_2;
+    v1 = rol32(v1, 13);
+    v1 *= PRIME32_1;
+
+    v2 += f * PRIME32_2;
+    v2 = rol32(v2, 13);
+    v2 *= PRIME32_1;
+
+    v3 += g * PRIME32_2;
+    v3 = rol32(v3, 13);
+    v3 *= PRIME32_1;
+
+    v4 += h * PRIME32_2;
+    v4 = rol32(v4, 13);
+    v4 *= PRIME32_1;
+
+    h32 = rol32(v1, 1) + rol32(v2, 7) + rol32(v3, 12) + rol32(v4, 18);
+    h32 += 32;
+
+    h32 ^= h32 >> 15;
+    h32 *= PRIME32_2;
+    h32 ^= h32 >> 13;
+    h32 *= PRIME32_3;
+    h32 ^= h32 >> 16;
+
+    return h32;
+}
+static inline uint32_t
 qemu_xxhash7(uint64_t ab, uint64_t cd, uint32_t e, uint32_t f, uint32_t g)
 {
     uint32_t v1 = QEMU_XXHASH_SEED + PRIME32_1 + PRIME32_2;
