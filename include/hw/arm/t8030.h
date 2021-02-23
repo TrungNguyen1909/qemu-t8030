@@ -178,6 +178,7 @@ typedef struct
     char kernel_filename[1024];
     char dtb_filename[1024];
     char driver_filename[1024];
+    char trustcache_filename[1024];
     char kern_args[1024];
     FileMmioDev ramdisk_file_dev;
     DTBNode *device_tree;
