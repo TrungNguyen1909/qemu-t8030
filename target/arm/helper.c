@@ -4714,6 +4714,22 @@ static void tlbi_aa64_vae1is_write(CPUARMState *env, const ARMCPRegInfo *ri,
 
     tlb_flush_page_bits_by_mmuidx_all_cpus_synced(cs, pageaddr, mask, bits);
 }
+static void tlbi_aa64_rvae1is_write(CPUARMState *env, const ARMCPRegInfo *ri,
+                                   uint64_t value)
+{
+    CPUState *cs = env_cpu(env);
+    int mask = vae1_tlbmask(env);
+    uint64_t shift = ((extract64(value, 46, 2) - 1) << 1) + 12;
+    uint64_t tg = 1 << shift;
+    uint64_t scale = extract64(value, 44, 2);
+    uint64_t num = extract64(value, 39, 5);
+    uint64_t baseaddr = extract64(value, 0, 37) << shift;
+    uint64_t baseaddr_end = baseaddr+((num+1)*(1ULL<<(5*scale+1)) * tg);
+    for(uint64_t pageaddr = baseaddr; pageaddr < baseaddr_end; pageaddr += tg) {
+        int bits = vae1_tlbbits(env, pageaddr);
+        tlb_flush_page_bits_by_mmuidx_all_cpus_synced(cs, pageaddr, mask, bits);
+    }
+}
 
 static void tlbi_aa64_vae1_write(CPUARMState *env, const ARMCPRegInfo *ri,
                                  uint64_t value)
@@ -4732,6 +4748,32 @@ static void tlbi_aa64_vae1_write(CPUARMState *env, const ARMCPRegInfo *ri,
         tlb_flush_page_bits_by_mmuidx_all_cpus_synced(cs, pageaddr, mask, bits);
     } else {
         tlb_flush_page_bits_by_mmuidx(cs, pageaddr, mask, bits);
+    }
+}
+static void tlbi_aa64_rvae1_write(CPUARMState *env, const ARMCPRegInfo *ri,
+                                 uint64_t value)
+{
+    /* Invalidate by VA, EL1&0 (AArch64 version).
+     * Currently handles all of VAE1, VAAE1, VAALE1 and VALE1,
+     * since we don't support flush-for-specific-ASID-only or
+     * flush-last-level-only.
+     */
+    CPUState *cs = env_cpu(env);
+    int mask = vae1_tlbmask(env);
+    uint64_t shift = ((extract64(value, 46, 2) - 1) << 1) + 12;
+    uint64_t tg = 1 << shift;
+    uint64_t scale = extract64(value, 44, 2);
+    uint64_t num = extract64(value, 39, 5);
+    uint64_t baseaddr = extract64(value, 0, 37) << shift;
+    uint64_t baseaddr_end = baseaddr+((num+1)*(1ULL<<(5*scale+1)) * tg);
+    for(uint64_t pageaddr = baseaddr; pageaddr < baseaddr_end; pageaddr += tg) {
+        int bits = vae1_tlbbits(env, pageaddr);
+
+        if (tlb_force_broadcast(env)) {
+            tlb_flush_page_bits_by_mmuidx_all_cpus_synced(cs, pageaddr, mask, bits);
+        } else {
+            tlb_flush_page_bits_by_mmuidx(cs, pageaddr, mask, bits);
+        }
     }
 }
 
@@ -5028,7 +5070,7 @@ static const ARMCPRegInfo v8_cp_reginfo[] = {
     { .name = "TLBI_RVAE1IS", .state = ARM_CP_STATE_AA64,
       .opc0 = 1, .opc1 = 0, .crn = 8, .crm = 2, .opc2 = 1,
       .access = PL1_W, .accessfn = access_ttlb, .type = ARM_CP_NO_RAW,
-      .writefn = tlbi_aa64_vae1is_write },
+      .writefn = tlbi_aa64_rvae1is_write },
     { .name = "TLBI_ASIDE1IS", .state = ARM_CP_STATE_AA64,
       .opc0 = 1, .opc1 = 0, .crn = 8, .crm = 3, .opc2 = 2,
       .access = PL1_W, .accessfn = access_ttlb, .type = ARM_CP_NO_RAW,
@@ -5040,7 +5082,7 @@ static const ARMCPRegInfo v8_cp_reginfo[] = {
     { .name = "TLBI_RVAAE1IS", .state = ARM_CP_STATE_AA64,
       .opc0 = 1, .opc1 = 0, .crn = 8, .crm = 2, .opc2 = 3,
       .access = PL1_W, .accessfn = access_ttlb, .type = ARM_CP_NO_RAW,
-      .writefn = tlbi_aa64_vae1is_write },
+      .writefn = tlbi_aa64_rvae1is_write },
     { .name = "TLBI_VALE1IS", .state = ARM_CP_STATE_AA64,
       .opc0 = 1, .opc1 = 0, .crn = 8, .crm = 3, .opc2 = 5,
       .access = PL1_W, .accessfn = access_ttlb, .type = ARM_CP_NO_RAW,
@@ -5068,7 +5110,7 @@ static const ARMCPRegInfo v8_cp_reginfo[] = {
     { .name = "TLBI_RVAAE1", .state = ARM_CP_STATE_AA64,
       .opc0 = 1, .opc1 = 0, .crn = 8, .crm = 6, .opc2 = 3,
       .access = PL1_W, .accessfn = access_ttlb, .type = ARM_CP_NO_RAW,
-      .writefn = tlbi_aa64_vae1_write },
+      .writefn = tlbi_aa64_rvae1_write },
     { .name = "TLBI_VALE1", .state = ARM_CP_STATE_AA64,
       .opc0 = 1, .opc1 = 0, .crn = 8, .crm = 7, .opc2 = 5,
       .access = PL1_W, .accessfn = access_ttlb, .type = ARM_CP_NO_RAW,
