@@ -46,7 +46,7 @@ static void allocate_and_copy(MemoryRegion *mem, AddressSpace *as,
                               void *buf)
 {
     if (mem) {
-        allocate_ram(mem, name, pa, align_64k_high(size));
+        allocate_ram(mem, name, pa, size);
     }
     address_space_rw(as, pa, MEMTXATTRS_UNSPECIFIED, (uint8_t *)buf, size, 1);
 }
