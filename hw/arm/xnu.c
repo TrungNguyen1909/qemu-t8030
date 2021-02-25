@@ -353,7 +353,7 @@ void macho_load_raw_file(const char *filename, AddressSpace *as, MemoryRegion *m
         allocate_and_copy(mem, as, name, file_pa, *size, file_data);
         g_free(file_data);
     } else {
-        error_report("Could not load macho file %s", filename);
+        error_report("Could not load raw file %s", filename);
         exit(EXIT_FAILURE);
     }
 }
