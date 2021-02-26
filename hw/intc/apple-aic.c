@@ -131,18 +131,25 @@ static void apple_aic_write(void *opaque,
         } else if (addr >= 0x4280) {
             //Unknown
         } else if (addr >= 0x4100){ /* REG_IRQ_DISABLE; REG_IRQ_ENABLE, REG_IRQ_STAT */
-            unsigned int ipid = extract32(addr, 2, 6);
-            if(ipid < (s->numIRQ >> 5)){
-                if (addr >= 0x4200) { /* REG_IRQ_STAT */
+            unsigned int ipid = 0xffff;
+            if (addr >= 0x4200) { /* REG_IRQ_STAT */
+                ipid = (addr - 0x4200) >> 2;
+                if (ipid < s->numIPID) {
                     s->ipid_mask[ipid] = val;
                     return;
-                } else if (addr >= 0x4180){ /* REG_IRQ_ENABLE */
+                }
+            } else if (addr >= 0x4180){ /* REG_IRQ_ENABLE */
+                    ipid = (addr - 0x4180) >> 2;
+                    if (ipid < s->numIPID) {
                         for(int i = 0; i < 32; i++)
                         if(test_bit(i, (unsigned long*)&val)) {
                             s->ipid_mask[ipid] &= ~(1 << i);
                         }
                         return;
-                } else { /* REG_IRQ_DISABLE */
+                    }
+            } else { /* REG_IRQ_DISABLE */
+                ipid = (addr - 0x4100) >> 2;
+                if (ipid < s->numIPID) {
                     for(int i = 0; i < 32; i++)
                         if(test_bit(i, (unsigned long*)&val)) {
                             s->ipid_mask[ipid] |= (1 << i);
@@ -158,7 +165,7 @@ static void apple_aic_write(void *opaque,
             // fprintf(stderr, "AIC: Received IRQ ack\n");
             return;
         } else if (addr >= 0x3000) { /* REG_IRQ_AFFINITY */
-            unsigned int vectorNumber = extract32(addr, 2, 10);
+            unsigned int vectorNumber = (addr - 0x3000) >> 2;
             val &= ~(-1 << s->numCPU);
             if (val == 0){
                 val = ~(-1 << s->numCPU); //any CPU
@@ -211,7 +218,7 @@ static void apple_aic_write(void *opaque,
                     return;
             }
         }
-        fprintf(stderr, "AIC: Write to unspported reg 0x%lx\n", addr);
+        fprintf(stderr, "AIC: Write to unspported reg 0x%llx\n", addr);
     }
 }
 static uint64_t apple_aic_read(void *opaque,
@@ -238,18 +245,25 @@ static uint64_t apple_aic_read(void *opaque,
         } else if (addr >= 0x4280) {
             //Unknown
         } else if (addr >= 0x4100){ /* REG_IRQ_DISABLE; REG_IRQ_ENABLE, REG_IRQ_STAT */
-            unsigned int ipid = extract32(addr, 2, 6);
-            if(ipid < (s->numIRQ >> 5)){
-                if (addr >= 0x4200) { /* REG_IRQ_STAT */
+            unsigned int ipid = 0xffff;
+            if (addr >= 0x4200) { /* REG_IRQ_STAT */
+                ipid = (addr - 0x4200) >> 2;
+                if (ipid < s->numIPID) {
                     return s->ipid_mask[ipid];
-                } else if (addr >= 0x4180){ /* REG_IRQ_ENABLE */
-                        return ~s->ipid_mask[ipid];
-                } else { /* REG_IRQ_DISABLE */
+                }
+            } else if (addr >= 0x4180){ /* REG_IRQ_ENABLE */
+                ipid = (addr - 0x4180) >> 2;
+                if (ipid < s->numIPID) {
+                    return ~s->ipid_mask[ipid];
+                }
+            } else { /* REG_IRQ_DISABLE */
+                ipid = (addr - 0x4100) >> 2;
+                if (ipid < s->numIPID) {
                     return s->ipid_mask[ipid];
                 }
             }
         } else if (addr >= 0x3000) { /* REG_IRQ_AFFINITY */
-            unsigned int vectorNumber = extract32(addr, 2, 10);
+            unsigned int vectorNumber = (addr - 0x3000) >> 2;
             return s->irq_affinity[vectorNumber];
         } else {
             switch (addr){
@@ -275,7 +289,7 @@ static uint64_t apple_aic_read(void *opaque,
             }
         }
     }
-    fprintf(stderr, "AIC: Read from unspported reg 0x%lx\n", addr);
+    fprintf(stderr, "AIC: Read from unspported reg 0x%llx\n", addr);
     return -1;
 }
 
