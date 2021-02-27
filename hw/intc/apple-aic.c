@@ -304,7 +304,6 @@ static const MemoryRegionOps apple_aic_ops = {
 
 static void apple_aic_init(Object *obj)
 {
-    SysBusDevice *sbd = SYS_BUS_DEVICE(obj);
     AppleAICState *s = APPLE_AIC(obj);
     qemu_mutex_init(&s->mutex);
     s->cpus = g_malloc0(sizeof(AppleAICOpaque*) * s->numCPU);
@@ -325,14 +324,13 @@ static void apple_aic_init(Object *obj)
     s->ipi_mask = g_malloc0(sizeof(unsigned int) * s->numCPU);
     s->irq_affinity = g_malloc0(sizeof(unsigned int) * s->numIRQ);
     s->cpu_irqs = g_malloc0(sizeof(qemu_irq) * s->numCPU);
-    qdev_init_gpio_out(DEVICE(obj), s->cpu_irqs, s->numCPU);
     s->pendingIPI = g_malloc0(sizeof(unsigned int*) * s->numCPU);
     s->deferredIPI = g_malloc0(sizeof(unsigned int*) * s->numCPU);
     for(int i = 0; i < s->numCPU; i++){
-        sysbus_init_irq(sbd, &s->cpu_irqs[i]);
         s->pendingIPI[i] = g_malloc0(sizeof(bool) * s->numCPU);
         s->deferredIPI[i] = g_malloc0(sizeof(bool) * s->numCPU);
     }
+    qdev_init_gpio_out(DEVICE(obj), s->cpu_irqs, s->numCPU);
     s->ext_irq_state = g_malloc0(sizeof(bool) * s->numIRQ);
 }
 static void apple_aic_realize(DeviceState *dev, Error **errp){
@@ -389,7 +387,7 @@ static void apple_aic_class_init(ObjectClass *klass, void *data)
 
 static const TypeInfo apple_aic_info = {
     .name = TYPE_APPLE_AIC,
-    .parent = TYPE_SYS_BUS_DEVICE,
+    .parent = TYPE_DEVICE,
     .instance_size = sizeof(AppleAICState),
     .class_init = apple_aic_class_init,
 };

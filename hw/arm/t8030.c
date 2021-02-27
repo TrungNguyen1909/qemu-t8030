@@ -866,23 +866,13 @@ static void T8030_create_aic(MachineState *machine){
     assert(child != NULL);
     tms->aic = apple_aic_create(tms->soc_base_pa, machine->smp.cpus, child);
     assert(tms->aic);
-    DTBNode* root = get_dtb_child_node_by_name(tms->device_tree, "cpus");
 
     for(unsigned int i = 0; i < machine->smp.cpus; i++)
     {
         memory_region_add_subregion_overlap(tms->cpus[i]->memory, tms->aic->base, tms->aic->iomems[i], 0);
         qdev_connect_gpio_out(DEVICE(tms->aic), i, qdev_get_gpio_in(DEVICE(tms->cpus[i]->cpu), ARM_CPU_IRQ));
-
-        char* cpu_name = g_malloc0(8);
-        snprintf(cpu_name, 8, "cpu%u", i);
-        DTBNode* node = get_dtb_child_node_by_name(root, cpu_name);
-        assert(node);
-        DTBProp* prop = get_dtb_prop(node, "interrupts");
-        assert(prop);
-        assert(prop->length == 12);
-        uint32_t* intr = (uint32_t*)prop->value;
-        qdev_connect_gpio_out_named(DEVICE(tms->cpus[i]->cpu), "pmu-interrupt", 0, qdev_get_gpio_in(DEVICE(tms->aic), intr[1]));
     }
+    qdev_realize(DEVICE(tms->aic), NULL, &error_fatal);
 }
 
 static void T8030_pmgr_setup(MachineState* machine){

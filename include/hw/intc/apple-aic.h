@@ -88,7 +88,7 @@ typedef struct  {
 } AppleAICOpaque;
 
 struct AppleAICState {
-    SysBusDevice parent_obj;
+    DeviceState parent_obj;
     //reg region per cpu
     MemoryRegion** iomems;
     //timer
