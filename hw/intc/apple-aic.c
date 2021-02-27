@@ -218,7 +218,7 @@ static void apple_aic_write(void *opaque,
                     return;
             }
         }
-        fprintf(stderr, "AIC: Write to unspported reg 0x%llx\n", addr);
+        fprintf(stderr, "AIC: Write to unspported reg 0x" TARGET_FMT_plx "\n", addr);
     }
 }
 static uint64_t apple_aic_read(void *opaque,
@@ -289,7 +289,7 @@ static uint64_t apple_aic_read(void *opaque,
             }
         }
     }
-    fprintf(stderr, "AIC: Read from unspported reg 0x%llx\n", addr);
+    fprintf(stderr, "AIC: Read from unspported reg 0x" TARGET_FMT_plx "\n", addr);
     return -1;
 }
 
