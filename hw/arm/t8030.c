@@ -869,7 +869,7 @@ static void T8030_create_aic(MachineState *machine){
 
     for(unsigned int i = 0; i < machine->smp.cpus; i++)
     {
-        memory_region_add_subregion_overlap(tms->cpus[i]->memory, tms->aic->base, tms->aic->iomems[i], 0);
+        memory_region_add_subregion_overlap(tms->cpus[i]->memory, tms->aic->base, &tms->aic->iomems[i], 0);
         qdev_connect_gpio_out(DEVICE(tms->aic), i, qdev_get_gpio_in(DEVICE(tms->cpus[i]->cpu), ARM_CPU_IRQ));
     }
     qdev_realize(DEVICE(tms->aic), NULL, &error_fatal);

@@ -90,7 +90,7 @@ typedef struct  {
 struct AppleAICState {
     DeviceState parent_obj;
     //reg region per cpu
-    MemoryRegion** iomems;
+    MemoryRegion* iomems;
     //timer
     QEMUTimer* timer;
     //mutex
@@ -102,13 +102,13 @@ struct AppleAICState {
     size_t numIRQ;
     size_t numCPU;
     //mask of IRQ in domains of 32
-    unsigned int *ipid_mask;
+    uint32_t *ipid_mask;
     //whether IPI i is disabled (bit 31 set: self masked, bit 0 set: other masked)
-    unsigned int *ipi_mask;
+    uint32_t *ipi_mask;
     //for IRQ i, if bit x is set, that IRQ should be sent to cpu x (there might be multiple bits set)
-    unsigned int *irq_affinity;
+    uint32_t *irq_affinity;
     //cpu opaques
-    AppleAICOpaque** cpus;
+    AppleAICOpaque* cpus;
     //cpu irqs
     qemu_irq *cpu_irqs;
     //ext irqs state
@@ -118,7 +118,7 @@ struct AppleAICState {
     //deferred IPIs: 1: set; 0: unset
     bool **deferredIPI;
     //global cfg
-    unsigned int global_cfg;
+    uint32_t global_cfg;
     //tick counter
     unsigned long tick;
     
