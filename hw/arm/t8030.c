@@ -847,8 +847,6 @@ static void T8030_cpu_setup(MachineState *machine)
         tms->cpus[i]->fast_ipi = qdev_get_gpio_in(fiq_or, 1);
 
         T8030_add_cpregs(tms->cpus[i]);
-        
-        object_unref(cpuobj);
     }
 }
 
@@ -865,6 +863,7 @@ static void T8030_create_aic(MachineState *machine){
     child = get_dtb_child_node_by_name(child, "aic");
     assert(child != NULL);
     tms->aic = apple_aic_create(tms->soc_base_pa, machine->smp.cpus, child);
+    object_property_add_child(OBJECT(machine), "aic", OBJECT(tms->aic));
     assert(tms->aic);
 
     for(unsigned int i = 0; i < machine->smp.cpus; i++)
