@@ -40,6 +40,7 @@
 #include "hw/irq.h"
 #include "hw/or-irq.h"
 #include "hw/intc/apple-aic.h"
+#include "block/apple-ans.h"
 
 #include "hw/arm/exynos4210.h"
 
@@ -702,6 +703,23 @@ static const MemoryRegionOps pmgr_reg_ops = {
     .read = pmgr_reg_read,
 };
 
+static void sart_reg_write(void *opaque,
+                  hwaddr addr,
+                  uint64_t data,
+                  unsigned size){
+    fprintf(stderr, "SART reg WRITE @ 0x" TARGET_FMT_lx " value: 0x" TARGET_FMT_lx "\n", addr, data);
+}
+static uint64_t sart_reg_read(void *opaque,
+                     hwaddr addr,
+                     unsigned size){
+    fprintf(stderr, "SART reg READ @ 0x" TARGET_FMT_lx "\n", addr);
+    return 0;
+}
+static const MemoryRegionOps sart_reg_ops = {
+    .write = sart_reg_write,
+    .read = sart_reg_read,
+};
+
 static void T8030_cluster_setup(MachineState *machine){
 
     T8030MachineState *tms = T8030_MACHINE(machine);
@@ -921,6 +939,51 @@ static void T8030_pmgr_setup(MachineState* machine){
     add_dtb_prop(child, "voltage-states1-sram", 40, (uint8_t*)"\x00\x10\x55\x22\xf1\x02\x00\x00\x00\x98\x7f\x33\xf1\x02\x00\x00\x00\x20\xaa\x44\xf1\x02\x00\x00\x00\xa8\xd4\x55\x42\x03\x00\x00\x00\x30\xff\x66\xaf\x03\x00\x00");
     add_dtb_prop(child, "voltage-states9-sram", 56, (uint8_t*)"\x00\x00\x00\x00\xf1\x02\x00\x00\x00\x2a\x75\x15\xf1\x02\x00\x00\xc0\x4f\xef\x1e\xf1\x02\x00\x00\x00\xcd\x56\x27\xf1\x02\x00\x00\x00\x11\xec\x2f\xf1\x02\x00\x00\x00\x55\x81\x38\x16\x03\x00\x00\x80\xfe\x2a\x47\x96\x03\x00\x00");
 }
+static void T8030_sart_setup(MachineState* machine){
+    T8030MachineState *tms = T8030_MACHINE(machine);
+    DTBNode *child = get_dtb_child_node_by_name(tms->device_tree, "arm-io");
+    assert(child != NULL);
+    child = get_dtb_child_node_by_name(child, "sart-ans");
+    assert(child != NULL);
+    DTBProp *prop = get_dtb_prop(child, "reg");
+    assert(prop);
+    uint64_t* reg = (uint64_t*)prop->value;
+    MemoryRegion* sart = g_new(MemoryRegion, 1);
+    memory_region_init_io(sart, OBJECT(machine), &sart_reg_ops, tms, "sart-reg", reg[1]);
+    memory_region_add_subregion(tms->sysmem, tms->soc_base_pa + reg[0], sart);
+}
+
+static void T8030_create_ans(MachineState* machine){
+    T8030MachineState *tms = T8030_MACHINE(machine);
+    DTBNode *child = get_dtb_child_node_by_name(tms->device_tree, "arm-io");
+    assert(child != NULL);
+    child = get_dtb_child_node_by_name(child, "ans");
+    assert(child != NULL);
+    tms->ans = apple_ans_create(tms->soc_base_pa, child);
+    assert(tms->ans);
+    object_property_add_child(OBJECT(machine), "ans", OBJECT(tms->ans));
+    DTBProp *prop = get_dtb_prop(child, "reg");
+    assert(prop);
+    uint64_t* reg = (uint64_t*)prop->value;
+    /*
+    0: AppleA7IOP akfRegMap
+    1: AppleASCWrapV2 coreRegisterMap
+    2: AppleA7IOP autoBootRegMap
+    */
+    memory_region_add_subregion(tms->sysmem, tms->soc_base_pa + reg[0], tms->ans->iomems[0]);
+    memory_region_add_subregion(tms->sysmem, tms->soc_base_pa + reg[2], tms->ans->iomems[1]);
+    memory_region_add_subregion(tms->sysmem, tms->soc_base_pa + reg[4], tms->ans->iomems[2]);
+    memory_region_add_subregion(tms->sysmem, tms->soc_base_pa + reg[6], tms->ans->iomems[3]);
+
+    prop = get_dtb_prop(child, "interrupts");
+    assert(prop);
+    assert(prop->length == 20);
+    uint32_t* ints = (uint32_t*)prop->value;
+    for(int i = 0; i < 5; i++){
+        qdev_connect_gpio_out(DEVICE(tms->ans), i, qdev_get_gpio_in(DEVICE(tms->aic), ints[i]));
+    }
+    qdev_realize(DEVICE(tms->ans), NULL, &error_fatal);
+}
 
 static void T8030_cpu_reset(void *opaque)
 {
@@ -998,6 +1061,10 @@ static void T8030_machine_init(MachineState *machine)
     T8030_create_s3c_uart(tms, serial_hd(0));
 
     T8030_pmgr_setup(machine);
+
+    T8030_sart_setup(machine);
+
+    T8030_create_ans(machine);
 
     T8030_memory_setup(machine);
 

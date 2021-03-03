@@ -32,6 +32,7 @@
 #include "hw/arm/boot.h"
 #include "hw/arm/xnu.h"
 #include "hw/intc/apple-aic.h"
+#include "block/apple-ans.h"
 #include "exec/memory.h"
 #include "cpu.h"
 #include "sysemu/kvm.h"
@@ -172,6 +173,7 @@ typedef struct
     uint64_t pendingIPI[MAX_CPU];
     bool pendingWakeup[MAX_CPU];
     AppleAICState* aic;
+    AppleANSState* ans;
     MemoryRegion* sysmem;
     struct arm_boot_info bootinfo;
     char ramdisk_filename[1024];
