@@ -13269,7 +13269,7 @@ static inline void assert_hflags_rebuild_correctly(CPUARMState *env)
     uint64_t env_flags_rebuilt = rebuild_hflags_internal(env);
 
     if (unlikely(env_flags_current != env_flags_rebuilt)) {
-        fprintf(stderr, "TCG hflags mismatch (current:0x%16lx rebuilt:0x%16lx)\n",
+        fprintf(stderr, "TCG hflags mismatch (current:0x" TARGET_FMT_plx " rebuilt:0x" TARGET_FMT_plx ")\n",
                 env_flags_current, env_flags_rebuilt);
         abort();
     }
