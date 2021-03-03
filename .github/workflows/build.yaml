@@ -6,6 +6,39 @@ on:
   pull_request:
 
 jobs:
+  build_aarch64_softmmu_debug_linux:
+    runs-on: ubuntu-20.04
+    container:
+      image: ubuntu:focal
+    steps:
+      - name: Install build dependencies
+        run: |
+          export DEBIAN_FRONTEND=noninteractive
+          apt-get update
+          apt-get install -y git libglib2.0-dev libfdt-dev libpixman-1-dev zlib1g-dev ninja-build build-essential
+
+      - uses: actions/checkout@v2
+        with:
+          fetch-depth: 0
+
+      - name: Build qemu
+        run: |
+          mkdir build
+          cd build
+          ../configure --enable-debug --target-list=aarch64-softmmu --disable-capstone --disable-slirp
+          make -j$(nproc)
+
+      - name: Install qemu
+        run: |
+          cd build
+          make DESTDIR=$GITHUB_WORKSPACE/bin/ install
+
+      - name: Publish binaries
+        uses: actions/upload-artifact@v2
+        with:
+          name: aarch64_softmmu_linux_debug
+          path: ${{ github.workspace }}/bin/
+
   build_aarch64_softmmu_linux:
     runs-on: ubuntu-20.04
     container:
