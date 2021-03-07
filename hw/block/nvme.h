@@ -4,7 +4,7 @@
 #include "block/nvme.h"
 #include "nvme-ns.h"
 
-#define NVME_MAX_NAMESPACES 256
+#define NVME_MAX_NAMESPACES 16
 
 typedef struct NvmeParams {
     char     *serial;
@@ -16,6 +16,7 @@ typedef struct NvmeParams {
     uint32_t aer_max_queued;
     uint8_t  mdts;
     bool     use_intel_id;
+    bool     is_apple_ans;
 } NvmeParams;
 
 typedef struct NvmeAsyncEvent {
@@ -68,6 +69,7 @@ typedef struct NvmeSQueue {
     struct NvmeCtrl *ctrl;
     uint16_t    sqid;
     uint16_t    cqid;
+    uint32_t    entry_size;
     uint32_t    head;
     uint32_t    tail;
     uint32_t    size;

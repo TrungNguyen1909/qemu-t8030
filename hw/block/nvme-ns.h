@@ -21,6 +21,7 @@
 
 typedef struct NvmeNamespaceParams {
     uint32_t nsid;
+    uint32_t nstype;
 } NvmeNamespaceParams;
 
 typedef struct NvmeNamespace {

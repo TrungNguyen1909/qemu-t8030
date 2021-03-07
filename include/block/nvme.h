@@ -842,7 +842,9 @@ typedef struct QEMU_PACKED NvmeIdCtrl {
     uint8_t     subnqn[256];
     uint8_t     rsvd1024[1024];
     NvmePSD     psd[32];
-    uint8_t     vs[1024];
+    uint8_t     rsvd3072[518];
+	uint16_t	capacity;
+	uint8_t		vs[504];
 } NvmeIdCtrl;
 
 enum NvmeIdCtrlOacs {
@@ -997,7 +999,8 @@ typedef struct QEMU_PACKED NvmeIdNs {
     uint64_t    eui64;
     NvmeLBAF    lbaf[16];
     uint8_t     rsvd192[192];
-    uint8_t     vs[3712];
+    uint32_t    nstype;
+    uint8_t     vs[3708];
 } NvmeIdNs;
 
 typedef struct QEMU_PACKED NvmeIdNsDescr {
@@ -1071,4 +1074,14 @@ static inline void _nvme_check_size(void)
     QEMU_BUILD_BUG_ON(sizeof(NvmeSglDescriptor) != 16);
     QEMU_BUILD_BUG_ON(sizeof(NvmeIdNsDescr) != 4);
 }
+
+#define NVME_APPLE_MAX_PEND_CMDS		0x1210
+#define   NVME_APPLE_MAX_PEND_CMDS_VAL	((64 << 16) | 64)
+#define NVME_APPLE_BOOT_STATUS		    0x1300
+#define   NVME_APPLE_BOOT_STATUS_OK		0xde71ce55
+#define NVME_APPLE_BASE_CMD_ID		    0x1308
+#define   NVME_APPLE_BASE_CMD_ID_MASK	0xffff
+#define NVME_APPLE_LINEAR_SQ_CTRL		0x24908
+#define   NVME_APPLE_LINEAR_SQ_CTRL_EN	(1 << 0)
+#define NVME_APPLE_MODESEL              0x1304
 #endif

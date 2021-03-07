@@ -7,7 +7,9 @@
 #include "hw/arm/xnu_dtb.h"
 #include "hw/block/block.h"
 #include "hw/pci/pci.h"
-#include "hw/pci/pci_bus.h"
+#include "hw/pci/pcie_host.h"
+#include "hw/pci/msi.h"
+#include "hw/pci/msix.h"
 #include "sysemu/dma.h"
 #include "hw/block/nvme.h"
 
@@ -114,9 +116,17 @@ typedef struct iop_message* iop_message_t;
 #define APPLE_BOOT_STATUS		0x1300
 #define   APPLE_BOOT_STATUS_OK		0xde71ce55
 
+typedef struct QEMU_PACKED {
+    uint32_t unk0;
+    uint32_t unk4;
+    uint32_t numBlocks;
+} NVMeCreateNamespacesEntryStruct;
 struct AppleANSState {
-    DeviceState parent_obj;
+    PCIExpressHost parent_obj;
     MemoryRegion* iomems[4];
+    MemoryRegion io_mmio;
+    MemoryRegion io_ioport;
+    MemoryRegion msix;
     QemuMutex mutex;
     QemuThread iop_thread;
     QemuCond iop_halt;
@@ -136,7 +146,8 @@ struct AppleANSState {
     QTAILQ_HEAD(, iop_message) outbox;
     QemuMutex* outboxLock;
     uint64_t outboxSize;
-    NvmeCtrl* nvme;
+    NvmeCtrl nvme;
+    uint32_t nvme_interrupt_idx;
 };
 AppleANSState* apple_ans_create(hwaddr soc_base, DTBNode* node);
 #endif /* APPLE_ANS_H */
