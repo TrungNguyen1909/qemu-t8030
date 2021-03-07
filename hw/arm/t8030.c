@@ -981,7 +981,7 @@ static void T8030_create_ans(MachineState* machine){
     for(int i = 0; i < 5; i++){
         qdev_connect_gpio_out(DEVICE(tms->ans), i, qdev_get_gpio_in(DEVICE(tms->aic), ints[i]));
     }
-    qdev_realize(DEVICE(tms->ans), NULL, &error_fatal);
+    sysbus_realize_and_unref(SYS_BUS_DEVICE(tms->ans), &error_fatal);
 }
 
 static void T8030_cpu_reset(void *opaque)

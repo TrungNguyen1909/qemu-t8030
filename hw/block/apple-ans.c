@@ -1,4 +1,5 @@
 #include "qemu/osdep.h"
+#include "qapi/error.h"
 #include "block/apple-ans.h"
 #include "hw/irq.h"
 #include "migration/vmstate.h"
@@ -94,6 +95,13 @@ static void iop_handle_mgmt_msg(AppleANSState* s, iop_message_t msg){
                 m->power.state = msg->power.state;
                 iop_outbox_push(s, m);
                 s->ep0_status = EP0_DONE;
+                
+                qemu_mutex_lock_iothread();
+                uint32_t config = pci_default_read_config(PCI_DEVICE(&s->nvme), PCI_COMMAND, 4);
+                config |= 0x0002 | 0x0004; // memory | bus
+                pci_default_write_config(PCI_DEVICE(&s->nvme), PCI_COMMAND, config, 4);
+                assert(PCI_DEVICE(&s->nvme)->bus_master_enable_region.enabled);
+                qemu_mutex_unlock_iothread();
                 break;
             }
         default:
@@ -144,7 +152,6 @@ static void iop_akf_reg_write(void *opaque,
                   uint64_t data,
                   unsigned size){
     AppleANSState* s = APPLE_ANS(opaque);
-    fprintf(stderr, "ANS2: AppleA7IOP AKF reg WRITE @ 0x" TARGET_FMT_plx " value: 0x" TARGET_FMT_plx "\n", addr, data);
     WITH_QEMU_LOCK_GUARD(&s->mutex){
         switch (addr){
             case REG_AKF_CONFIG:
@@ -179,13 +186,13 @@ static void iop_akf_reg_write(void *opaque,
                 }
                 return;
         }
+        fprintf(stderr, "ANS2: AppleA7IOP AKF unknown reg WRITE @ 0x" TARGET_FMT_plx " value: 0x" TARGET_FMT_plx "\n", addr, data);
     }
 }
 static uint64_t iop_akf_reg_read(void *opaque,
                      hwaddr addr,
                      unsigned size){
     AppleANSState* s = APPLE_ANS(opaque);
-    fprintf(stderr, "ANS2: AppleA7IOP AKF reg READ @ 0x" TARGET_FMT_plx "\n", addr);
     WITH_QEMU_LOCK_GUARD(&s->mutex){
         iop_message_t m;
         uint64_t ret = 0;
@@ -227,6 +234,7 @@ static uint64_t iop_akf_reg_read(void *opaque,
                 }
                 return ret;
         }
+        fprintf(stderr, "ANS2: AppleA7IOP AKF unknown reg READ @ 0x" TARGET_FMT_plx "\n", addr);
     }
     return 0;
 }
@@ -279,39 +287,24 @@ static const MemoryRegionOps iop_autoboot_reg_ops = {
     .read = iop_autoboot_reg_read,
 };
 
-static void ans_reg_write(void *opaque,
-                  hwaddr addr,
-                  uint64_t data,
-                  unsigned size){
-    fprintf(stderr, "ANS2: AppleANS2NVMeController reg WRITE @ 0x" TARGET_FMT_plx " value: 0x" TARGET_FMT_plx "\n", addr, data);
+static void apple_ans_set_irq(void *opaque, int irq_num, int level){
+    AppleANSState* s = APPLE_ANS(opaque);
+    qemu_set_irq(s->irqs[s->nvme_interrupt_idx], level);
 }
-static uint64_t ans_reg_read(void *opaque,
-                     hwaddr addr,
-                     unsigned size){
-    fprintf(stderr, "ANS2: AppleANS2NVMeController reg READ @ 0x" TARGET_FMT_plx "\n", addr);
-    switch (addr) {
-        case APPLE_BOOT_STATUS:
-            return APPLE_BOOT_STATUS_OK;
-    }
-    return 0;
-}
-static const MemoryRegionOps ans_reg_ops = {
-    .write = ans_reg_write,
-    .read = ans_reg_read,
-    .endianness = DEVICE_NATIVE_ENDIAN,
-    .valid.min_access_size = 4,
-    .valid.max_access_size = 8,
-    .impl.min_access_size = 4,
-    .impl.max_access_size = 8,
-    .valid.unaligned = false,
-};
 
 AppleANSState* apple_ans_create(hwaddr soc_base, DTBNode* node) {
     DeviceState  *dev;
     AppleANSState *s;
+    PCIHostState *pci;
+    SysBusDevice *sbd;
+    PCIExpressHost *pex;
 
     dev = qdev_new(TYPE_APPLE_ANS);
     s = APPLE_ANS(dev);
+    pci = PCI_HOST_BRIDGE(dev);
+    sbd = SYS_BUS_DEVICE(dev);
+    pex = PCIE_HOST_BRIDGE(dev);
+
     qemu_mutex_init(&s->mutex);
     DTBProp *prop = get_dtb_prop(node, "reg");
     assert(prop);
@@ -327,8 +320,6 @@ AppleANSState* apple_ans_create(hwaddr soc_base, DTBNode* node) {
     memory_region_init_io(s->iomems[1], OBJECT(dev), &ascv2_core_reg_ops, s, "ans-ascv2-core-reg", reg[3]);
     s->iomems[2] = g_new(MemoryRegion, 1);
     memory_region_init_io(s->iomems[2], OBJECT(dev), &iop_autoboot_reg_ops, s, "ans-iop-autoboot-reg", reg[5]);
-    s->iomems[3] = g_new(MemoryRegion, 1);
-    memory_region_init_io(s->iomems[3], OBJECT(dev), &ans_reg_ops, s, "ans-reg", reg[7]);
     qdev_init_gpio_out(dev, s->irqs, 5);
     QTAILQ_INIT(&s->inbox);
     QTAILQ_INIT(&s->outbox);
@@ -364,10 +355,43 @@ AppleANSState* apple_ans_create(hwaddr soc_base, DTBNode* node) {
     segrange[1].size = 0x3c00000;
     segrange[1].flag = 0x0;
     add_dtb_prop(child, "segment-ranges", 64, (uint8_t*)segrange);
+
+    prop = get_dtb_prop(node, "nvme-interrupt-idx");
+    assert(prop);
+    s->nvme_interrupt_idx = *(uint32_t*)prop->value;
+    object_initialize_child(OBJECT(dev), "nvme", &s->nvme, TYPE_NVME);
+    
+    object_property_set_str(OBJECT(&s->nvme), "serial", "QEMUT8030ANS", &error_fatal);
+    object_property_set_bool(OBJECT(&s->nvme), "is-apple-ans", true, &error_fatal);
+    object_property_set_uint(OBJECT(&s->nvme), "max_ioqpairs", 8, &error_fatal);
+    prop = get_dtb_prop(node, "namespaces");
+    assert(prop);
+    NVMeCreateNamespacesEntryStruct* namespaces = (NVMeCreateNamespacesEntryStruct*)prop->value;
+    // for (int i=0; i < prop->length / 12; i++){
+    //     DeviceState* ns = qdev_new(TYPE_NVME_NS);
+    //     object_property_set_uint(OBJECT(ns), "nsid", namespaces[i].unk0, &error_fatal);
+           
+    // }
+    pcie_host_mmcfg_init(pex, PCIE_MMCFG_SIZE_MAX);
+    memory_region_init(&s->io_mmio, OBJECT(s), "ans_pci_mmio", UINT64_MAX);
+    memory_region_init(&s->io_ioport, OBJECT(s), "ans_pci_ioport", 64 * 1024);
+
+    sysbus_init_mmio(sbd, &pex->mmio);
+    sysbus_init_mmio(sbd, &s->io_mmio);
+    sysbus_init_mmio(sbd, &s->io_ioport);
+    pci->bus = pci_register_root_bus(dev, "anspcie.0", apple_ans_set_irq,
+                                     pci_swizzle_map_irq_fn, s, &s->io_mmio,
+                                     &s->io_ioport, 0, 4, TYPE_PCIE_BUS);
+    pci_realize_and_unref(PCI_DEVICE(&s->nvme), pci->bus, &error_fatal);
+    s->iomems[3] = &s->nvme.iomem;
     return s;
 }
 static void apple_ans_realize(DeviceState *dev, Error **errp){
     AppleANSState* s = APPLE_ANS(dev);
+    PCIHostState *pci = PCI_HOST_BRIDGE(dev);
+    SysBusDevice *sbd = SYS_BUS_DEVICE(dev);
+    PCIExpressHost *pex = PCIE_HOST_BRIDGE(dev);
+
     if(iop_inbox_empty(s)){
         qemu_irq_raise(s->irqs[IRQ_IOP_INBOX]);
     }
@@ -382,16 +406,19 @@ static void apple_ans_unrealize(DeviceState *dev){
 }
 static void apple_ans_class_init(ObjectClass *klass, void *data)
 {
+    PCIHostBridgeClass *hc = PCI_HOST_BRIDGE_CLASS(klass);
     DeviceClass *dc = DEVICE_CLASS(klass);
     dc->realize = apple_ans_realize;
     dc->unrealize = apple_ans_unrealize;
     // dc->reset = apple_ans_reset;
     dc->desc = "Apple ANS NVMe";
+    set_bit(DEVICE_CATEGORY_BRIDGE, dc->categories);
+    dc->fw_name = "pci";
 }
 
 static const TypeInfo apple_ans_info = {
     .name = TYPE_APPLE_ANS,
-    .parent = TYPE_DEVICE,
+    .parent = TYPE_PCIE_HOST_BRIDGE,
     .instance_size = sizeof(AppleANSState),
     .class_init = apple_ans_class_init,
 };

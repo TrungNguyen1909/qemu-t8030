@@ -1099,7 +1099,7 @@ static uint16_t nvme_del_sq(NvmeCtrl *n, NvmeRequest *req)
 }
 
 static void nvme_init_sq(NvmeSQueue *sq, NvmeCtrl *n, uint64_t dma_addr,
-                         uint16_t sqid, uint16_t cqid, uint16_t size)
+                         uint16_t sqid, uint16_t cqid, uint16_t size, uint32_t entry_size)
 {
     int i;
     NvmeCQueue *cq;
@@ -1108,6 +1108,7 @@ static void nvme_init_sq(NvmeSQueue *sq, NvmeCtrl *n, uint64_t dma_addr,
     sq->dma_addr = dma_addr;
     sq->sqid = sqid;
     sq->size = size;
+    sq->entry_size = entry_size;
     sq->cqid = cqid;
     sq->head = sq->tail = 0;
     sq->io_req = g_new0(NvmeRequest, sq->size);
@@ -1161,7 +1162,7 @@ static uint16_t nvme_create_sq(NvmeCtrl *n, NvmeRequest *req)
         return NVME_INVALID_FIELD | NVME_DNR;
     }
     sq = g_malloc0(sizeof(*sq));
-    nvme_init_sq(sq, n, prp1, sqid, cqid, qsize + 1);
+    nvme_init_sq(sq, n, prp1, sqid, cqid, qsize + 1, 1 << NVME_CC_IOSQES(n->bar.cc));
     return NVME_SUCCESS;
 }
 
@@ -1946,7 +1947,7 @@ static void nvme_process_sq(void *opaque)
     NvmeRequest *req;
 
     while (!(nvme_sq_empty(sq) || QTAILQ_EMPTY(&sq->req_list))) {
-        addr = sq->dma_addr + sq->head * n->sqe_size;
+        addr = sq->dma_addr + sq->head * sq->entry_size;
         if (nvme_addr_read(n, addr, (void *)&cmd, sizeof(cmd))) {
             trace_pci_nvme_err_addr_read(addr);
             trace_pci_nvme_err_cfs();
@@ -2106,11 +2107,11 @@ static int nvme_start_ctrl(NvmeCtrl *n)
     n->page_size = page_size;
     n->max_prp_ents = n->page_size / sizeof(uint64_t);
     n->cqe_size = 1 << NVME_CC_IOCQES(n->bar.cc);
-    n->sqe_size = 1 << NVME_CC_IOSQES(n->bar.cc);
+    //TODO: entry_size
     nvme_init_cq(&n->admin_cq, n, n->bar.acq, 0, 0,
                  NVME_AQA_ACQS(n->bar.aqa) + 1, 1);
     nvme_init_sq(&n->admin_sq, n, n->bar.asq, 0, 0,
-                 NVME_AQA_ASQS(n->bar.aqa) + 1);
+                 NVME_AQA_ASQS(n->bar.aqa) + 1, 1 << 6);
 
     nvme_set_timestamp(n, 0ULL);
 
@@ -2304,6 +2305,18 @@ static uint64_t nvme_mmio_read(void *opaque, hwaddr addr, unsigned size)
             memory_region_msync(&n->pmrdev->mr, 0, n->pmrdev->size);
         }
         memcpy(&val, ptr + addr, size);
+    } else if (n->params.is_apple_ans) {
+        switch (addr){
+            case NVME_APPLE_BOOT_STATUS:
+                val = NVME_APPLE_BOOT_STATUS_OK;
+                break;
+            case NVME_APPLE_BASE_CMD_ID:
+                val = 0x6000;
+                break;
+            default:
+                fprintf(stderr, "ANS2: MMIO read beyond last register,"
+                                " offset=0x%"PRIx64", returning 0\n", addr);
+        }
     } else {
         NVME_GUEST_ERR(pci_nvme_ub_mmiord_invalid_ofs,
                        "MMIO read beyond last register,"
@@ -2447,8 +2460,11 @@ static void nvme_mmio_write(void *opaque, hwaddr addr, uint64_t data,
 
     if (addr < sizeof(n->bar)) {
         nvme_write_bar(n, addr, data, size);
-    } else {
+    } else if (addr < sizeof(n->bar) + 2 * (n->params.max_ioqpairs + 1) * NVME_DB_SIZE){
         nvme_process_db(n, addr, data);
+    } else if (n->params.is_apple_ans) {
+        fprintf(stderr, "ANS2: MMIO write to unknown vendor register,"
+                        " offset=0x%"PRIx64" value=0x%"PRIx64", returning\n", addr, data);
     }
 }
 
@@ -2540,8 +2556,12 @@ static void nvme_init_state(NvmeCtrl *n)
 {
     n->num_namespaces = NVME_MAX_NAMESPACES;
     /* add one to max_ioqpairs to account for the admin queue pair */
-    n->reg_size = pow2ceil(sizeof(NvmeBar) +
-                           2 * (n->params.max_ioqpairs + 1) * NVME_DB_SIZE);
+    if (n->params.is_apple_ans) {
+        n->reg_size = 0x40000;
+    } else {
+        n->reg_size = pow2ceil(sizeof(NvmeBar) +
+                            2 * (n->params.max_ioqpairs + 1) * NVME_DB_SIZE);
+    }
     n->sq = g_new0(NvmeSQueue *, n->params.max_ioqpairs + 1);
     n->cq = g_new0(NvmeCQueue *, n->params.max_ioqpairs + 1);
     n->temperature = NVME_TEMPERATURE;
@@ -2729,7 +2749,8 @@ static void nvme_init_ctrl(NvmeCtrl *n, PCIDevice *pci_dev)
     id->wctemp = cpu_to_le16(NVME_TEMPERATURE_WARNING);
     id->cctemp = cpu_to_le16(NVME_TEMPERATURE_CRITICAL);
 
-    id->sqes = (0x6 << 4) | 0x6;
+    //TODO: ANS2: IOSQES = 7 on non-admin queues
+    id->sqes = (0x7 << 4) | 0x6;
     id->cqes = (0x4 << 4) | 0x4;
     id->nn = cpu_to_le32(n->num_namespaces);
     id->oncs = cpu_to_le16(NVME_ONCS_WRITE_ZEROES | NVME_ONCS_TIMESTAMP |
@@ -2747,6 +2768,12 @@ static void nvme_init_ctrl(NvmeCtrl *n, PCIDevice *pci_dev)
     id->psd[0].enlat = cpu_to_le32(0x10);
     id->psd[0].exlat = cpu_to_le32(0x4);
 
+    // id->capacity = 0;
+    // for (int i = 0; i < n->num_namespaces; i++)
+    // if(n->namespaces[i]){
+    //     id->capacity += n->namespaces[i]->size;
+    // }
+    id->capacity = 10;
     n->bar.cap = 0;
     NVME_CAP_SET_MQES(n->bar.cap, 0x7ff);
     NVME_CAP_SET_CQR(n->bar.cap, 1);
@@ -2826,6 +2853,7 @@ static Property nvme_props[] = {
     DEFINE_PROP_UINT32("aer_max_queued", NvmeCtrl, params.aer_max_queued, 64),
     DEFINE_PROP_UINT8("mdts", NvmeCtrl, params.mdts, 7),
     DEFINE_PROP_BOOL("use-intel-id", NvmeCtrl, params.use_intel_id, false),
+    DEFINE_PROP_BOOL("is-apple-ans", NvmeCtrl, params.is_apple_ans, false),
     DEFINE_PROP_END_OF_LIST(),
 };
 
