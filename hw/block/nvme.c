@@ -1903,6 +1903,10 @@ static uint16_t nvme_aer(NvmeCtrl *n, NvmeRequest *req)
     return NVME_NO_COMPLETE;
 }
 
+static uint16_t nvme_tunnel(NvmeCtrl *n, NvmeRequest *req) {
+    return NVME_SUCCESS;
+}
+
 static uint16_t nvme_admin_cmd(NvmeCtrl *n, NvmeRequest *req)
 {
     trace_pci_nvme_admin_cmd(nvme_cid(req), nvme_sqid(req), req->cmd.opcode,
@@ -1929,6 +1933,8 @@ static uint16_t nvme_admin_cmd(NvmeCtrl *n, NvmeRequest *req)
         return nvme_get_feature(n, req);
     case NVME_ADM_CMD_ASYNC_EV_REQ:
         return nvme_aer(n, req);
+    case NVME_ADM_CMD_TUNNEL:
+        return nvme_tunnel(n, req);
     default:
         trace_pci_nvme_err_invalid_admin_opc(req->cmd.opcode);
         return NVME_INVALID_OPCODE | NVME_DNR;
@@ -2307,6 +2313,9 @@ static uint64_t nvme_mmio_read(void *opaque, hwaddr addr, unsigned size)
         memcpy(&val, ptr + addr, size);
     } else if (n->params.is_apple_ans) {
         switch (addr){
+            case NVME_APPLE_MAX_PEND_CMDS:
+                val = NVME_APPLE_MAX_PEND_CMDS_VAL;
+                break;
             case NVME_APPLE_BOOT_STATUS:
                 val = NVME_APPLE_BOOT_STATUS_OK;
                 break;
