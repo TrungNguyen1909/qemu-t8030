@@ -8,6 +8,7 @@
 #include "qemu/module.h"
 #include "qemu/timer.h"
 #include "hw/arm/xnu_dtb.h"
+#include "hw/pci/msi.h"
 
 //cpu is getting next interrupt to process, find one
 static uint32_t apple_aic_find_irq_cpu(AppleAICState* s, uint32_t cpu_id){
@@ -362,6 +363,7 @@ static void apple_aic_realize(DeviceState *dev, Error **errp){
                             apple_aic_tick, dev);
     timer_mod_ns(s->timer, kDeferredIPITimerDefault);
     apple_aic_reset(dev);
+    msi_nonbroken = true;
 }
 AppleAICState* apple_aic_create(hwaddr soc_base, uint32_t numCPU, DTBNode* node){
     DeviceState  *dev;
