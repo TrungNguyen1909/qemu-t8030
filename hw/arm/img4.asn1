@@ -1,0 +1,18 @@
+Img4 { }
+
+DEFINITIONS EXPLICIT TAGS ::=
+
+BEGIN
+
+Img4Payload ::= SEQUENCE {
+magic       IA5String (SIZE(1..4)),
+type        IA5String (SIZE(1..4)),
+description IA5String (SIZE(1..128)),
+data        OCTET STRING,
+
+-- This appears to be a sequence with two integers,
+-- at least for the DeviceTree file.
+extra       ANY                         OPTIONAL
+}
+
+END

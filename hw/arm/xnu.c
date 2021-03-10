@@ -30,6 +30,8 @@
 #include "qemu/error-report.h"
 #include "hw/arm/xnu.h"
 #include "hw/loader.h"
+#include "img4.h"
+#include "lzfse.h"
 
 const char *KEEP_COMP[] = {"uart-1,samsung\0$",
                            "N104AP\0iPhone12,1\0AppleARM\0$", "arm-io,t8030\0$", "apple,thunder\0ARM,v8\0$", "aic,1\0$", "pmgr1,t8030\0$"};
@@ -150,17 +152,127 @@ static void macho_dtb_node_process(DTBNode *node)
 
 }
 
-DTBNode* load_dtb_from_file(char *filename){
+// Extracts the payload from an im4p file. If the file is not an im4p file,
+// the raw file contents are returned. Exits if an error occurs.
+// See https://www.theiphonewiki.com/wiki/IMG4_File_Format for an overview
+// of the file format.
+static void extract_im4p_payload(const char* filename, const char* payload_type, uint8_t **data, uint32_t* length) {
     uint8_t *file_data = NULL;
     unsigned long fsize;
 
-    if (g_file_get_contents(filename, (char **)&file_data, &fsize, NULL)) {
-        DTBNode *root = load_dtb(file_data);
-        return root;
-    } else {
-        abort();
+    char errorDescription[ASN1_MAX_ERROR_DESCRIPTION_SIZE];
+    asn1_node img4_definitions = ASN1_TYPE_EMPTY;
+    asn1_node img4;
+    int ret;
+
+    if (!g_file_get_contents(filename, (char **)&file_data, &fsize, NULL)) {
+        error_report("Could not load %s data from file '%s'", payload_type, filename);
+        exit(EXIT_FAILURE);
     }
+
+    if (asn1_array2tree(img4_definitions_array, &img4_definitions, errorDescription)) {
+        error_report("Could not initialize the ASN.1 parser: %s.", errorDescription);
+        exit(EXIT_FAILURE);
+    }
+
+    if ((ret = asn1_create_element(img4_definitions, "Img4.Img4Payload", &img4) != ASN1_SUCCESS)) {
+        error_report("Could not create an Img4Payload element: %d", ret);
+        exit(EXIT_FAILURE);
+    }
+
+    if ((ret = asn1_der_decoding(&img4, (const uint8_t*)file_data, (uint32_t)fsize, errorDescription)) == ASN1_SUCCESS) {
+        char magic[4];
+        char type[4];
+        char description[128];
+        int len;
+
+        len = 4;
+        if ((ret = asn1_read_value(img4, "magic", magic, &len)) != ASN1_SUCCESS) {
+            error_report("Failed to read the im4p magic in file '%s': %d.", filename, ret);
+            exit(EXIT_FAILURE);
+        }
+
+        if (strncmp(magic, "IM4P", 4) != 0) {
+            error_report("Could parse ASN.1 data in file '%s' because it does not start with the IM4P header.", filename);
+            exit(EXIT_FAILURE);
+        }
+
+        len = 4;
+        if ((ret = asn1_read_value(img4, "type", type, &len)) != ASN1_SUCCESS) {
+            error_report("Failed to read the im4p type in file '%s': %d.", filename, ret);
+            exit(EXIT_FAILURE);
+        }
+
+        if (strncmp(type, payload_type, 4) != 0) {
+            error_report("Could parse ASN.1 data in file '%s' because it is not a %s object.", filename, payload_type);
+            exit(EXIT_FAILURE);
+        }
+
+        len = 128;
+        if ((ret = asn1_read_value(img4, "description", description, &len)) != ASN1_SUCCESS) {
+            error_report("Failed to read the im4p description in file '%s': %d.", filename, ret);
+            exit(EXIT_FAILURE);
+        }
+
+        uint8_t *payload_data = NULL;
+        len = 0;
+
+        if ((ret = asn1_read_value(img4, "data", payload_data, &len) != ASN1_MEM_ERROR)) {
+            error_report("Failed to read the im4p payload in file '%s': %d.", filename, ret);
+            exit(EXIT_FAILURE);
+        }
+
+        payload_data = g_malloc0(len);
+
+        if ((ret = asn1_read_value(img4, "data", payload_data, &len) != ASN1_SUCCESS)) {
+            error_report("Failed to read the im4p payload in file '%s': %d.", filename, ret);
+            exit(EXIT_FAILURE);
+        }
+
+        // Determine whether the payload is LZFSE-compressed: LZFSE-compressed files contains various buffer blocks,
+        // and each buffer block starts with bvx? magic, where ? is -, 1, 2 or n.
+        // See https://github.com/lzfse/lzfse/blob/e634ca58b4821d9f3d560cdc6df5dec02ffc93fd/src/lzfse_internal.h
+        // for the details
+        if (payload_data[0] == (uint8_t)'b' && payload_data[1] == (uint8_t)'v' && payload_data[2] == (uint8_t)'x') {
+            size_t decode_buffer_size = len * 8;
+            uint8_t* decode_buffer = g_malloc0(decode_buffer_size);
+
+            int decoded_length = lzfse_decode_buffer(decode_buffer, decode_buffer_size, payload_data, len, NULL /* scratch_buffer */);
+            
+            if (decoded_length == 0 || decoded_length == decode_buffer_size) {
+                error_report("Could not decompress LZFSE-compressed data in file '%s' because the decode buffer was too small.", filename);
+                exit(EXIT_FAILURE);
+            }
+
+            *data = decode_buffer;
+            *length = decoded_length;
+
+            g_free(payload_data);
+            g_free(file_data);
+        } else {
+            *data = payload_data;
+            *length = len;
+
+            g_free(file_data);
+        }
+    }
+    else
+    {
+        *data = file_data;
+        *length = (uint32_t)fsize;
+    }
+}
+
+DTBNode* load_dtb_from_file(char *filename) {
+    DTBNode *root = NULL;
+    uint8_t *file_data = NULL;
+    uint32_t fsize;
+
+    extract_im4p_payload(filename, "dtre", &file_data, &fsize);
+    root = load_dtb(file_data);
     g_free(file_data);
+
+    return root;
 }
 
 void macho_load_dtb(DTBNode* root, AddressSpace *as, MemoryRegion *mem,
@@ -445,11 +557,11 @@ static void macho_highest_lowest(struct mach_header_64* mh, uint64_t *lowaddr,
 void macho_file_highest_lowest(const char *filename, hwaddr *lowest,
                                       hwaddr *highest)
 {
-    gsize len;
+    uint32_t len;
     uint8_t *data = NULL;
-    if (!g_file_get_contents(filename, (char **)&data, &len, NULL)) {
-        abort();
-    }
+
+    extract_im4p_payload(filename, "krnl", &data, &len);
+
     struct mach_header_64* mh = (struct mach_header_64*)data;
     macho_highest_lowest(mh, lowest, highest);
     g_free(data);
@@ -459,12 +571,10 @@ void arm_load_macho(char *filename, AddressSpace *as, MemoryRegion *mem,
                     const char *name, hwaddr phys_base, hwaddr virt_base, hwaddr *pc)
 {
     uint8_t *data = NULL;
-    gsize len;
+    uint32_t len;
     uint8_t* rom_buf = NULL;
 
-    if (!g_file_get_contents(filename, (char **)&data, &len, NULL)) {
-        abort();
-    }
+    extract_im4p_payload(filename, "krnl", &data, &len);
     
     struct mach_header_64* mh = (struct mach_header_64*)data;
     struct load_command* cmd = (struct load_command*)(data +
