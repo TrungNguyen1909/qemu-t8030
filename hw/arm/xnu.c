@@ -563,6 +563,13 @@ void macho_file_highest_lowest(const char *filename, hwaddr *lowest,
     extract_im4p_payload(filename, "krnl", &data, &len);
 
     struct mach_header_64* mh = (struct mach_header_64*)data;
+
+    if (mh->magic != MACH_MAGIC_64)
+    {
+        error_report("The file '%s' is not a valid MACH object.", filename);
+        exit(EXIT_FAILURE);
+    }
+
     macho_highest_lowest(mh, lowest, highest);
     g_free(data);
 }
@@ -577,6 +584,13 @@ void arm_load_macho(char *filename, AddressSpace *as, MemoryRegion *mem,
     extract_im4p_payload(filename, "krnl", &data, &len);
     
     struct mach_header_64* mh = (struct mach_header_64*)data;
+
+    if (mh->magic != MACH_MAGIC_64)
+    {
+        error_report("The file '%s' is not a valid MACH object.", filename);
+        exit(EXIT_FAILURE);
+    }
+
     struct load_command* cmd = (struct load_command*)(data +
                                                 sizeof(struct mach_header_64));
 
