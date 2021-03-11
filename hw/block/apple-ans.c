@@ -364,6 +364,7 @@ AppleANSState* apple_ans_create(hwaddr soc_base, DTBNode* node) {
     object_property_set_str(OBJECT(&s->nvme), "serial", "QEMUT8030ANS", &error_fatal);
     object_property_set_bool(OBJECT(&s->nvme), "is-apple-ans", true, &error_fatal);
     object_property_set_uint(OBJECT(&s->nvme), "max_ioqpairs", 8, &error_fatal);
+    object_property_set_uint(OBJECT(&s->nvme), "mdts", 8, &error_fatal);
     prop = get_dtb_prop(node, "namespaces");
     assert(prop);
     NVMeCreateNamespacesEntryStruct* namespaces = (NVMeCreateNamespacesEntryStruct*)prop->value;
