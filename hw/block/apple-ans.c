@@ -123,7 +123,7 @@ static void* iop_thread_fn(void* opaque){
             }
             if(has_work){
                 iop_message_t msg = iop_inbox_get(s);
-                fprintf(stderr, "ANS2: Received msg type: %d endpoint: %d: 0x%llx 0x%llx\n", msg->type, msg->endpoint, msg->data[0], msg->data[1]);
+                // fprintf(stderr, "ANS2: Received msg type: %d endpoint: %d: 0x" TARGET_FMT_plx " 0x" TARGET_FMT_plx "\n", msg->type, msg->endpoint, msg->data[0], msg->data[1]);
                 switch(msg->endpoint){
                     case 0:
                         iop_handle_mgmt_msg(s, msg);
@@ -210,9 +210,7 @@ static uint64_t iop_akf_reg_read(void *opaque,
                 assert(m);
                 QTAILQ_REMOVE(&s->outbox, m, entry);
                 m->flags = iop_outbox_flags(s);
-                fprintf(stderr, "ANS2: I2A flags: 0x%x\n", m->flags);
                 ret = m->data[1];
-                fprintf(stderr, "ANS2: I2A_MSG1: 0x%llx\n", m->data[1]);
                 if(iop_outbox_empty(s)) {
                     qemu_irq_lower(s->irqs[IRQ_IOP_OUTBOX]);
                 }
@@ -367,7 +365,7 @@ AppleANSState* apple_ans_create(hwaddr soc_base, DTBNode* node) {
     object_property_set_uint(OBJECT(&s->nvme), "mdts", 8, &error_fatal);
     prop = get_dtb_prop(node, "namespaces");
     assert(prop);
-    NVMeCreateNamespacesEntryStruct* namespaces = (NVMeCreateNamespacesEntryStruct*)prop->value;
+    // NVMeCreateNamespacesEntryStruct* namespaces = (NVMeCreateNamespacesEntryStruct*)prop->value;
     // for (int i=0; i < prop->length / 12; i++){
     //     DeviceState* ns = qdev_new(TYPE_NVME_NS);
     //     object_property_set_uint(OBJECT(ns), "nsid", namespaces[i].unk0, &error_fatal);
@@ -389,9 +387,6 @@ AppleANSState* apple_ans_create(hwaddr soc_base, DTBNode* node) {
 }
 static void apple_ans_realize(DeviceState *dev, Error **errp){
     AppleANSState* s = APPLE_ANS(dev);
-    PCIHostState *pci = PCI_HOST_BRIDGE(dev);
-    SysBusDevice *sbd = SYS_BUS_DEVICE(dev);
-    PCIExpressHost *pex = PCIE_HOST_BRIDGE(dev);
 
     if(iop_inbox_empty(s)){
         qemu_irq_raise(s->irqs[IRQ_IOP_INBOX]);
@@ -407,7 +402,6 @@ static void apple_ans_unrealize(DeviceState *dev){
 }
 static void apple_ans_class_init(ObjectClass *klass, void *data)
 {
-    PCIHostBridgeClass *hc = PCI_HOST_BRIDGE_CLASS(klass);
     DeviceClass *dc = DEVICE_CLASS(klass);
     dc->realize = apple_ans_realize;
     dc->unrealize = apple_ans_unrealize;
