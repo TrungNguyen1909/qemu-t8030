@@ -15,7 +15,17 @@ jobs:
         run: |
           export DEBIAN_FRONTEND=noninteractive
           apt-get update
-          apt-get install -y git libglib2.0-dev libfdt-dev libpixman-1-dev zlib1g-dev ninja-build build-essential
+          apt-get install -y git libglib2.0-dev libfdt-dev libpixman-1-dev zlib1g-dev libtasn1-dev ninja-build build-essential cmake
+
+      - name: Install lzfse
+        run: |
+          git clone https://github.com/lzfse/lzfse
+          cd lzfse
+          mkdir build
+          cd build
+          cmake ..
+          make
+          make install
 
       - uses: actions/checkout@v2
         with:
@@ -48,7 +58,7 @@ jobs:
 
       - name: Install build dependencies
         run: |
-          brew install ninja pixman
+          brew install ninja pixman lzfse
 
       - name: Build qemu
         run: |
@@ -77,7 +87,17 @@ jobs:
         run: |
           export DEBIAN_FRONTEND=noninteractive
           apt-get update
-          apt-get install -y git libglib2.0-dev libfdt-dev libpixman-1-dev zlib1g-dev ninja-build build-essential
+          apt-get install -y git libglib2.0-dev libfdt-dev libpixman-1-dev zlib1g-dev libtasn1-dev ninja-build build-essential cmake
+
+      - name: Install lzfse
+        run: |
+          git clone https://github.com/lzfse/lzfse
+          cd lzfse
+          mkdir build
+          cd build
+          cmake ..
+          make
+          make install
 
       - uses: actions/checkout@v2
         with:
@@ -110,7 +130,7 @@ jobs:
 
       - name: Install build dependencies
         run: |
-          brew install ninja pixman
+          brew install ninja pixman lzfse
 
       - name: Build qemu
         run: |
