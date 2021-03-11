@@ -54,6 +54,8 @@ struct segment_command_64
     uint32_t flags;
 };
 
+#define MACH_MAGIC_64   0xFEEDFACFu
+
 struct mach_header_64 {
     uint32_t    magic;      /* mach magic number identifier */
     uint32_t /*cpu_type_t*/  cputype;    /* cpu specifier */
