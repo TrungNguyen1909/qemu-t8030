@@ -204,7 +204,7 @@ static void extract_im4p_payload(const char* filename, const char* payload_type,
         }
 
         if (strncmp(type, payload_type, 4) != 0) {
-            error_report("Could parse ASN.1 data in file '%s' because it is not a %s object.", filename, payload_type);
+            error_report("Could parse ASN.1 data in file '%s' because it is not a '%s' object, found '%s' object.", filename, payload_type, type);
             exit(EXIT_FAILURE);
         }
 
