@@ -407,19 +407,42 @@ void macho_load_trustcache(const char *filename, AddressSpace *as, MemoryRegion 
     uint64_t trustcache_size = 0;
     uint8_t* file_data = NULL;
     unsigned long file_size = 0;
-    if (g_file_get_contents(filename, (char **)&file_data, &file_size, NULL)) {
-        trustcache_size = file_size + 8;
-        trustcache_data = (uint32_t*)g_malloc(trustcache_size);
-        trustcache_data[0] = 1; //#trustcaches
-        trustcache_data[1] = 8; //offset
-        memcpy(&trustcache_data[2], file_data, file_size);
-        allocate_and_copy(mem, as, "TrustCache", pa, trustcache_size, trustcache_data);
-        *size = trustcache_size;
-        g_free(file_data);
-        g_free(trustcache_data);
-    } else {
-        abort();
+    uint32_t length = 0;
+
+    extract_im4p_payload(filename, "trst", &file_data, &length);
+    file_size = (unsigned long)length;
+
+    trustcache_size = file_size + 8;
+    trustcache_data = (uint32_t*)g_malloc(trustcache_size);
+    trustcache_data[0] = 1; //#trustcaches
+    trustcache_data[1] = 8; //offset
+    memcpy(&trustcache_data[2], file_data, file_size);
+
+    // Validate the trustcache v1 header. The layout is:
+    // uint32_t version
+    // uuid (16 bytes)
+    // uint32_t entry_count
+    //
+    // The cache is then followed by entry_count entries, each of which
+    // contains a 20 byte hash and 2 additional bytes (hence is 22 bytes long)
+    uint32_t trustcache_version = trustcache_data[2];
+    uint32_t trustcache_entry_count = trustcache_data[7];
+    uint32_t expected_file_size = 24 /* header size */ + trustcache_entry_count * 22 /* entry size */;
+
+    if (trustcache_version != 1) {
+        error_report("The trust cache '%s' does not have a v1 header", filename);
+        exit(EXIT_FAILURE);
     }
+
+    if (file_size != expected_file_size) {
+        error_report("The expected size %d of trust cache '%s' does not match the actual size %ld", expected_file_size, filename, file_size);
+        exit(EXIT_FAILURE);
+    }
+
+    allocate_and_copy(mem, as, "TrustCache", pa, trustcache_size, trustcache_data);
+    *size = trustcache_size;
+    g_free(file_data);
+    g_free(trustcache_data);
 }
 
 void macho_map_raw_file(const char *filename, AddressSpace *as, MemoryRegion *mem,
