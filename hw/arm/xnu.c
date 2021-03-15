@@ -254,6 +254,7 @@ static void extract_im4p_payload(const char* filename, char* payload_type /* mus
     {
         *data = file_data;
         *length = (uint32_t)fsize;
+        strncpy(payload_type, "raw", 4);
     }
 }
 
@@ -265,7 +266,8 @@ DTBNode* load_dtb_from_file(char *filename) {
 
     extract_im4p_payload(filename, payload_type, &file_data, &fsize);
 
-    if (strncmp(payload_type, "dtre", 4) != 0) {
+    if (strncmp(payload_type, "dtre", 4) != 0
+        && strncmp(payload_type, "raw", 4) != 0) {
         error_report("Couldn't parse ASN.1 data in file '%s' because it is not a 'dtre' object, found '%.4s' object.", filename, payload_type);
         exit(EXIT_FAILURE);
     }
@@ -420,7 +422,8 @@ void macho_load_trustcache(const char *filename, AddressSpace *as, MemoryRegion 
     extract_im4p_payload(filename, payload_type, &file_data, &length);
 
     if (strncmp(payload_type, "trst", 4) != 0
-        && strncmp(payload_type, "rtsc", 4) != 0) {
+        && strncmp(payload_type, "rtsc", 4) != 0 
+        && strncmp(payload_type, "raw", 4) != 0) {
         error_report("Couldn't parse ASN.1 data in file '%s' because it is not a 'trst' or 'rtsc' object, found '%.4s' object.", filename, payload_type);
         exit(EXIT_FAILURE);
     }
@@ -458,6 +461,27 @@ void macho_load_trustcache(const char *filename, AddressSpace *as, MemoryRegion 
     *size = trustcache_size;
     g_free(file_data);
     g_free(trustcache_data);
+}
+
+void macho_load_ramdisk(const char *filename, AddressSpace *as, MemoryRegion *mem,
+                            hwaddr pa, uint64_t *size) {
+    uint8_t* file_data = NULL;
+    unsigned long file_size = 0;
+    uint32_t length = 0;
+    char payload_type[4];
+
+    extract_im4p_payload(filename, payload_type, &file_data, &length);
+    if (strncmp(payload_type, "rdsk", 4) != 0
+        && strncmp(payload_type, "raw", 4) != 0) {
+        error_report("Couldn't parse ASN.1 data in file '%s' because it is not a 'rdsk' object, found '%.4s' object.", filename, payload_type);
+        exit(EXIT_FAILURE);
+    }
+    file_size = align_64k_high(length);
+    file_data = g_realloc(file_data, file_size);
+
+    allocate_and_copy(mem, as, "RamDisk", pa, file_size, file_data);
+    *size = file_size;
+    g_free(file_data);
 }
 
 void macho_map_raw_file(const char *filename, AddressSpace *as, MemoryRegion *mem,
@@ -601,7 +625,8 @@ void macho_file_highest_lowest(const char *filename, hwaddr *lowest,
 
     extract_im4p_payload(filename, payload_type, &data, &len);
 
-    if (strncmp(payload_type, "krnl", 4) != 0) {
+    if (strncmp(payload_type, "krnl", 4) != 0
+        && strncmp(payload_type, "raw", 4) != 0) {
         error_report("Couldn't parse ASN.1 data in file '%s' because it is not a 'krnl' object, found '%.4s' object.", filename, payload_type);
         exit(EXIT_FAILURE);
     }
@@ -628,7 +653,8 @@ void arm_load_macho(char *filename, AddressSpace *as, MemoryRegion *mem,
 
     extract_im4p_payload(filename, payload_type, &data, &len);
 
-    if (strncmp(payload_type, "krnl", 4) != 0) {
+    if (strncmp(payload_type, "krnl", 4) != 0
+        && strncmp(payload_type, "raw", 4) != 0) {
         error_report("Couldn't parse ASN.1 data in file '%s' because it is not a 'krnl' object, found '%.4s' object.", filename, payload_type);
         exit(EXIT_FAILURE);
     }

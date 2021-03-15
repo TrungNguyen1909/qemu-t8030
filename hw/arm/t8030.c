@@ -555,9 +555,7 @@ static void T8030_memory_setup(MachineState *machine)
     if (0 != tms->ramdisk_filename[0])
     {
         tms->ramdisk_file_dev.pa = phys_ptr;
-        macho_map_raw_file(tms->ramdisk_filename, nsas, sysmem,
-                           "RamDisk", tms->ramdisk_file_dev.pa,
-                           &tms->ramdisk_file_dev.size);
+        macho_load_ramdisk(tms->ramdisk_filename, nsas, sysmem, phys_ptr, &tms->ramdisk_file_dev.size);
         tms->ramdisk_file_dev.size = align_64k_high(tms->ramdisk_file_dev.size);
         ramdisk_size = tms->ramdisk_file_dev.size;
         phys_ptr += tms->ramdisk_file_dev.size;
