@@ -266,7 +266,7 @@ DTBNode* load_dtb_from_file(char *filename) {
     extract_im4p_payload(filename, payload_type, &file_data, &fsize);
 
     if (strncmp(payload_type, "dtre", 4) != 0) {
-        error_report("Could parse ASN.1 data in file '%s' because it is not a 'dtre' object, found '%.4s' object.", filename, payload_type);
+        error_report("Couldn't parse ASN.1 data in file '%s' because it is not a 'dtre' object, found '%.4s' object.", filename, payload_type);
         exit(EXIT_FAILURE);
     }
 
