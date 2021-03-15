@@ -156,7 +156,7 @@ static void macho_dtb_node_process(DTBNode *node)
 // the raw file contents are returned. Exits if an error occurs.
 // See https://www.theiphonewiki.com/wiki/IMG4_File_Format for an overview
 // of the file format.
-static void extract_im4p_payload(const char* filename, const char* payload_type, uint8_t **data, uint32_t* length) {
+static void extract_im4p_payload(const char* filename, char* payload_type /* must be at least 4 bytes long */, uint8_t **data, uint32_t* length) {
     uint8_t *file_data = NULL;
     unsigned long fsize;
 
@@ -182,7 +182,6 @@ static void extract_im4p_payload(const char* filename, const char* payload_type,
 
     if ((ret = asn1_der_decoding(&img4, (const uint8_t*)file_data, (uint32_t)fsize, errorDescription)) == ASN1_SUCCESS) {
         char magic[4];
-        char type[4];
         char description[128];
         int len;
 
@@ -193,18 +192,13 @@ static void extract_im4p_payload(const char* filename, const char* payload_type,
         }
 
         if (strncmp(magic, "IM4P", 4) != 0) {
-            error_report("Could parse ASN.1 data in file '%s' because it does not start with the IM4P header.", filename);
+            error_report("Couldn't parse ASN.1 data in file '%s' because it does not start with the IM4P header.", filename);
             exit(EXIT_FAILURE);
         }
 
         len = 4;
-        if ((ret = asn1_read_value(img4, "type", type, &len)) != ASN1_SUCCESS) {
+        if ((ret = asn1_read_value(img4, "type", payload_type, &len)) != ASN1_SUCCESS) {
             error_report("Failed to read the im4p type in file '%s': %d.", filename, ret);
-            exit(EXIT_FAILURE);
-        }
-
-        if (strncmp(type, payload_type, 4) != 0) {
-            error_report("Could parse ASN.1 data in file '%s' because it is not a '%s' object, found '%s' object.", filename, payload_type, type);
             exit(EXIT_FAILURE);
         }
 
@@ -267,8 +261,15 @@ DTBNode* load_dtb_from_file(char *filename) {
     DTBNode *root = NULL;
     uint8_t *file_data = NULL;
     uint32_t fsize;
+    char payload_type[4];
 
-    extract_im4p_payload(filename, "dtre", &file_data, &fsize);
+    extract_im4p_payload(filename, payload_type, &file_data, &fsize);
+
+    if (strncmp(payload_type, "dtre", 4) != 0) {
+        error_report("Couldn't parse ASN.1 data in file '%s' because it is not a 'dtre' object, found '%.4s' object.", filename, payload_type);
+        exit(EXIT_FAILURE);
+    }
+
     root = load_dtb(file_data);
     g_free(file_data);
 
@@ -414,8 +415,16 @@ void macho_load_trustcache(const char *filename, AddressSpace *as, MemoryRegion 
     uint8_t* file_data = NULL;
     unsigned long file_size = 0;
     uint32_t length = 0;
+    char payload_type[4];
 
-    extract_im4p_payload(filename, "trst", &file_data, &length);
+    extract_im4p_payload(filename, payload_type, &file_data, &length);
+
+    if (strncmp(payload_type, "trst", 4) != 0
+        && strncmp(payload_type, "rtsc", 4) != 0) {
+        error_report("Couldn't parse ASN.1 data in file '%s' because it is not a 'trst' or 'rtsc' object, found '%.4s' object.", filename, payload_type);
+        exit(EXIT_FAILURE);
+    }
+
     file_size = (unsigned long)length;
 
     trustcache_size = file_size + 8;
@@ -588,8 +597,14 @@ void macho_file_highest_lowest(const char *filename, hwaddr *lowest,
 {
     uint32_t len;
     uint8_t *data = NULL;
+    char payload_type[4];
 
-    extract_im4p_payload(filename, "krnl", &data, &len);
+    extract_im4p_payload(filename, payload_type, &data, &len);
+
+    if (strncmp(payload_type, "krnl", 4) != 0) {
+        error_report("Couldn't parse ASN.1 data in file '%s' because it is not a 'krnl' object, found '%.4s' object.", filename, payload_type);
+        exit(EXIT_FAILURE);
+    }
 
     struct mach_header_64* mh = (struct mach_header_64*)data;
 
@@ -609,8 +624,14 @@ void arm_load_macho(char *filename, AddressSpace *as, MemoryRegion *mem,
     uint8_t *data = NULL;
     uint32_t len;
     uint8_t* rom_buf = NULL;
+    char payload_type[4];
 
-    extract_im4p_payload(filename, "krnl", &data, &len);
+    extract_im4p_payload(filename, payload_type, &data, &len);
+
+    if (strncmp(payload_type, "krnl", 4) != 0) {
+        error_report("Couldn't parse ASN.1 data in file '%s' because it is not a 'krnl' object, found '%.4s' object.", filename, payload_type);
+        exit(EXIT_FAILURE);
+    }
     
     struct mach_header_64* mh = (struct mach_header_64*)data;
 
