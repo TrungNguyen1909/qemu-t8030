@@ -482,11 +482,22 @@ static void T8030_create_s3c_uart(const T8030MachineState *tms, Chardev *chr)
 
 static void T8030_patch_kernel(AddressSpace *nsas)
 {
-    uint32_t value = 0;
-    //disable_kprintf_output = 0
-    address_space_rw(nsas, vtop_static(0xFFFFFFF0077142C8),
-                     MEMTXATTRS_UNSPECIFIED, (uint8_t *)&value,
-                     sizeof(value), 1);
+    // uint32_t value = 0;
+    // //disable_kprintf_output = 0
+    // address_space_rw(nsas, vtop_static(0xFFFFFFF0077142C8),
+    //                  MEMTXATTRS_UNSPECIFIED, (uint8_t *)&value,
+    //                  sizeof(value), 1);
+    //TODO: PMGR
+    // value = RET_INST;
+    // //AppleT8030PMGR::panicHW
+    // address_space_rw(nsas, vtop_static(0xFFFFFFF008B2DBE4),
+    //                  MEMTXATTRS_UNSPECIFIED, (uint8_t *)&value,
+    //                  sizeof(value), 1);
+    // //AppleImage4 _xnu_log 
+    // value = NOP_INST;
+    // address_space_rw(nsas, vtop_static(0xFFFFFFF008387A28),
+    //                  MEMTXATTRS_UNSPECIFIED, (uint8_t *)&value,
+    //                  sizeof(value), 1);
 }
 
 static void T8030_memory_setup(MachineState *machine)
@@ -905,12 +916,23 @@ static void T8030_pmgr_setup(MachineState* machine){
     for(int i = 0; i < prop->length / 8; i+=2){
         MemoryRegion* mem = g_new(MemoryRegion, 1);
         if(i > 0){
-            memory_region_init_io(mem, OBJECT(machine), &pmgr_unk_reg_ops, (void*)reg[i], "pmgr-unk-reg", reg[i+1]);
+            char* name = g_malloc0(32);
+            snprintf(name, 32, "pmgr-unk-reg-%d", i);
+            memory_region_init_io(mem, OBJECT(machine), &pmgr_unk_reg_ops, (void*)reg[i], name, reg[i+1]);
+            g_free(name);
         }
         else {
             memory_region_init_io(mem, OBJECT(machine), &pmgr_reg_ops, tms, "pmgr-reg", reg[i+1]);
         }
-        memory_region_add_subregion(tms->sysmem, reg[i] < tms->soc_size ? tms->soc_base_pa + reg[i] : reg[i], mem);
+        memory_region_add_subregion(tms->sysmem, reg[i] + reg[i+1] < tms->soc_size ? tms->soc_base_pa + reg[i] : reg[i], mem);
+    }
+    {
+        //TODO: figure out where does this map come from
+        MemoryRegion* mem = g_new(MemoryRegion, 1);
+        char* name = g_malloc0(32);
+        snprintf(name, 32, "pmgr-unk-man-reg");
+        memory_region_init_io(mem, OBJECT(machine), &pmgr_unk_reg_ops, (void*)0x3BC00000, name, 0x1000);
+        memory_region_add_subregion(tms->sysmem, tms->soc_base_pa + 0x3BC00000, mem);
     }
     add_dtb_prop(child, "voltage-states0", 24, (uint8_t*)"\x01\x00\x00\x00\x71\x02\x00\x00\x01\x00\x00\x00\xa9\x02\x00\x00\x01\x00\x00\x00\xe4\x02\x00\x00");
     add_dtb_prop(child, "voltage-states1", 40, (uint8_t*)"\x71\xbc\x01\x00\x38\x02\x00\x00\x4b\x28\x01\x00\x83\x02\x00\x00\x38\xde\x00\x00\xde\x02\x00\x00\xc7\xb1\x00\x00\x42\x03\x00\x00\x25\x94\x00\x00\xaf\x03\x00\x00");

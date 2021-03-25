@@ -311,7 +311,7 @@ void macho_load_dtb(DTBNode* root, AddressSpace *as, MemoryRegion *mem,
     // *(uint32_t*)prop->value = 1;
     prop = get_dtb_prop(child, "firmware-version");
     remove_dtb_prop(child, prop);
-    add_dtb_prop(child, "firmware-version", 15, (uint8_t*)"qemu-t8030");
+    add_dtb_prop(child, "firmware-version", 11, (uint8_t*)"qemu-t8030");
     prop = get_dtb_prop(child, "nvram-total-size");
     remove_dtb_prop(child, prop);
     uint32_t nvram_total_size = 0xFFFF * 0x10;
@@ -348,7 +348,9 @@ void macho_load_dtb(DTBNode* root, AddressSpace *as, MemoryRegion *mem,
     add_dtb_prop(child, "chip-epoch", sizeof(data), (uint8_t *)&data);
     data = 0xffffffff;
     add_dtb_prop(child, "debug-enabled", sizeof(data), (uint8_t *)&data);
-
+    prop = get_dtb_prop(child, "amfi-allows-trust-cache-load");
+    assert(prop->length == 4);
+    *(uint32_t*)prop->value = 1;
     child = get_dtb_child_node_by_name(child, "memory-map");
     assert(child != NULL);
 
@@ -399,6 +401,11 @@ void macho_load_dtb(DTBNode* root, AddressSpace *as, MemoryRegion *mem,
     prop = get_dtb_prop(child, "aes-service-publish-timeout");
     assert(prop);
     *(uint32_t*)prop->value = 0xffffffff;
+    child = get_dtb_child_node_by_name(root, "product");
+    assert(child);
+    data = 1;
+    // TODO: Workaround: AppleKeyStore SEP(?)
+    add_dtb_prop(child, "boot-ios-diagnostics", sizeof(data), (uint8_t*)&data);
     macho_dtb_node_process(root);
 
     uint64_t size_n = get_dtb_node_buffer_size(root);

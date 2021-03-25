@@ -2782,7 +2782,7 @@ static void nvme_init_ctrl(NvmeCtrl *n, PCIDevice *pci_dev)
     // if(n->namespaces[i]){
     //     id->capacity += n->namespaces[i]->size;
     // }
-    id->capacity = 10;
+    id->capacity = 128;
     n->bar.cap = 0;
     NVME_CAP_SET_MQES(n->bar.cap, 0x7ff);
     NVME_CAP_SET_CQR(n->bar.cap, 1);
