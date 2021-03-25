@@ -153,7 +153,7 @@ typedef struct {
     uint64_t tick;
 } cluster;
 
-#define kDeferredIPITimerDefault 1536
+#define kDeferredIPITimerDefault 64000
 
 typedef struct
 {
@@ -193,4 +193,31 @@ typedef struct
     uint8_t ramfb[RAMFB_SIZE];
 } __attribute__((packed)) AllocatedData;
 
+#define NSEC_PER_USEC   1000ull         /* nanoseconds per microsecond */
+#define USEC_PER_SEC    1000000ull      /* microseconds per second */
+#define NSEC_PER_SEC    1000000000ull   /* nanoseconds per second */
+#define NSEC_PER_MSEC   1000000ull      /* nanoseconds per millisecond */
+#define RTCLOCK_SEC_DIVISOR     24000000ull
+
+static void
+absolutetime_to_nanoseconds(uint64_t   abstime,
+    uint64_t * result)
+{
+	uint64_t        t64;
+
+	*result = (t64 = abstime / RTCLOCK_SEC_DIVISOR) * NSEC_PER_SEC;
+	abstime -= (t64 * RTCLOCK_SEC_DIVISOR);
+	*result += (abstime * NSEC_PER_SEC) / RTCLOCK_SEC_DIVISOR;
+}
+
+static void
+nanoseconds_to_absolutetime(uint64_t   nanosecs,
+    uint64_t * result)
+{
+	uint64_t        t64;
+
+	*result = (t64 = nanosecs / NSEC_PER_SEC) * RTCLOCK_SEC_DIVISOR;
+	nanosecs -= (t64 * NSEC_PER_SEC);
+	*result += (nanosecs * RTCLOCK_SEC_DIVISOR) / NSEC_PER_SEC;
+}
 #endif

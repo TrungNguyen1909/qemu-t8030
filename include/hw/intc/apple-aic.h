@@ -67,7 +67,7 @@ num IRQ + (cpu_id * 2) -> self_ipi (cpuX->cpuX)
 num IRQ + (cpu_id * 2) + 1 -> other_ipi (cpuX->cpuY)
 */ 
 
-#define kDeferredIPITimerDefault 1536
+#define kDeferredIPITimerDefault 64000
 
 typedef enum {
     //CPU not in AppleInterruptController::handleInterrupt loop

@@ -281,22 +281,25 @@ static uint64_t T8030_ipi_read_cr(CPUARMState *env, const ARMCPRegInfo *ri)
 {
     T8030CPUState *tcpu = T8030_cs_from_env(env);
     T8030MachineState *tms = T8030_MACHINE(tcpu->machine);
-    return tms->ipi_cr;
+    uint64_t abstime;
+    nanoseconds_to_absolutetime(tms->ipi_cr, &abstime);
+    return abstime;
 }
 //Set deferred interrupt timeout (global)
 static void T8030_ipi_write_cr(CPUARMState *env, const ARMCPRegInfo *ri,
                                          uint64_t value)
 {
-    fprintf(stderr, "T8030 adjusting deferred IPI timeout to " TARGET_FMT_lu "\n", value);
+    uint64_t nanosec = 0;
+    absolutetime_to_nanoseconds(value, &nanosec);
+    fprintf(stderr, "T8030 adjusting deferred IPI timeout to " TARGET_FMT_lu "ns\n", nanosec);
     T8030CPUState *tcpu = T8030_cs_from_env(env);
     T8030MachineState *tms = T8030_MACHINE(tcpu->machine);
     WITH_QEMU_LOCK_GUARD(&tms->mutex){
         if(value == 0) value = kDeferredIPITimerDefault;
-        if(tms->ipi_cr == value) return;
 
         uint64_t ct = qemu_clock_get_ns(QEMU_CLOCK_VIRTUAL);
-        timer_mod_ns(tms->ipicr_timer, (ct / tms->ipi_cr) * tms->ipi_cr + value);
-        tms->ipi_cr = value;
+        timer_mod_ns(tms->ipicr_timer, (ct / tms->ipi_cr) * tms->ipi_cr + nanosec);
+        tms->ipi_cr = nanosec;
     }
 }
 
