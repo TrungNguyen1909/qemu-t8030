@@ -788,7 +788,8 @@ static void T8030_cpu_setup(MachineState *machine)
         assert(prop->length == 4);
         unsigned int cluster_id = *(unsigned int*)prop->value;
         uint64_t mpidr = 0LL | phys_id | (tms->clusters[cluster_id]->type << MPIDR_AFF2_SHIFT) | (1LL << 31);
-        object_property_set_int(cpuobj, "mp-affinity", mpidr, &error_fatal);
+        object_property_set_uint(cpuobj, "mp-affinity", mpidr, &error_fatal);
+        object_property_set_uint(cpuobj, "cntfrq", 24000000, &error_fatal);
         tms->cpus[i]->mpidr = mpidr;
         tms->cpus[i]->cpu_id = cpu_id;
         tms->cpus[i]->phys_id = phys_id;
