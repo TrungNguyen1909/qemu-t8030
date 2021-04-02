@@ -282,7 +282,9 @@ void macho_load_dtb(DTBNode* root, AddressSpace *as, MemoryRegion *mem,
                     const char *name, hwaddr dtb_pa, uint64_t *size,
                     hwaddr ramdisk_addr, hwaddr ramdisk_size,
                     hwaddr trustcache_addr, hwaddr trustcache_size,
-                    hwaddr dram_base, unsigned long dram_size)
+                    hwaddr bootargs_addr,
+                    hwaddr dram_base, unsigned long dram_size,
+                    void* nvram_data, unsigned long nvram_size)
 {
     DTBNode* child = NULL;
     DTBProp* prop = NULL;
@@ -314,13 +316,14 @@ void macho_load_dtb(DTBNode* root, AddressSpace *as, MemoryRegion *mem,
     add_dtb_prop(child, "firmware-version", 11, (uint8_t*)"qemu-t8030");
     prop = get_dtb_prop(child, "nvram-total-size");
     remove_dtb_prop(child, prop);
-    uint32_t nvram_total_size = 0xFFFF * 0x10;
+    if(nvram_size > 0xFFFF * 0x10){
+        nvram_size = 0xFFFF * 0x10;
+    }
+    uint32_t nvram_total_size = nvram_size;
     add_dtb_prop(child, "nvram-total-size", 4, (uint8_t*)&nvram_total_size);
-    
-    char nvram_proxy_data[] = "0000common\0     nonce-seeds=aaaabbbbccccddddaaaabbbbccccdddd\0\0\0";
     prop = get_dtb_prop(child, "nvram-proxy-data");
     remove_dtb_prop(child, prop);
-    add_dtb_prop(child, "nvram-proxy-data", sizeof(nvram_proxy_data), (uint8_t*)nvram_proxy_data);
+    add_dtb_prop(child, "nvram-proxy-data", nvram_size, (uint8_t*)nvram_data);
 
     uint32_t data = 1;
     add_dtb_prop(child, "research-enabled", sizeof(data), (uint8_t *)&data);
@@ -368,6 +371,10 @@ void macho_load_dtb(DTBNode* root, AddressSpace *as, MemoryRegion *mem,
         add_dtb_prop(child, "TrustCache", sizeof(memmap),
                         (uint8_t *)&memmap[0]);
     }
+    memmap[0] = bootargs_addr;
+    memmap[1] = sizeof(struct xnu_arm64_boot_args);
+    add_dtb_prop(child, "BootArgs", sizeof(memmap), (uint8_t *)&memmap[0]);
+    add_dtb_prop(child, "DeviceTree", sizeof(memmap), (uint8_t *)&memmap[0]);
     
     child = get_dtb_child_node_by_name(root, "chosen");
     assert(child);
@@ -409,6 +416,11 @@ void macho_load_dtb(DTBNode* root, AddressSpace *as, MemoryRegion *mem,
     macho_dtb_node_process(root);
 
     uint64_t size_n = get_dtb_node_buffer_size(root);
+    child = get_dtb_child_node_by_name(root, "chosen");
+    child = get_dtb_child_node_by_name(child, "memory-map");
+    prop = get_dtb_prop(child, "DeviceTree");
+    ((uint64_t*)prop->value)[0] = dtb_pa;
+    ((uint64_t*)prop->value)[1] = size_n;
 
     uint8_t *buf = g_malloc0(size_n);
     save_dtb(buf, root);

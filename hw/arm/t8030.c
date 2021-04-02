@@ -29,6 +29,7 @@
 #include "hw/arm/boot.h"
 #include "exec/address-spaces.h"
 #include "hw/misc/unimp.h"
+#include "sysemu/block-backend.h"
 #include "sysemu/sysemu.h"
 #include "sysemu/reset.h"
 #include "qemu/error-report.h"
@@ -48,6 +49,7 @@
 #define CPU_IMPL_REG_BASE (0x210050000)
 #define CPM_IMPL_REG_BASE (0x210e40000)
 #define T8030_MAX_DEVICETREE_SIZE (0x40000)
+#define T8030_NVRAM_SIZE (0x2000)
 #define NOP_INST (0xd503201f)
 #define MOV_W0_01_INST (0x52800020)
 #define MOV_X13_0_INST (0xd280000d)
@@ -591,11 +593,20 @@ static void T8030_memory_setup(MachineState *machine)
     tms->dram_base = T8030_PHYS_BASE;
     tms->dram_size = machine->ram_size;
 
+    NvmeNamespace* nvram = NVME_NS(qdev_find_recursive(sysbus_get_default(), "nvram"));
+    assert(nvram);
+    void* nvram_data = NULL;
+    nvram_data = g_malloc0(T8030_NVRAM_SIZE);
+    blk_pread(nvram->blkconf.blk, 0, nvram_data, T8030_NVRAM_SIZE);
+    
     macho_load_dtb(tms->device_tree, nsas, sysmem, "DeviceTree",
                    dtb_pa, &dtb_size,
                    tms->ramdisk_file_dev.pa, ramdisk_size,
                    trustcache_pa, trustcache_size,
-                   tms->dram_base, tms->dram_size);
+                   kbootargs_pa,
+                   tms->dram_base, tms->dram_size,
+                   nvram_data, T8030_NVRAM_SIZE);
+    g_free(nvram_data);
     assert(dtb_size <= T8030_MAX_DEVICETREE_SIZE);
 
     macho_setup_bootargs("BootArgs", nsas, sysmem, kbootargs_pa,
@@ -1057,6 +1068,7 @@ static void T8030_machine_reset(void* opaque){
     T8030MachineState *tms = T8030_MACHINE(opaque);
     tms->ipicr_timer = timer_new_ns(QEMU_CLOCK_VIRTUAL, T8030_machine_ipicr_tick, machine);
     timer_mod_ns(tms->ipicr_timer, kDeferredIPITimerDefault);
+    T8030_memory_setup(machine);
     T8030_cpu_reset(tms);
 }
 
@@ -1088,8 +1100,6 @@ static void T8030_machine_init(MachineState *machine)
     T8030_sart_setup(machine);
 
     T8030_create_ans(machine);
-
-    T8030_memory_setup(machine);
 
     T8030_bootargs_setup(machine);
 
@@ -1230,7 +1240,7 @@ static void T8030_machine_class_init(ObjectClass *klass, void *data)
     mc->max_cpus = MAX_CPU;
     //this disables the error message "Failed to query for block devices!"
     //when starting qemu - must keep at least one device
-    //mc->no_sdcard = 1;
+    mc->no_sdcard = 1;
     mc->no_floppy = 1;
     mc->no_cdrom = 1;
     mc->no_parallel = 1;
