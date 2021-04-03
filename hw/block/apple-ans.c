@@ -290,7 +290,7 @@ static void apple_ans_set_irq(void *opaque, int irq_num, int level){
     qemu_set_irq(s->irqs[s->nvme_interrupt_idx], level);
 }
 
-AppleANSState* apple_ans_create(hwaddr soc_base, DTBNode* node) {
+DeviceState* apple_ans_create(DTBNode* node) {
     DeviceState  *dev;
     AppleANSState *s;
     PCIHostState *pci;
@@ -314,11 +314,16 @@ AppleANSState* apple_ans_create(hwaddr soc_base, DTBNode* node) {
     */
     s->iomems[0] = g_new(MemoryRegion, 1);
     memory_region_init_io(s->iomems[0], OBJECT(dev), &iop_akf_reg_ops, s, "ans-akf-reg", reg[1]);
+    sysbus_init_mmio(sbd, s->iomems[0]);
     s->iomems[1] = g_new(MemoryRegion, 1);
     memory_region_init_io(s->iomems[1], OBJECT(dev), &ascv2_core_reg_ops, s, "ans-ascv2-core-reg", reg[3]);
+    sysbus_init_mmio(sbd, s->iomems[1]);
     s->iomems[2] = g_new(MemoryRegion, 1);
     memory_region_init_io(s->iomems[2], OBJECT(dev), &iop_autoboot_reg_ops, s, "ans-iop-autoboot-reg", reg[5]);
-    qdev_init_gpio_out(dev, s->irqs, 5);
+    sysbus_init_mmio(sbd, s->iomems[2]);
+    for(int i = 0; i < 5; i++) {
+        sysbus_init_irq(sbd, &s->irqs[i]);
+    }
     QTAILQ_INIT(&s->inbox);
     QTAILQ_INIT(&s->outbox);
     qemu_cond_init(&s->iop_halt);
@@ -375,15 +380,12 @@ AppleANSState* apple_ans_create(hwaddr soc_base, DTBNode* node) {
     memory_region_init(&s->io_mmio, OBJECT(s), "ans_pci_mmio", UINT64_MAX);
     memory_region_init(&s->io_ioport, OBJECT(s), "ans_pci_ioport", 64 * 1024);
 
-    sysbus_init_mmio(sbd, &pex->mmio);
-    sysbus_init_mmio(sbd, &s->io_mmio);
-    sysbus_init_mmio(sbd, &s->io_ioport);
     pci->bus = pci_register_root_bus(dev, "anspcie.0", apple_ans_set_irq,
                                      pci_swizzle_map_irq_fn, s, &s->io_mmio,
                                      &s->io_ioport, 0, 4, TYPE_PCIE_BUS);
     pci_realize_and_unref(PCI_DEVICE(&s->nvme), pci->bus, &error_fatal);
-    s->iomems[3] = &s->nvme.iomem;
-    return s;
+    sysbus_init_mmio(sbd, &s->nvme.iomem);
+    return dev;
 }
 static void apple_ans_realize(DeviceState *dev, Error **errp){
     AppleANSState* s = APPLE_ANS(dev);

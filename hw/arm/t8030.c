@@ -993,7 +993,7 @@ static void T8030_create_ans(MachineState* machine){
     assert(child != NULL);
     child = get_dtb_child_node_by_name(child, "ans");
     assert(child != NULL);
-    tms->ans = apple_ans_create(tms->soc_base_pa, child);
+    tms->ans = apple_ans_create(child);
     assert(tms->ans);
     object_property_add_child(OBJECT(machine), "ans", OBJECT(tms->ans));
     DTBProp *prop = get_dtb_prop(child, "reg");
@@ -1003,18 +1003,19 @@ static void T8030_create_ans(MachineState* machine){
     0: AppleA7IOP akfRegMap
     1: AppleASCWrapV2 coreRegisterMap
     2: AppleA7IOP autoBootRegMap
+    3: NVMe BAR
     */
-    memory_region_add_subregion(tms->sysmem, tms->soc_base_pa + reg[0], tms->ans->iomems[0]);
-    memory_region_add_subregion(tms->sysmem, tms->soc_base_pa + reg[2], tms->ans->iomems[1]);
-    memory_region_add_subregion(tms->sysmem, tms->soc_base_pa + reg[4], tms->ans->iomems[2]);
-    memory_region_add_subregion(tms->sysmem, tms->soc_base_pa + reg[6], tms->ans->iomems[3]);
+    sysbus_mmio_map(SYS_BUS_DEVICE(tms->ans), 0, tms->soc_base_pa + reg[0]);
+    sysbus_mmio_map(SYS_BUS_DEVICE(tms->ans), 1, tms->soc_base_pa + reg[2]);
+    sysbus_mmio_map(SYS_BUS_DEVICE(tms->ans), 2, tms->soc_base_pa + reg[4]);
+    sysbus_mmio_map(SYS_BUS_DEVICE(tms->ans), 3, tms->soc_base_pa + reg[6]);
 
     prop = get_dtb_prop(child, "interrupts");
     assert(prop);
     assert(prop->length == 20);
     uint32_t* ints = (uint32_t*)prop->value;
-    for(int i = 0; i < 5; i++){
-        qdev_connect_gpio_out(DEVICE(tms->ans), i, qdev_get_gpio_in(DEVICE(tms->aic), ints[i]));
+    for(int i = 0; i < prop->length / sizeof(uint32_t); i++){
+        sysbus_connect_irq(SYS_BUS_DEVICE(tms->ans), i, qdev_get_gpio_in(DEVICE(tms->aic), ints[i]));
     }
     sysbus_realize_and_unref(SYS_BUS_DEVICE(tms->ans), &error_fatal);
 }
