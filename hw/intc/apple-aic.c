@@ -1,5 +1,6 @@
 #include "qemu/osdep.h"
 #include "hw/intc/apple-aic.h"
+#include "trace.h"
 #include "hw/irq.h"
 #include "migration/vmstate.h"
 #include "qemu/bitops.h"
@@ -116,8 +117,6 @@ static void apple_aic_write(void *opaque,
     WITH_QEMU_LOCK_GUARD(&s->mutex){
         if (addr >= 0x6000) { /* REG_TSTAMP */
             //TODO: implement
-            // fprintf(stderr, "AIC: Write REG_TSTAMP\n");
-            return;
         } else if (addr >= 0x5000) { /* REG_PERCPU(r,c) */
             uint32_t cpu_id = extract32(addr, 7, 5);
             uint32_t op = extract32(addr, 0, 7);
@@ -150,6 +149,7 @@ static void apple_aic_write(void *opaque,
                         for(int i = 0; i < 32; i++)
                         if(test_bit(i, (unsigned long*)&val)) {
                             clear_bit((ipid << 5) + i, (unsigned long*)s->ipid_mask);
+                            trace_aic_enable_irq((ipid << 5) + i);
                         }
                         return;
                     }
@@ -159,6 +159,7 @@ static void apple_aic_write(void *opaque,
                     for(int i = 0; i < 32; i++)
                         if(test_bit(i, (unsigned long*)&val)) {
                             set_bit((ipid << 5) + i, (unsigned long*)s->ipid_mask);
+                            trace_aic_disable_irq((ipid << 5) + i);
                         }
                     return;
                 }
@@ -195,7 +196,7 @@ static void apple_aic_write(void *opaque,
                         set = true;
                     }
                     if (!set){
-                        fprintf(stderr, "AIC: Write REG_IPI_SET = 0x%x from CPU %u not set any IPI\n", val, o->cpu_id);
+                        qemu_log_mask(LOG_GUEST_ERROR, "AIC: Write REG_IPI_SET = 0x%x from CPU %u not set any IPI", val, o->cpu_id);
                         break;
                     }
                     apple_aic_update(s);
@@ -212,7 +213,7 @@ static void apple_aic_write(void *opaque,
                         set = true;
                     }
                     if (!set){
-                        fprintf(stderr, "AIC: Write REG_IPI_DEFER_SET = 0x%x not set any IPI\n", val);
+                        qemu_log_mask(LOG_GUEST_ERROR, "AIC: Write REG_IPI_DEFER_SET = 0x%x not set any IPI", val);
                         break;
                     }
                     apple_aic_update(s);
@@ -224,7 +225,7 @@ static void apple_aic_write(void *opaque,
                     return;
             }
         }
-        fprintf(stderr, "AIC: Write to unspported reg 0x" TARGET_FMT_plx "\n", addr);
+        qemu_log_mask(LOG_UNIMP, "AIC: Write to unspported reg 0x" TARGET_FMT_plx, addr);
     }
 }
 static uint64_t apple_aic_read(void *opaque,
@@ -235,7 +236,7 @@ static uint64_t apple_aic_read(void *opaque,
     WITH_QEMU_LOCK_GUARD(&s->mutex){
         if (addr >= 0x6000) { /* REG_TSTAMP */
             //TODO: implement
-            fprintf(stderr, "AIC: Read REG_TSTAMP\n");
+            qemu_log_mask(LOG_UNIMP, "AIC: Read REG_TSTAMP");
             return 0;
         } else if (addr >= 0x5000) { /* REG_PERCPU(r,c) */
             uint32_t cpu_id = extract32(addr, 7, 5);
@@ -301,7 +302,7 @@ static uint64_t apple_aic_read(void *opaque,
             }
         }
     }
-    fprintf(stderr, "AIC: Read from unspported reg 0x" TARGET_FMT_plx "\n", addr);
+    qemu_log_mask(LOG_UNIMP, "AIC: Read from unspported reg 0x" TARGET_FMT_plx, addr);
     return -1;
 }
 
