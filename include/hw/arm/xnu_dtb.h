@@ -46,6 +46,7 @@ typedef struct {
 DTBNode *load_dtb(uint8_t *dtb_blob);
 void delete_dtb_node(DTBNode *node);
 void save_dtb(uint8_t *buf, DTBNode *root);
+void remove_dtb_node(DTBNode *node, DTBNode *child);
 void remove_dtb_prop(DTBNode *node, DTBProp *prop);
 void add_dtb_prop(DTBNode *n, const char *name, uint32_t size, uint8_t *val);
 void add_dtb_node(DTBNode *n, const char *name);

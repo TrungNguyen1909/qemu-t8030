@@ -161,11 +161,26 @@ static void save_node(DTBNode *node, uint8_t **buf)
     g_list_foreach(node->child_nodes, (GFunc)save_node, buf);
 }
 
-void remove_dtb_prop(DTBNode *node, DTBProp *prop)
+void remove_dtb_node(DTBNode *parent, DTBNode *node)
 {
-    if ((NULL == node) || (NULL == prop)) {
-        abort();
+    assert(parent && node);
+    GList *iter;
+    bool found = false;
+    for (iter = parent->child_nodes; iter != NULL; iter = iter->next) {
+        if (node == iter->data) {
+            found = true;
+            break;
+        }
     }
+    assert(found);
+    delete_dtb_node(node);
+    parent->child_nodes = g_list_delete_link(parent->child_nodes, iter);
+
+    //sanity
+    assert(parent->child_node_count > 0);
+
+    parent->child_node_count--;
+}
     GList *iter;
     bool found = false;
     for (iter = node->props; iter != NULL; iter = iter->next) {
