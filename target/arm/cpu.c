@@ -801,13 +801,14 @@ static void aarch64_cpu_dump_state(CPUState *cs, FILE *f, int flags)
     } else {
         ns_status = "";
     }
-    qemu_fprintf(f, "PSTATE=%08x %c%c%c%c %sEL%d%c",
+    qemu_fprintf(f, "PSTATE=%08x %c%c%c%c %s%cL%d%c",
                  psr,
                  psr & PSTATE_N ? 'N' : '-',
                  psr & PSTATE_Z ? 'Z' : '-',
                  psr & PSTATE_C ? 'C' : '-',
                  psr & PSTATE_V ? 'V' : '-',
                  ns_status,
+                 env->gxf.guarded ? 'G' : 'E',
                  el,
                  psr & PSTATE_SP ? 'h' : 't');
 
