@@ -190,7 +190,7 @@ void remove_dtb_prop(DTBNode *node, DTBProp *prop)
     node->prop_count--;
 }
 
-void add_dtb_prop(DTBNode *n, const char *name, uint32_t size, uint8_t *val)
+DTBProp *add_dtb_prop(DTBNode *n, const char *name, uint32_t size, uint8_t *val)
 {
     assert(n && name && val);
     DTBProp *prop = g_new0(DTBProp, 1);
@@ -200,14 +200,16 @@ void add_dtb_prop(DTBNode *n, const char *name, uint32_t size, uint8_t *val)
     memcpy(&prop->value[0], val, size);
     n->props = g_list_append(n->props, prop);
     n->prop_count++;
+    return prop;
 }
-void add_dtb_node(DTBNode *n, const char *name)
+DTBNode *add_dtb_node(DTBNode *n, const char *name)
 {
     assert(n && name);
     DTBNode *node = g_new0(DTBNode, 1);
     add_dtb_prop(node, "name", strlen(name) + 1, (uint8_t*)name);
     n->child_nodes = g_list_append(n->child_nodes, node);
     n->child_node_count ++;
+    return node;
 }
 
 void save_dtb(uint8_t *buf, DTBNode *root)
