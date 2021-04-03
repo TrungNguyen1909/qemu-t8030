@@ -41,7 +41,7 @@
 #include "hw/irq.h"
 #include "hw/or-irq.h"
 #include "hw/intc/apple-aic.h"
-#include "block/apple-ans.h"
+#include "hw/block/apple-ans.h"
 
 #include "hw/arm/exynos4210.h"
 

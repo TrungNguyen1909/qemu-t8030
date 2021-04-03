@@ -1,6 +1,6 @@
 #include "qemu/osdep.h"
 #include "qapi/error.h"
-#include "block/apple-ans.h"
+#include "hw/block/apple-ans.h"
 #include "hw/irq.h"
 #include "migration/vmstate.h"
 #include "qemu/bitops.h"
