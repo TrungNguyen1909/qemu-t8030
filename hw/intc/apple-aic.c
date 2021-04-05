@@ -11,6 +11,49 @@
 #include "hw/arm/xnu_dtb.h"
 #include "hw/pci/msi.h"
 
+#define REG_ID_REVISION                 0x0000
+#define REG_ID_CONFIG                   0x0004
+#define REG_GLOBAL_CFG                  0x0010
+#define REG_TIME_LO                     0x0020
+#define REG_TIME_HI                     0x0028
+#define REG_ID_CPUID                    0x2000
+#define REG_ACK                     0x2004
+#define  REG_ACK_TYPE_MASK          (15 << 16)
+#define   REG_ACK_TYPE_NONE         (0 << 16)
+#define   REG_ACK_TYPE_IRQ          (1 << 16)
+#define   REG_ACK_TYPE_IPI          (4 << 16)
+#define    REG_ACK_IPI_OTHER        0x40001
+#define    REG_ACK_IPI_SELF         0x40002
+#define  REG_ACK_NUM_MASK           (4095)
+
+#define REG_IPI_SET                     0x2008
+#define   REG_IPI_FLAG_SELF             (1 << 31)
+#define   REG_IPI_FLAG_OTHER            (1 << 0)
+#define REG_IPI_CLEAR                   0x200C
+#define REG_IPI_DEFER_SET               0x202C
+#define REG_IPI_DEFER_CLEAR             0x2030
+
+#define REG_IPI_DISABLE                 0x0024
+#define REG_IPI_ENABLE                  0x0028
+
+#define REG_TSTAMP_CTRL                 0x2040
+#define REG_TSTAMP_LO                   0x2048
+#define REG_TSTAMP_HI                   0x204C
+
+#define REG_TSTAMP(i)					(0x6000 + ((i) << 4))
+
+#define REG_IRQ_AFFINITY(i)             (0x3000 + ((i) << 2))
+#define REG_IRQ_DISABLE(i)              (0x4100 + (((i) >> 5) << 2))
+#define  REG_IRQ_xABLE_MASK(i)          (1 << ((i) & 31))
+#define REG_IRQ_ENABLE(i)               (0x4180 + (((i) >> 5) << 2))
+#define REG_IRQ_STAT(i)               	(0x4200 + (((i) >> 5) << 2))
+#define REG_CPU_REGION                  0x5000
+#define  REG_CPU_LOCAL                  0x2000
+#define  REG_CPU_SHIFT                  7
+#define  REG_PERCPU(r,c)                ((r)+REG_CPU_REGION+((c)<<REG_CPU_SHIFT))
+
+#define kDeferredIPITimerDefault 64000
+
 //cpu is getting next interrupt to process, find one
 static uint32_t apple_aic_find_irq_cpu(AppleAICState* s, uint32_t cpu_id){
     // check for IPI
