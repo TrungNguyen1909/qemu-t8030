@@ -47,8 +47,12 @@ static void allocate_and_copy(MemoryRegion *mem, AddressSpace *as,
                               const char *name, hwaddr pa, hwaddr size,
                               void *buf)
 {
+    uint64_t memsize = size;
+    if (size > 0 && size < 0x4000) {
+        memsize = 0x4000;
+    }
     if (mem) {
-        allocate_ram(mem, name, pa, size);
+        allocate_ram(mem, name, pa, memsize);
     }
     address_space_rw(as, pa, MEMTXATTRS_UNSPECIFIED, (uint8_t *)buf, size, 1);
 }
