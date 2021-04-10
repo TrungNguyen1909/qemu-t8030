@@ -776,12 +776,16 @@ static void T8030_cpu_setup(MachineState *machine)
     T8030_cluster_setup(machine);
 
     DTBNode* root = get_dtb_child_node_by_name(tms->device_tree, "cpus");
-    for(unsigned int i=0;i<machine->smp.cpus;i++){
+    for(unsigned int i=0;i<MAX_CPU;i++){
 
         char* cpu_name = g_malloc0(8);
         snprintf(cpu_name, 8, "cpu%u", i);
         DTBNode* node = get_dtb_child_node_by_name(root, cpu_name);
         assert(node);
+        if (i >= machine->smp.cpus){
+            remove_dtb_node(root, node);
+            continue;
+        }
         DTBProp* prop = NULL;
         Object *cpuobj = object_new(machine->cpu_type);
         tms->cpus[i] = g_new(T8030CPUState, 1);
