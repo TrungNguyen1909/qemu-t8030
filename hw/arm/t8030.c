@@ -24,6 +24,7 @@
  */
 
 #include "qemu/osdep.h"
+#include "qemu/log.h"
 #include "qapi/error.h"
 #include "qemu-common.h"
 #include "hw/arm/boot.h"
@@ -189,7 +190,7 @@ static void T8030_ipi_rr_local(CPUARMState *env, const ARMCPRegInfo *ri,
         }
         // fprintf(stderr, "CPU %x sending fast IPI to local CPU %x: value: 0x%llx\n", tcpu->phys_id, phys_id, value);
         if(cpu_id == -1 || c->cpus[cpu_id] == NULL) {
-            fprintf(stderr, "CPU %x failed to send fast IPI to local CPU %x: value: 0x" TARGET_FMT_lx "\n", tcpu->phys_id, phys_id, value);
+            qemu_log_mask(LOG_GUEST_ERROR, "CPU %x failed to send fast IPI to local CPU %x: value: 0x" TARGET_FMT_lx "\n", tcpu->phys_id, phys_id, value);
             return;
         }
         if ((value & ARM64_REG_IPI_RR_TYPE_NOWAKE) == ARM64_REG_IPI_RR_TYPE_NOWAKE){
@@ -276,7 +277,7 @@ static void T8030_ipi_write_sr(CPUARMState *env, const ARMCPRegInfo *ri,
             c->deferredIPI[src_cpu][tcpu->cpu_id] = 0;
         }
     }
-    // fprintf(stderr, "CPU %x ack fast IPI from CPU %llu\n", tcpu->cpu_id, src_cpu);
+    // fprintf(stderr, "CPU %x ack fast IPI from CPU %llu: 0x%llx\n", tcpu->cpu_id, src_cpu, value);
 }
 //Read deferred interrupt timeout (global)
 static uint64_t T8030_ipi_read_cr(CPUARMState *env, const ARMCPRegInfo *ri)
@@ -293,7 +294,7 @@ static void T8030_ipi_write_cr(CPUARMState *env, const ARMCPRegInfo *ri,
 {
     uint64_t nanosec = 0;
     absolutetime_to_nanoseconds(value, &nanosec);
-    fprintf(stderr, "T8030 adjusting deferred IPI timeout to " TARGET_FMT_lu "ns\n", nanosec);
+    // fprintf(stderr, "T8030 adjusting deferred IPI timeout to " TARGET_FMT_lu "ns\n", nanosec);
     T8030CPUState *tcpu = T8030_cs_from_env(env);
     T8030MachineState *tms = T8030_MACHINE(tcpu->machine);
     WITH_QEMU_LOCK_GUARD(&tms->mutex){
@@ -730,12 +731,12 @@ static void sart_reg_write(void *opaque,
                   hwaddr addr,
                   uint64_t data,
                   unsigned size){
-    fprintf(stderr, "SART reg WRITE @ 0x" TARGET_FMT_lx " value: 0x" TARGET_FMT_lx "\n", addr, data);
+    qemu_log_mask(LOG_UNIMP, "SART reg WRITE @ 0x" TARGET_FMT_lx " value: 0x" TARGET_FMT_lx "\n", addr, data);
 }
 static uint64_t sart_reg_read(void *opaque,
                      hwaddr addr,
                      unsigned size){
-    fprintf(stderr, "SART reg READ @ 0x" TARGET_FMT_lx "\n", addr);
+    qemu_log_mask(LOG_UNIMP, "SART reg READ @ 0x" TARGET_FMT_lx "\n", addr);
     return 0;
 }
 static const MemoryRegionOps sart_reg_ops = {
