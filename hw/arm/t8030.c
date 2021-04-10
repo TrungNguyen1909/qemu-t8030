@@ -43,6 +43,7 @@
 #include "hw/or-irq.h"
 #include "hw/intc/apple-aic.h"
 #include "hw/block/apple-ans.h"
+#include "hw/gpio/apple-gpio.h"
 
 #include "hw/arm/exynos4210.h"
 
@@ -1024,6 +1025,29 @@ static void T8030_create_ans(MachineState* machine){
     sysbus_realize_and_unref(SYS_BUS_DEVICE(tms->ans), &error_fatal);
 }
 
+static void T8030_create_gpio(MachineState *machine)
+{
+    T8030MachineState *tms = T8030_MACHINE(machine);
+    DTBNode *child = get_dtb_child_node_by_name(tms->device_tree, "arm-io");
+    child = get_dtb_child_node_by_name(child, "gpio");
+    assert(child);
+    tms->gpio = apple_gpio_create(child);
+    assert(tms->gpio);
+    object_property_add_child(OBJECT(machine), "gpio", OBJECT(tms->gpio));
+
+    DTBProp *prop = get_dtb_prop(child, "reg");
+    assert(prop);
+    uint64_t *reg = (uint64_t*)prop->value;
+    sysbus_mmio_map(SYS_BUS_DEVICE(tms->gpio), 0, tms->soc_base_pa + reg[0]);
+    prop = get_dtb_prop(child, "interrupts");
+    assert(prop);
+    uint32_t* ints = (uint32_t*)prop->value;
+    for(int i = 0; i < prop->length / sizeof(uint32_t); i++){
+        sysbus_connect_irq(SYS_BUS_DEVICE(tms->gpio), i, qdev_get_gpio_in(DEVICE(tms->aic), ints[i]));
+    }
+    sysbus_realize_and_unref(SYS_BUS_DEVICE(tms->gpio), &error_fatal);
+}
+
 static void T8030_cpu_reset(void *opaque)
 {
     MachineState *machine = MACHINE(opaque);
@@ -1106,6 +1130,8 @@ static void T8030_machine_init(MachineState *machine)
 
     T8030_create_ans(machine);
 
+    T8030_create_gpio(machine);
+    
     T8030_bootargs_setup(machine);
 
     qemu_register_reset(T8030_machine_reset, tms);

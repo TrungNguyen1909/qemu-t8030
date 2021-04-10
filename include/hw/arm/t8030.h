@@ -173,6 +173,7 @@ typedef struct
     bool pendingWakeup[MAX_CPU];
     AppleAICState* aic;
     DeviceState* ans;
+    DeviceState* gpio;
     MemoryRegion* sysmem;
     struct arm_boot_info bootinfo;
     char ramdisk_filename[1024];

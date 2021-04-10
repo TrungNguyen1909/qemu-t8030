@@ -1,3 +1,5 @@
+specific_ss.add(when: ['CONFIG_SOFTMMU', 'TARGET_AARCH64'], if_true: files('apple-gpio.c'))
+
 softmmu_ss.add(when: 'CONFIG_E500', if_true: files('mpc8xxx.c'))
 softmmu_ss.add(when: 'CONFIG_GPIO_KEY', if_true: files('gpio_key.c'))
 softmmu_ss.add(when: 'CONFIG_MAX7310', if_true: files('max7310.c'))
