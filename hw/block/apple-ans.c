@@ -58,7 +58,6 @@ static void iop_handle_mgmt_msg(AppleANSState* s, iop_message_t msg){
     switch(s->ep0_status){
         case EP0_WAIT_HELLO:
             if(msg->type == MSG_RECV_HELLO){
-                fprintf(stderr, "ANS2: EP0: Received Hello message, proceeding with EPRollcall\n");
                 iop_message_t m = g_new0(struct iop_message, 1);
                 m->type = MSG_TYPE_ROLLCALL;
                 m->rollcall.epMask = (1 << 0); //Register ANS2Endpoint1 ?
@@ -70,7 +69,6 @@ static void iop_handle_mgmt_msg(AppleANSState* s, iop_message_t msg){
             }
         case EP0_WAIT_ROLLCALL:
             if(msg->type == MSG_TYPE_ROLLCALL){
-                fprintf(stderr, "ANS2: EP0: Received EPRollcall message\n");
                 iop_message_t m = g_new0(struct iop_message, 1);
                 m->type = MSG_TYPE_POWER;
                 m->power.state = 32;
@@ -80,7 +78,6 @@ static void iop_handle_mgmt_msg(AppleANSState* s, iop_message_t msg){
             }
         case EP0_WAIT_EPSTAT:
             if(msg->type == MSG_TYPE_EPSTAT) {
-                fprintf(stderr, "ANS2: EP0: Received EPSTAT message\n");
                 iop_message_t m = g_new0(struct iop_message, 1);
                 m->type = MSG_TYPE_POWER;
                 m->power.state = 32;
@@ -89,7 +86,6 @@ static void iop_handle_mgmt_msg(AppleANSState* s, iop_message_t msg){
             }
         case EP0_WAIT_POWERACK:
             if(msg->type == MSG_TYPE_POWERACK) {
-                fprintf(stderr, "ANS2: EP0: Received POWERACK. Initialization completed\n");
                 iop_message_t m = g_new0(struct iop_message, 1);
                 m->type = MSG_TYPE_POWERACK;
                 m->power.state = msg->power.state;
@@ -105,7 +101,7 @@ static void iop_handle_mgmt_msg(AppleANSState* s, iop_message_t msg){
                 break;
             }
         default:
-            fprintf(stderr, "ANS2: EP0: Skipping unexpected message\n");
+            qemu_log_mask(LOG_GUEST_ERROR, "ANS2: EP0: Skipping unexpected message\n");
     }
     g_free(msg);
 }
@@ -129,7 +125,7 @@ static void* iop_thread_fn(void* opaque){
                         iop_handle_mgmt_msg(s, msg);
                         break;
                     default:
-                        fprintf(stderr, "ANS2: Skipping message to unknown endpoint: %d\n", msg->endpoint);
+                        qemu_log_mask(LOG_GUEST_ERROR, "ANS2: Skipping message to unknown endpoint: %d\n", msg->endpoint);
                         g_free(msg);
                 }
                 if(iop_inbox_empty(s)){
@@ -186,7 +182,7 @@ static void iop_akf_reg_write(void *opaque,
                 }
                 return;
         }
-        fprintf(stderr, "ANS2: AppleA7IOP AKF unknown reg WRITE @ 0x" TARGET_FMT_plx " value: 0x" TARGET_FMT_plx "\n", addr, data);
+        qemu_log_mask(LOG_GUEST_ERROR, "ANS2: AppleA7IOP AKF unknown reg WRITE @ 0x" TARGET_FMT_plx " value: 0x" TARGET_FMT_plx "\n", addr, data);
     }
 }
 static uint64_t iop_akf_reg_read(void *opaque,
@@ -232,7 +228,7 @@ static uint64_t iop_akf_reg_read(void *opaque,
                 }
                 return ret;
         }
-        fprintf(stderr, "ANS2: AppleA7IOP AKF unknown reg READ @ 0x" TARGET_FMT_plx "\n", addr);
+        qemu_log_mask(LOG_UNIMP, "ANS2: AppleA7IOP AKF unknown reg READ @ 0x" TARGET_FMT_plx "\n", addr);
     }
     return 0;
 }
@@ -250,12 +246,12 @@ static void ascv2_core_reg_write(void *opaque,
                   hwaddr addr,
                   uint64_t data,
                   unsigned size){
-    fprintf(stderr, "ANS2: AppleASCWrapV2 core reg WRITE @ 0x" TARGET_FMT_plx " value: 0x" TARGET_FMT_plx "\n", addr, data);
+    qemu_log_mask(LOG_UNIMP, "ANS2: AppleASCWrapV2 core reg WRITE @ 0x" TARGET_FMT_plx " value: 0x" TARGET_FMT_plx "\n", addr, data);
 }
 static uint64_t ascv2_core_reg_read(void *opaque,
                      hwaddr addr,
                      unsigned size){
-    fprintf(stderr, "ANS2: AppleASCWrapV2 core reg READ @ 0x" TARGET_FMT_plx "\n", addr);
+    qemu_log_mask(LOG_UNIMP, "ANS2: AppleASCWrapV2 core reg READ @ 0x" TARGET_FMT_plx "\n", addr);
     return 0;
 }
 static const MemoryRegionOps ascv2_core_reg_ops = {
@@ -272,12 +268,12 @@ static void iop_autoboot_reg_write(void *opaque,
                   hwaddr addr,
                   uint64_t data,
                   unsigned size){
-    fprintf(stderr, "ANS2: AppleA7IOP autoboot reg WRITE @ 0x" TARGET_FMT_plx " value: 0x" TARGET_FMT_plx "\n", addr, data);
+    qemu_log_mask(LOG_UNIMP, "ANS2: AppleA7IOP autoboot reg WRITE @ 0x" TARGET_FMT_plx " value: 0x" TARGET_FMT_plx "\n", addr, data);
 }
 static uint64_t iop_autoboot_reg_read(void *opaque,
                      hwaddr addr,
                      unsigned size){
-    fprintf(stderr, "ANS2: AppleA7IOP autoboot reg READ @ 0x" TARGET_FMT_plx "\n", addr);
+    qemu_log_mask(LOG_UNIMP, "ANS2: AppleA7IOP autoboot reg READ @ 0x" TARGET_FMT_plx "\n", addr);
     return 0;
 }
 static const MemoryRegionOps iop_autoboot_reg_ops = {
