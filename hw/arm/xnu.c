@@ -69,7 +69,7 @@ static uint64_t sstrlen(const char *str)
     return (end - str);
 }
 
-static void macho_dtb_node_process(DTBNode *node)
+static void macho_dtb_node_process(DTBNode *node, DTBNode *parent)
 {
     GList *iter = NULL;
     DTBNode *child = NULL;
@@ -91,7 +91,7 @@ static void macho_dtb_node_process(DTBNode *node)
     //     }
     // }
 
-    //remove compatible properties
+    //remove by compatible property
     prop = get_dtb_prop(node, "compatible");
     if (NULL != prop) {
         uint64_t count = sizeof(KEEP_COMP) / sizeof(KEEP_COMP[0]);
@@ -104,20 +104,24 @@ static void macho_dtb_node_process(DTBNode *node)
             }
         }
         if (!found) {
-            //TODO: maybe remove the whole node and sub nodes?
-            overwrite_dtb_prop_val(prop, *(uint8_t *)"~");
+            if (parent) {
+                remove_dtb_node(parent, node);
+                return;
+            }
         }
     }
 
-    //remove name properties
+    //remove by name property
     prop = get_dtb_prop(node, "name");
     if (NULL != prop) {
         uint64_t count = sizeof(REM_NAMES) / sizeof(REM_NAMES[0]);
         for (i = 0; i < count; i++) {
             uint64_t size = MIN(prop->length, sstrlen(REM_NAMES[i]));
             if (0 == memcmp(prop->value, REM_NAMES[i], size)) {
-                //TODO: maybe remove the whole node and sub nodes?
-                overwrite_dtb_prop_val(prop, *(uint8_t *)"~");
+                if (parent) {
+                    remove_dtb_node(parent, node);
+                    return;
+                }
                 break;
             }
         }
@@ -145,11 +149,15 @@ static void macho_dtb_node_process(DTBNode *node)
             }
         }
     }
-    for (iter = node->child_nodes; iter != NULL; iter = iter->next) {
+    int cnt = node->child_node_count;
+    for (iter = node->child_nodes; iter != NULL;) {
         child = (DTBNode *)iter->data;
-        macho_dtb_node_process(child);
+        //iter might be invalidated by macho_dtb_node_process
+        iter = iter->next;
+        macho_dtb_node_process(child, node);
+        cnt--;
     }
-
+    assert(cnt == 0);
 }
 
 // Extracts the payload from an im4p file. If the file is not an im4p file,
@@ -413,7 +421,7 @@ void macho_load_dtb(DTBNode* root, AddressSpace *as, MemoryRegion *mem,
     data = 1;
     // TODO: Workaround: AppleKeyStore SEP(?)
     add_dtb_prop(child, "boot-ios-diagnostics", sizeof(data), (uint8_t*)&data);
-    macho_dtb_node_process(root);
+    macho_dtb_node_process(root, NULL);
 
     uint64_t size_n = get_dtb_node_buffer_size(root);
     child = get_dtb_child_node_by_name(root, "chosen");
