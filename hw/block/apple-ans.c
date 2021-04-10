@@ -313,13 +313,13 @@ DeviceState* apple_ans_create(DTBNode* node) {
     2: AppleA7IOP autoBootRegMap
     */
     s->iomems[0] = g_new(MemoryRegion, 1);
-    memory_region_init_io(s->iomems[0], OBJECT(dev), &iop_akf_reg_ops, s, "ans-akf-reg", reg[1]);
+    memory_region_init_io(s->iomems[0], OBJECT(dev), &iop_akf_reg_ops, s, TYPE_APPLE_ANS ".akf-reg", reg[1]);
     sysbus_init_mmio(sbd, s->iomems[0]);
     s->iomems[1] = g_new(MemoryRegion, 1);
-    memory_region_init_io(s->iomems[1], OBJECT(dev), &ascv2_core_reg_ops, s, "ans-ascv2-core-reg", reg[3]);
+    memory_region_init_io(s->iomems[1], OBJECT(dev), &ascv2_core_reg_ops, s, TYPE_APPLE_ANS ".ascv2-core-reg", reg[3]);
     sysbus_init_mmio(sbd, s->iomems[1]);
     s->iomems[2] = g_new(MemoryRegion, 1);
-    memory_region_init_io(s->iomems[2], OBJECT(dev), &iop_autoboot_reg_ops, s, "ans-iop-autoboot-reg", reg[5]);
+    memory_region_init_io(s->iomems[2], OBJECT(dev), &iop_autoboot_reg_ops, s, TYPE_APPLE_ANS ".iop-autoboot-reg", reg[5]);
     sysbus_init_mmio(sbd, s->iomems[2]);
     for(int i = 0; i < 5; i++) {
         sysbus_init_irq(sbd, &s->irqs[i]);
