@@ -944,11 +944,10 @@ static void T8030_pmgr_setup(MachineState* machine){
         memory_region_add_subregion(tms->sysmem, reg[i] + reg[i+1] < tms->soc_size ? tms->soc_base_pa + reg[i] : reg[i], mem);
     }
     {
-        //TODO: figure out where does this map come from
         MemoryRegion* mem = g_new(MemoryRegion, 1);
         char* name = g_malloc0(32);
-        snprintf(name, 32, "pmgr-unk-man-reg");
-        memory_region_init_io(mem, OBJECT(machine), &pmgr_unk_reg_ops, (void*)0x3BC00000, name, 0x1000);
+        snprintf(name, 32, "pmp-reg");
+        memory_region_init_io(mem, OBJECT(machine), &pmgr_unk_reg_ops, (void*)0x3BC00000, name, 0x60000);
         memory_region_add_subregion(tms->sysmem, tms->soc_base_pa + 0x3BC00000, mem);
     }
     add_dtb_prop(child, "voltage-states0", 24, (uint8_t*)"\x01\x00\x00\x00\x71\x02\x00\x00\x01\x00\x00\x00\xa9\x02\x00\x00\x01\x00\x00\x00\xe4\x02\x00\x00");
