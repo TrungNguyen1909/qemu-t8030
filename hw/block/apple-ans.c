@@ -286,7 +286,7 @@ static void apple_ans_set_irq(void *opaque, int irq_num, int level){
     qemu_set_irq(s->irqs[s->nvme_interrupt_idx], level);
 }
 
-DeviceState* apple_ans_create(DTBNode* node) {
+SysBusDevice* apple_ans_create(DTBNode* node) {
     DeviceState  *dev;
     AppleANSState *s;
     PCIHostState *pci;
@@ -381,7 +381,7 @@ DeviceState* apple_ans_create(DTBNode* node) {
                                      &s->io_ioport, 0, 4, TYPE_PCIE_BUS);
     pci_realize_and_unref(PCI_DEVICE(&s->nvme), pci->bus, &error_fatal);
     sysbus_init_mmio(sbd, &s->nvme.iomem);
-    return dev;
+    return sbd;
 }
 static void apple_ans_realize(DeviceState *dev, Error **errp){
     AppleANSState* s = APPLE_ANS(dev);

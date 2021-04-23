@@ -171,8 +171,7 @@ typedef struct
     //store the pending IPI_SR value
     uint64_t pendingIPI[MAX_CPU];
     bool pendingWakeup[MAX_CPU];
-    AppleAICState* aic;
-    DeviceState* ans;
+    SysBusDevice* ans;
     DeviceState* gpio;
     MemoryRegion* sysmem;
     struct arm_boot_info bootinfo;

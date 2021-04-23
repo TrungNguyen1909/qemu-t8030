@@ -149,5 +149,5 @@ struct AppleANSState {
     NvmeCtrl nvme;
     uint32_t nvme_interrupt_idx;
 };
-DeviceState* apple_ans_create(DTBNode* node);
+SysBusDevice* apple_ans_create(DTBNode* node);
 #endif /* APPLE_ANS_H */

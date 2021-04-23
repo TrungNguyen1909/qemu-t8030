@@ -1010,19 +1010,19 @@ static void T8030_create_ans(MachineState* machine){
     2: AppleA7IOP autoBootRegMap
     3: NVMe BAR
     */
-    sysbus_mmio_map(SYS_BUS_DEVICE(tms->ans), 0, tms->soc_base_pa + reg[0]);
-    sysbus_mmio_map(SYS_BUS_DEVICE(tms->ans), 1, tms->soc_base_pa + reg[2]);
-    sysbus_mmio_map(SYS_BUS_DEVICE(tms->ans), 2, tms->soc_base_pa + reg[4]);
-    sysbus_mmio_map(SYS_BUS_DEVICE(tms->ans), 3, tms->soc_base_pa + reg[6]);
+    sysbus_mmio_map(tms->ans, 0, tms->soc_base_pa + reg[0]);
+    sysbus_mmio_map(tms->ans, 1, tms->soc_base_pa + reg[2]);
+    sysbus_mmio_map(tms->ans, 2, tms->soc_base_pa + reg[4]);
+    sysbus_mmio_map(tms->ans, 3, tms->soc_base_pa + reg[6]);
 
     prop = get_dtb_prop(child, "interrupts");
     assert(prop);
     assert(prop->length == 20);
     uint32_t* ints = (uint32_t*)prop->value;
     for(int i = 0; i < prop->length / sizeof(uint32_t); i++){
-        sysbus_connect_irq(SYS_BUS_DEVICE(tms->ans), i, qdev_get_gpio_in(DEVICE(tms->aic), ints[i]));
+        sysbus_connect_irq(tms->ans, i, qdev_get_gpio_in(DEVICE(tms->aic), ints[i]));
     }
-    sysbus_realize_and_unref(SYS_BUS_DEVICE(tms->ans), &error_fatal);
+    sysbus_realize(tms->ans, &error_fatal);
 }
 
 static void T8030_create_gpio(MachineState *machine)
