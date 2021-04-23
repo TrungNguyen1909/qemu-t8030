@@ -196,7 +196,7 @@ static void apple_gpio_int_write(AppleGPIOState *s, unsigned int group, hwaddr a
     }
     
     int offset = addr - rGPIOINT(group, 0);
-    *(uint32_t*)&((uint8_t*)s->int_cfg[group])[offset] = value;
+    s->int_cfg[group][offset >> 2] = value;
 
     if(find_first_bit((unsigned long*)s->int_cfg[group], s->npins) == s->npins) {
         qemu_irq_lower(s->irqs[group]);
@@ -209,7 +209,7 @@ static uint32_t apple_gpio_int_read(AppleGPIOState *s, unsigned int group, hwadd
         return 0;
     }
     int offset = addr - rGPIOINT(group, 0);
-    return *(uint32_t*)&((uint8_t*)s->int_cfg[group])[offset];
+    return s->int_cfg[group][offset >> 2];
 }
 static void apple_gpio_reg_write(void *opaque,
                   hwaddr addr,
@@ -263,6 +263,9 @@ static uint64_t apple_gpio_reg_read(void *opaque,
 static const MemoryRegionOps gpio_reg_ops = {
     .write = apple_gpio_reg_write,
     .read = apple_gpio_reg_read,
+    .valid.max_access_size = 4,
+    .valid.min_access_size = 4,
+    .valid.unaligned = false,
 };
 
 DeviceState *apple_gpio_create(DTBNode *node){
