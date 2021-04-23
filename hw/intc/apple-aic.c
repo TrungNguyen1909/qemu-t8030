@@ -11,144 +11,66 @@
 #include "hw/arm/xnu_dtb.h"
 #include "hw/pci/msi.h"
 
-#define REG_ID_REVISION                 0x0000
-#define REG_ID_CONFIG                   0x0004
-#define REG_GLOBAL_CFG                  0x0010
-#define REG_TIME_LO                     0x0020
-#define REG_TIME_HI                     0x0028
-#define REG_ID_CPUID                    0x2000
-#define REG_ACK                     0x2004
-#define  REG_ACK_TYPE_MASK          (15 << 16)
-#define   REG_ACK_TYPE_NONE         (0 << 16)
-#define   REG_ACK_TYPE_IRQ          (1 << 16)
-#define   REG_ACK_TYPE_IPI          (4 << 16)
-#define    REG_ACK_IPI_OTHER        0x40001
-#define    REG_ACK_IPI_SELF         0x40002
-#define  REG_ACK_NUM_MASK           (4095)
-
-#define REG_IPI_SET                     0x2008
-#define   REG_IPI_FLAG_SELF             (1 << 31)
-#define   REG_IPI_FLAG_OTHER            (1 << 0)
-#define REG_IPI_CLEAR                   0x200C
-#define REG_IPI_DEFER_SET               0x202C
-#define REG_IPI_DEFER_CLEAR             0x2030
-
-#define REG_IPI_DISABLE                 0x0024
-#define REG_IPI_ENABLE                  0x0028
-
-#define REG_TSTAMP_CTRL                 0x2040
-#define REG_TSTAMP_LO                   0x2048
-#define REG_TSTAMP_HI                   0x204C
-
-#define REG_TSTAMP(i)					(0x6000 + ((i) << 4))
-
-#define REG_IRQ_AFFINITY(i)             (0x3000 + ((i) << 2))
-#define REG_IRQ_DISABLE(i)              (0x4100 + (((i) >> 5) << 2))
-#define  REG_IRQ_xABLE_MASK(i)          (1 << ((i) & 31))
-#define REG_IRQ_ENABLE(i)               (0x4180 + (((i) >> 5) << 2))
-#define REG_IRQ_STAT(i)               	(0x4200 + (((i) >> 5) << 2))
-#define REG_CPU_REGION                  0x5000
-#define  REG_CPU_LOCAL                  0x2000
-#define  REG_CPU_SHIFT                  7
-#define  REG_PERCPU(r,c)                ((r)+REG_CPU_REGION+((c)<<REG_CPU_SHIFT))
-
-#define kDeferredIPITimerDefault 64000
-
-//cpu is getting next interrupt to process, find one
-static uint32_t apple_aic_find_irq_cpu(AppleAICState* s, uint32_t cpu_id){
-    // check for IPI
-    for(int i = 0; i < s->numCPU; i++){ /* source */
-        int j = cpu_id; /* target */
-        if(s->pendingIPI[i][j]){
-            bool isMasked = s->ipi_mask[j] & (i == j ?  REG_IPI_FLAG_SELF : REG_IPI_FLAG_OTHER);
-            if(!isMasked){
-                s->cpus[j].state = AIC_CPU_STATE_PROCESSING;
-                s->cpus[j].is_ipi = true;
-                s->cpus[j].ipi_source = i;
-                s->cpus[j].ack = (i == j ? REG_ACK_IPI_SELF : REG_ACK_IPI_OTHER);
-                s->ipi_mask[j] |= s->cpus[j].ack; 
-                return s->cpus[j].ack;
-            }
+// Check state and interrupt cpus, call with mutex locked
+static void apple_aic_update(AppleAICState* s) {
+    for (int i = 0; i < s->numCPU; i++) {
+        s->cpus[i].pendingIPI |= s->cpus[i].deferredIPI;
+        s->cpus[i].deferredIPI = 0;
+    }
+    uint32_t intr = 0;
+    for (int i = 0; i < s->numCPU; i++) {
+        if (s->cpus[i].pendingIPI & (~s->cpus[i].ipi_mask)) {
+            intr |= (1 << i);
         }
     }
-    // check for IRQ
-    for(int i = 0; i < s->numIRQ;i++)
-    if(s->ext_irq_state[i]){
-        if(!test_bit(i, (unsigned long*)s->ipid_mask) && test_bit(cpu_id, (unsigned long*)&s->irq_affinity[i])){
-            s->cpus[cpu_id].state = AIC_CPU_STATE_PROCESSING;
-            s->cpus[cpu_id].is_ipi = false;
-            s->cpus[cpu_id].irq_source = i;
-            s->cpus[cpu_id].ack = i | REG_ACK_TYPE_IRQ;
-            set_bit(i, (unsigned long*)s->ipid_mask);
-            return s->cpus[cpu_id].ack;
-        }
-    }
-    s->cpus[cpu_id].state = AIC_CPU_STATE_NONE;
-    s->cpus[cpu_id].ack = 0;
-    return REG_ACK_TYPE_NONE;
-}
-//update aic and dispatch pendings, call with mutex locked
-static void apple_aic_update(AppleAICState* s){
-    // This is not the best way to handle this
-    // Interrupts should be grouped in order for one CPU to handle it all at once
-
-    // check for IPI
-    for(int i = 0; i < s->numCPU; i++) /* source */
-        for(int j = 0; j < s->numCPU; j++) /* target */
-            if(s->cpus[j].state == AIC_CPU_STATE_NONE && s->pendingIPI[i][j]){
-                bool isMasked = s->ipi_mask[j] & (i == j ?  REG_IPI_FLAG_SELF : REG_IPI_FLAG_OTHER);
-                if(!isMasked){
-                    s->cpus[j].state = AIC_CPU_STATE_PROCESSING;
-                    s->cpus[j].is_ipi = true;
-                    s->cpus[j].ipi_source = i;
-                    s->cpus[j].ack = (i == j ? REG_ACK_IPI_SELF : REG_ACK_IPI_OTHER);
-                    s->ipi_mask[j] |= s->cpus[j].ack;
-                    qemu_irq_raise(s->cpu_irqs[j]);
+    for (int i = 0; i < s->numEIR; i++) {
+        if (unlikely(s->eir_state[i] & (~s->eir_mask[i]))) {
+            for (int j = 0; j < 32; j++) {
+                if (((s->eir_mask[i] & (1 << j)) == 0) && (s->eir_state[i] & (1 << j))) {
+                    if ((s->eir_dest[AIC_EIR_TO_SRC(i, j)]) && ((intr & (s->eir_dest[AIC_EIR_TO_SRC(i, j)])) == 0)) {
+                        intr |= (1 << find_first_bit((unsigned long*)&s->eir_dest[AIC_EIR_TO_SRC(i, j)], s->numCPU));
+                    }
                 }
             }
-    // check for IRQ
-    for(int i = 0; i < s->numIRQ;i++)
-    if(s->ext_irq_state[i]){
-        if(!test_bit(i, (unsigned long*)s->ipid_mask)){
-            //find a cpu to interrupt
-            int cpu = -1;
-            for(int j = 0; j < s->numCPU; j++)
-            if(s->cpus[j].state == AIC_CPU_STATE_NONE && test_bit(j, (unsigned long*)&s->irq_affinity[i])){
-                cpu = j;
-                break;
-            }
-            if(cpu == -1) continue;
-            s->cpus[cpu].state = AIC_CPU_STATE_PROCESSING;
-            s->cpus[cpu].is_ipi = false;
-            s->cpus[cpu].irq_source = i;
-            s->cpus[cpu].ack = i | REG_ACK_TYPE_IRQ;
-            set_bit(i, (unsigned long*)s->ipid_mask);
-            qemu_irq_raise(s->cpu_irqs[cpu]);
+        }
+    }
+    for (int i = 0; i < s->numCPU; i++) {
+        if (intr & (1 << i)) {
+            qemu_irq_raise(s->cpus[i].irq);
         }
     }
 }
 static void apple_aic_set_irq(void *opaque, int irq, int level){
     AppleAICState* s = APPLE_AIC(opaque);
     WITH_QEMU_LOCK_GUARD(&s->mutex){
-        s->ext_irq_state[irq] = level & 1;
-        if(level == 1) {
-            apple_aic_update(s);
+        trace_aic_set_irq(irq, level);
+        if(level) {
+            set_bit(irq, (unsigned long*)s->eir_state);
+        } else {
+            clear_bit(irq, (unsigned long*)s->eir_state);
         }
     }
 }
 static void apple_aic_tick(void *opaque) {
     AppleAICState* s = APPLE_AIC(opaque);
     WITH_QEMU_LOCK_GUARD(&s->mutex){
-        for(int i = 0; i < s->numCPU; i++){ /* source */
-            for(int j = 0; j < s->numCPU; j++) /* target */
-            if(s->deferredIPI[i][j]){
-                s->pendingIPI[i][j] = 1;
-                s->deferredIPI[i][j] = 0;
-            }
-        }
         apple_aic_update(s);
     }
-    timer_mod_ns(s->timer, qemu_clock_get_ns(QEMU_CLOCK_VIRTUAL) + kDeferredIPITimerDefault);
+    timer_mod_ns(s->timer, qemu_clock_get_ns(QEMU_CLOCK_VIRTUAL) + kAICWT);
+}
+static void apple_aic_reset(DeviceState *dev){
+    AppleAICState *s = APPLE_AIC(dev);
+    // mask all IRQs
+    memset(s->eir_mask, 0xffff, sizeof(uint32_t)*s->numEIR);
+    // dest default to 0
+    memset(s->eir_dest, 0, sizeof(uint32_t)*s->numIRQ);
+    for(int i=0; i < s->numCPU; i++)
+    {
+        // mask all IPI
+        s->cpus[i].ipi_mask = AIC_IPI_NORMAL | AIC_IPI_SELF;
+        s->cpus[i].pendingIPI = 0;
+        s->cpus[i].deferredIPI = 0;
+    }
 }
 static void apple_aic_write(void *opaque,
                   hwaddr addr,
@@ -157,118 +79,135 @@ static void apple_aic_write(void *opaque,
     AppleAICOpaque* o = (AppleAICOpaque*)opaque;
     AppleAICState* s = APPLE_AIC(o->aic);
     uint32_t val = (uint32_t)data;
-    WITH_QEMU_LOCK_GUARD(&s->mutex){
-        if (addr >= 0x6000) { /* REG_TSTAMP */
-            //TODO: implement
-        } else if (addr >= 0x5000) { /* REG_PERCPU(r,c) */
-            uint32_t cpu_id = extract32(addr, 7, 5);
-            uint32_t op = extract32(addr, 0, 7);
-            switch (op){
-                case REG_IPI_DISABLE:
-                    s->ipi_mask[cpu_id] = (~val) & (REG_IPI_FLAG_SELF | REG_IPI_FLAG_OTHER);
-                    return;
-                case REG_IPI_ENABLE:
-                    s->ipi_mask[cpu_id] = ((~val) & REG_IPI_FLAG_SELF) | ((~val) & REG_IPI_FLAG_OTHER);
-                    return;
-                case REG_IPI_DEFER_CLEAR:
-                    s->deferredIPI[cpu_id][o->cpu_id] = 0;
-                    return;
-                default:
-                    break;
-            }
-        } else if (addr >= 0x4280) {
-            //Unknown
-        } else if (addr >= 0x4100){ /* REG_IRQ_DISABLE; REG_IRQ_ENABLE, REG_IRQ_STAT */
-            uint32_t ipid = 0xffff;
-            if (addr >= 0x4200) { /* REG_IRQ_STAT */
-                ipid = (addr - 0x4200) >> 2;
-                if (ipid < s->numIPID) {
-                    s->ipid_mask[ipid] = val;
-                    return;
-                }
-            } else if (addr >= 0x4180){ /* REG_IRQ_ENABLE */
-                    ipid = (addr - 0x4180) >> 2;
-                    if (ipid < s->numIPID) {
-                        for(int i = 0; i < 32; i++)
-                        if(test_bit(i, (unsigned long*)&val)) {
-                            clear_bit((ipid << 5) + i, (unsigned long*)s->ipid_mask);
-                            trace_aic_enable_irq((ipid << 5) + i);
+    WITH_QEMU_LOCK_GUARD(&s->mutex) {
+        switch (addr) {
+            case rAIC_RST:
+                apple_aic_reset(DEVICE(s));
+                return;
+            case rAIC_GLB_CFG:
+                s->global_cfg = data;
+                return;
+            case rAIC_IPI_SET:
+                {
+                    for (int i = 0; i < s->numCPU; i++) {
+                        if (val & (1 << i)) {
+                            set_bit(o->cpu_id, (unsigned long*)&s->cpus[i].pendingIPI);
+                            if (s->cpus[i].pendingIPI & s->cpus[i].ipi_mask) {
+                                qemu_irq_raise(s->cpus[i].irq);
+                            }
                         }
-                        return;
                     }
-            } else { /* REG_IRQ_DISABLE */
-                ipid = (addr - 0x4100) >> 2;
-                if (ipid < s->numIPID) {
-                    for(int i = 0; i < 32; i++)
-                        if(test_bit(i, (unsigned long*)&val)) {
-                            set_bit((ipid << 5) + i, (unsigned long*)s->ipid_mask);
-                            trace_aic_disable_irq((ipid << 5) + i);
+                    if (val & AIC_IPI_SELF) {
+                        set_bit(AIC_IPI_SELF, (unsigned long*)&o->pendingIPI);
+                        if (o->pendingIPI & o->ipi_mask) {
+                                qemu_irq_raise(o->irq);
                         }
-                    return;
+                    }
                 }
-            }
-        } else if (addr >= 0x4080){
-            //IRQ ACK
-            //if the vector-th bit is set in ipid-mask, [0, 4) in most dtree, this will be sent
-            //on t8030, only wdt (watch dog timer) is affected by this
-            //for wdt device, when IRQ 0 is raised, the device panics
-            // fprintf(stderr, "AIC: Received IRQ ack\n");
-            return;
-        } else if (addr >= 0x3000) { /* REG_IRQ_AFFINITY */
-            uint32_t vectorNumber = (addr - 0x3000) >> 2;
-            val &= ~(-1 << s->numCPU);
-            if (val == 0){
-                val = ~(-1 << s->numCPU); //any CPU
-            }
-            s->irq_affinity[vectorNumber] = val;
-            return;
-        } else {
-            bool set = false;
-            switch (addr){
-                case REG_GLOBAL_CFG:
-                    s->global_cfg = val;
-                    return;
-                case REG_IPI_SET:
-                    if (val & REG_IPI_FLAG_SELF){
-                        val = 1 << o->cpu_id;
+                return;
+            case rAIC_IPI_CLR:
+                {
+                    for (int i = 0; i < s->numCPU; i++) {
+                        if (val & (1 << i)) {
+                            clear_bit(o->cpu_id, (unsigned long*)&s->cpus[i].pendingIPI);
+                        }
                     }
-                    for (int i = 0; i < s->numCPU; i++)
-                    if(test_bit(i, (unsigned long*)&val))
-                    {
-                        s->pendingIPI[o->cpu_id][i] = 1;
-                        set = true;
+
+                    if (val & AIC_IPI_SELF) {
+                        clear_bit(AIC_IPI_SELF, (unsigned long*)&o->pendingIPI);
                     }
-                    if (!set){
-                        qemu_log_mask(LOG_GUEST_ERROR, "AIC: Write REG_IPI_SET = 0x%x from CPU %u not set any IPI", val, o->cpu_id);
+                }
+                return;
+            case rAIC_IPI_MASK_SET:
+                o->ipi_mask |= (val & (AIC_IPI_NORMAL | AIC_IPI_SELF));
+                return;
+            case rAIC_IPI_MASK_CLR:
+                o->ipi_mask &= ~(val & (AIC_IPI_NORMAL | AIC_IPI_SELF));
+                return;
+            case rAIC_IPI_DEFER_SET:
+                {
+                    for (int i = 0; i < s->numCPU; i++) {
+                        if (val & (1 << i)) {
+                            set_bit(o->cpu_id, (unsigned long*)&s->cpus[i].deferredIPI);
+                        }
+                    }
+
+                    if (val & AIC_IPI_SELF) {
+                        set_bit(AIC_IPI_SELF, (unsigned long*)&o->deferredIPI);
+                    }
+                }
+                return;
+            case rAIC_IPI_DEFER_CLR:
+                {
+                    for (int i = 0; i < s->numCPU; i++) {
+                        if (val & (1 << i)) {
+                            clear_bit(o->cpu_id, (unsigned long*)&s->cpus[i].deferredIPI);
+                        }
+                    }
+                    if (val & AIC_IPI_SELF) {
+                        clear_bit(AIC_IPI_SELF, (unsigned long*)&o->deferredIPI);
+                    }
+                }
+                return;
+            case rAIC_EIR_DEST(0) ... rAIC_EIR_DEST(AIC_INT_COUNT):
+                {
+                    uint32_t vector = (addr - rAIC_EIR_DEST(0)) / 4;
+                    if (unlikely(vector >= s->numIRQ)) {
                         break;
                     }
-                    apple_aic_update(s);
-                    return;
-                case REG_IPI_DEFER_SET:
-                    if (val & REG_IPI_FLAG_SELF){
-                        val = 1 << o->cpu_id;
-                    }
-                    set = false;
-                    for (int i = 0; i < s->numCPU; i++)
-                    if(test_bit(i, (unsigned long*)&val))
-                    {
-                        s->deferredIPI[o->cpu_id][i] = 1;
-                        set = true;
-                    }
-                    if (!set){
-                        qemu_log_mask(LOG_GUEST_ERROR, "AIC: Write REG_IPI_DEFER_SET = 0x%x not set any IPI", val);
+                    s->eir_dest[vector] = val;
+                }
+                return;
+            case rAIC_EIR_SW_SET(0) ... rAIC_EIR_SW_SET(kAIC_NUM_EIRS):
+                {
+                    uint32_t eir = (addr - rAIC_EIR_SW_SET(0)) / 4;
+                    if (unlikely(eir >= s->numEIR)) {
                         break;
                     }
-                    apple_aic_update(s);
-                    return;
-                case REG_IPI_CLEAR:
-                    if(o->is_ipi){
-                       s->pendingIPI[o->ipi_source][o->cpu_id] = 0;
+                    s->eir_state[eir] |= val;
+                }
+                return;
+            case rAIC_EIR_SW_CLR(0) ... rAIC_EIR_SW_CLR(kAIC_NUM_EIRS):
+                {
+                    uint32_t eir = (addr - rAIC_EIR_SW_CLR(0)) / 4;
+                    if (unlikely(eir >= s->numEIR)) {
+                        break;
                     }
-                    return;
-            }
+                    s->eir_state[eir] &= ~val;
+                }
+                return;
+            case rAIC_EIR_MASK_SET(0) ... rAIC_EIR_MASK_SET(kAIC_NUM_EIRS):
+                {
+                    uint32_t eir = (addr - rAIC_EIR_MASK_SET(0)) / 4;
+                    if (unlikely(eir >= s->numEIR)) {
+                        break;
+                    }
+                    s->eir_mask[eir] |= val;
+                }
+                return;
+            case rAIC_EIR_MASK_CLR(0) ... rAIC_EIR_MASK_CLR(kAIC_NUM_EIRS):
+                {
+                    uint32_t eir = (addr - rAIC_EIR_MASK_CLR(0)) / 4;
+                    if (unlikely(eir >= s->numEIR)) {
+                        break;
+                    }
+                    s->eir_mask[eir] &= ~val;
+                }
+                return;
+            case rAIC_WHOAMI_Pn(0) ... rAIC_WHOAMI_Pn(AIC_CPU_COUNT) - 4:
+                {
+                    uint32_t cpu = (addr - 0x5000) / 0x80;
+                    if (unlikely(cpu > s->numCPU)) {
+                        break;
+                    }
+                    addr = addr - 0x5000 + 0x2000;
+                    qemu_mutex_unlock(&s->mutex);
+                    apple_aic_write(&s->cpus[cpu], addr, data, size);
+                    qemu_mutex_lock(&s->mutex);
+                }
+                return;
         }
-        qemu_log_mask(LOG_UNIMP, "AIC: Write to unspported reg 0x" TARGET_FMT_plx, addr);
+        qemu_log_mask(LOG_UNIMP, "AIC: Write to unspported reg 0x" TARGET_FMT_plx " cpu %u\n", addr, o->cpu_id);
     }
 }
 static uint64_t apple_aic_read(void *opaque,
@@ -276,76 +215,88 @@ static uint64_t apple_aic_read(void *opaque,
                      unsigned size){
     AppleAICOpaque* o = (AppleAICOpaque*)opaque;
     AppleAICState* s = APPLE_AIC(o->aic);
-    WITH_QEMU_LOCK_GUARD(&s->mutex){
-        if (addr >= 0x6000) { /* REG_TSTAMP */
-            //TODO: implement
-            qemu_log_mask(LOG_UNIMP, "AIC: Read REG_TSTAMP");
-            return 0;
-        } else if (addr >= 0x5000) { /* REG_PERCPU(r,c) */
-            uint32_t cpu_id = extract32(addr, 7, 5);
-            uint32_t op = extract32(addr, 0, 7);
-            switch (op){
-                case REG_IPI_DISABLE:
-                    return s->ipi_mask[cpu_id];
-                case REG_IPI_ENABLE:
-                    return ((~s->ipi_mask[cpu_id]) & REG_IPI_FLAG_SELF) | ((~s->ipi_mask[cpu_id]) & REG_IPI_FLAG_OTHER);
-                default:
-                    break;
-            }
-        } else if (addr >= 0x4280) {
-            //Unknown
-        } else if (addr >= 0x4100){ /* REG_IRQ_DISABLE; REG_IRQ_ENABLE, REG_IRQ_STAT */
-            uint32_t ipid = 0xffff;
-            if (addr >= 0x4200) { /* REG_IRQ_STAT */
-                ipid = (addr - 0x4200) >> 2;
-                if (ipid < s->numIPID) {
-                    return s->ipid_mask[ipid];
-                }
-            } else if (addr >= 0x4180){ /* REG_IRQ_ENABLE */
-                ipid = (addr - 0x4180) >> 2;
-                if (ipid < s->numIPID) {
-                    return ~s->ipid_mask[ipid];
-                }
-            } else { /* REG_IRQ_DISABLE */
-                ipid = (addr - 0x4100) >> 2;
-                if (ipid < s->numIPID) {
-                    return s->ipid_mask[ipid];
-                }
-            }
-        } else if (addr >= 0x3000) { /* REG_IRQ_AFFINITY */
-            uint32_t vectorNumber = (addr - 0x3000) >> 2;
-            return s->irq_affinity[vectorNumber];
-        } else {
-            switch (addr){
-                case REG_ID_REVISION:
-                    return 2;
-                case REG_ID_CONFIG:
-                    return (((uint64_t)s->numCPU - 1) << 16) | (s->numIRQ);
-                case REG_GLOBAL_CFG:
-                    return s->global_cfg;
-                case REG_ID_CPUID:
-                    return o->cpu_id;
-                case REG_TSTAMP_LO:
-                    return (uint32_t)s->tick;
-                case REG_TSTAMP_HI:
-                    return (uint32_t)((s->tick)>>32);
-                case REG_ACK:
-                    qemu_irq_lower(s->cpu_irqs[o->cpu_id]);
-                    if(o->state == AIC_CPU_STATE_NONE) return REG_ACK_TYPE_NONE;
-                    int ack = 0;
-                    if(o->ack) {
-                        ack = o->ack;
-                        o->ack = 0;
-                    } else {
-                        ack = apple_aic_find_irq_cpu(s, o->cpu_id);
+    WITH_QEMU_LOCK_GUARD(&s->mutex) {
+        switch (addr) {
+            case rAIC_REV:
+                return 2;
+            case rAIC_CAP0:
+                return (((uint64_t)s->numCPU - 1) << 16) | (s->numIRQ);
+            case rAIC_GLB_CFG:
+                return s->global_cfg;
+            case rAIC_WHOAMI:
+                return o->cpu_id;
+            case rAIC_IACK:
+                {
+                    qemu_irq_lower(o->irq);
+                    if (o->pendingIPI & AIC_IPI_SELF & (~o->ipi_mask)) {
+                        return kAIC_INT_IPI | kAIC_INT_IPI_SELF;
                     }
-                    return ack;
-                default:
-                    break;
-            }
+                    for (int i = 0; i < s->numCPU; i++) {
+                        if (o->pendingIPI & (~o->ipi_mask) & (1 << i)) {
+                            return kAIC_INT_IPI | (i == o->cpu_id ? kAIC_INT_IPI_SELF : kAIC_INT_IPI_NORM);
+                        }
+                    }
+
+                    for (int i = 0; i < s->numEIR; i++) {
+                        if (unlikely(s->eir_state[i] & (~s->eir_mask[i]))) {
+                            for (int j = 0; j < 32; j++) {
+                                if (((s->eir_mask[i] & (1 << j)) == 0) && (s->eir_state[i] & (1 << j)) && (s->eir_dest[AIC_EIR_TO_SRC(i, j)] & (1 << o->cpu_id))) {
+                                    return kAIC_INT_EXT | AIC_EIR_TO_SRC(i, j);
+                                }
+                            }
+                        }
+                    }
+                    return kAIC_INT_SPURIOUS;
+                }
+            case rAIC_EIR_DEST(0) ... rAIC_EIR_DEST(AIC_INT_COUNT):
+                {
+                    uint32_t vector = (addr - rAIC_EIR_DEST(0)) / 4;
+                    if (unlikely(vector >= s->numIRQ)) {
+                        break;
+                    }
+                    return s->eir_dest[vector];
+                }
+            case rAIC_EIR_MASK_SET(0) ... rAIC_EIR_MASK_SET(kAIC_NUM_EIRS):
+                {
+                    uint32_t eir = (addr - rAIC_EIR_MASK_SET(0)) / 4;
+                    if (unlikely(eir >= s->numEIR)) {
+                        break;
+                    }
+                    return s->eir_mask[eir];
+                }
+            case rAIC_EIR_MASK_CLR(0) ... rAIC_EIR_MASK_CLR(kAIC_NUM_EIRS):
+                {
+                    uint32_t eir = (addr - rAIC_EIR_MASK_CLR(0)) / 4;
+                    if (unlikely(eir >= s->numEIR)) {
+                        break;
+                    }
+                    return s->eir_mask[eir];
+                }
+            case rAIC_EIR_INT_RO(0) ... rAIC_EIR_INT_RO(kAIC_NUM_EIRS):
+                {
+                    uint32_t eir = (addr - rAIC_EIR_INT_RO(0)) / 4;
+                    if (unlikely(eir >= s->numEIR)) {
+                        break;
+                    }
+                    return s->eir_state[eir];
+                }
+            case rAIC_WHOAMI_Pn(0) ... rAIC_WHOAMI_Pn(AIC_CPU_COUNT) - 4:
+                {
+                    uint32_t cpu = (addr - 0x5000) / 0x80;
+                    if (unlikely(cpu > s->numCPU)) {
+                        break;
+                    }
+                    addr = addr - 0x5000 + 0x2000;
+                    qemu_mutex_unlock(&s->mutex);
+                    uint64_t val = apple_aic_read(&s->cpus[cpu], addr, size);
+                    qemu_mutex_lock(&s->mutex);
+                    return val;
+                }
+            default:
+                break;
         }
     }
-    qemu_log_mask(LOG_UNIMP, "AIC: Read from unspported reg 0x" TARGET_FMT_plx, addr);
+    qemu_log_mask(LOG_UNIMP, "AIC: Read from unspported reg 0x" TARGET_FMT_plx " cpu: %u\n", addr, o->cpu_id);
     return -1;
 }
 
@@ -363,53 +314,34 @@ static const MemoryRegionOps apple_aic_ops = {
 static void apple_aic_init(Object *obj)
 {
     AppleAICState *s = APPLE_AIC(obj);
+    SysBusDevice *sbd = SYS_BUS_DEVICE(obj);
     qemu_mutex_init(&s->mutex);
     s->cpus = g_new0(AppleAICOpaque, s->numCPU);
-    s->iomems = g_new0(MemoryRegion, s->numCPU);
     for(int i=0; i < s->numCPU; i++){
         AppleAICOpaque *opaque = &s->cpus[i];
         opaque->aic = s;
         opaque->cpu_id = i;
-        memory_region_init_io(&s->iomems[i], obj, &apple_aic_ops, opaque,
+        memory_region_init_io(&opaque->iomem, obj, &apple_aic_ops, opaque,
                                 TYPE_APPLE_AIC, s->base_size);
+        sysbus_init_mmio(sbd, &opaque->iomem);
+        sysbus_init_irq(sbd, &opaque->irq);
     }
 
     qdev_init_gpio_in(DEVICE(obj), apple_aic_set_irq, s->numIRQ);
     assert(s->numCPU > 0);
-    s->ipid_mask = g_malloc0(sizeof(uint32_t) * s->numIPID);
-    s->ipi_mask = g_malloc0(sizeof(uint32_t) * s->numCPU);
-    s->irq_affinity = g_malloc0(sizeof(uint32_t) * s->numIRQ);
-    s->cpu_irqs = g_malloc0(sizeof(qemu_irq) * s->numCPU);
-    s->pendingIPI = g_malloc0(sizeof(uint32_t*) * s->numCPU);
-    s->deferredIPI = g_malloc0(sizeof(uint32_t*) * s->numCPU);
-    for(int i = 0; i < s->numCPU; i++){
-        s->pendingIPI[i] = g_malloc0(sizeof(bool) * s->numCPU);
-        s->deferredIPI[i] = g_malloc0(sizeof(bool) * s->numCPU);
-    }
-    qdev_init_gpio_out(DEVICE(obj), s->cpu_irqs, s->numCPU);
-    s->ext_irq_state = g_malloc0(sizeof(bool) * s->numIRQ);
-}
-static void apple_aic_reset(DeviceState *dev){
-    AppleAICState *s = APPLE_AIC(dev);
-    //mask all IRQs
-    memset(s->ipid_mask, 0xffff, sizeof(uint32_t)*s->numIPID);
-    //Affinity default to 0
-    memset(s->irq_affinity, 0, sizeof(uint32_t)*s->numIRQ);
-    for(int i=0;i < s->numCPU; i++)
-    {
-        // mask all IPI
-        s->ipi_mask[i] = REG_IPI_FLAG_SELF | REG_IPI_FLAG_OTHER;
-    }
+    s->eir_mask = g_malloc0(sizeof(uint32_t) * s->numEIR);
+    s->eir_dest = g_malloc0(sizeof(uint32_t) * s->numIRQ);
+    s->eir_state = g_malloc0(sizeof(bool) * s->numIRQ);
 }
 static void apple_aic_realize(DeviceState *dev, Error **errp){
     AppleAICState *s = APPLE_AIC(dev);
     s->timer = timer_new_ns(QEMU_CLOCK_VIRTUAL,
                             apple_aic_tick, dev);
-    timer_mod_ns(s->timer, kDeferredIPITimerDefault);
+    timer_mod_ns(s->timer, kAICWT);
     apple_aic_reset(dev);
     msi_nonbroken = true;
 }
-AppleAICState* apple_aic_create(hwaddr soc_base, uint32_t numCPU, DTBNode* node){
+SysBusDevice* apple_aic_create(uint32_t numCPU, DTBNode* node){
     DeviceState  *dev;
     AppleAICState *s;
 
@@ -418,11 +350,10 @@ AppleAICState* apple_aic_create(hwaddr soc_base, uint32_t numCPU, DTBNode* node)
     DTBProp* prop = get_dtb_prop(node, "reg");
     assert(prop != NULL);
     hwaddr* reg = (hwaddr*)prop->value;
-    s->base = soc_base + reg[0];
     s->base_size = reg[1];
     prop = get_dtb_prop(node, "ipid-mask");
-    s->numIPID = prop->length / 4;
-    s->numIRQ = s->numIPID * 32;
+    s->numEIR = prop->length / 4;
+    s->numIRQ = s->numEIR * 32;
 
     s->numCPU = numCPU;
     overwrite_dtb_prop(node, "#main-cpus", 4, (uint8_t*)&s->numCPU);
@@ -433,7 +364,7 @@ AppleAICState* apple_aic_create(hwaddr soc_base, uint32_t numCPU, DTBNode* node)
     *(uint32_t*)prop->value = 0;
     apple_aic_init(OBJECT(dev));
 
-    return s;
+    return SYS_BUS_DEVICE(dev);
 }
 static void apple_aic_class_init(ObjectClass *klass, void *data)
 {
@@ -445,7 +376,7 @@ static void apple_aic_class_init(ObjectClass *klass, void *data)
 
 static const TypeInfo apple_aic_info = {
     .name = TYPE_APPLE_AIC,
-    .parent = TYPE_DEVICE,
+    .parent = TYPE_SYS_BUS_DEVICE,
     .instance_size = sizeof(AppleAICState),
     .class_init = apple_aic_class_init,
 };

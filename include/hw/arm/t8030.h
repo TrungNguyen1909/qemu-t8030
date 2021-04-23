@@ -31,7 +31,6 @@
 #include "hw/boards.h"
 #include "hw/arm/boot.h"
 #include "hw/arm/xnu.h"
-#include "hw/intc/apple-aic.h"
 #include "exec/memory.h"
 #include "cpu.h"
 #include "sysemu/kvm.h"
@@ -171,6 +170,7 @@ typedef struct
     //store the pending IPI_SR value
     uint64_t pendingIPI[MAX_CPU];
     bool pendingWakeup[MAX_CPU];
+    SysBusDevice* aic;
     SysBusDevice* ans;
     DeviceState* gpio;
     MemoryRegion* sysmem;

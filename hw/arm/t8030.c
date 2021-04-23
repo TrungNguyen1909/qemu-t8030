@@ -910,16 +910,20 @@ static void T8030_create_aic(MachineState *machine){
     assert(child != NULL);
     child = get_dtb_child_node_by_name(child, "aic");
     assert(child != NULL);
-    tms->aic = apple_aic_create(tms->soc_base_pa, machine->smp.cpus, child);
+    tms->aic = apple_aic_create(machine->smp.cpus, child);
     object_property_add_child(OBJECT(machine), "aic", OBJECT(tms->aic));
     assert(tms->aic);
 
+    DTBProp* prop = get_dtb_prop(child, "reg");
+    assert(prop != NULL);
+    hwaddr* reg = (hwaddr*)prop->value;
+
     for(unsigned int i = 0; i < machine->smp.cpus; i++)
     {
-        memory_region_add_subregion_overlap(tms->cpus[i]->memory, tms->aic->base, &tms->aic->iomems[i], 0);
-        qdev_connect_gpio_out(DEVICE(tms->aic), i, qdev_get_gpio_in(DEVICE(tms->cpus[i]->cpu), ARM_CPU_IRQ));
+        memory_region_add_subregion_overlap(tms->cpus[i]->memory, tms->soc_base_pa + reg[0], sysbus_mmio_get_region(SYS_BUS_DEVICE(tms->aic), i), 0);
+        sysbus_connect_irq(SYS_BUS_DEVICE(tms->aic), i, qdev_get_gpio_in(DEVICE(tms->cpus[i]->cpu), ARM_CPU_IRQ));
     }
-    qdev_realize(DEVICE(tms->aic), NULL, &error_fatal);
+    sysbus_realize(SYS_BUS_DEVICE(tms->aic), &error_fatal);
 }
 
 static void T8030_pmgr_setup(MachineState* machine){

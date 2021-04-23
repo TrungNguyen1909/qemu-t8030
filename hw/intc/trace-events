@@ -205,5 +205,6 @@ bcm2835_ic_set_gpu_irq(int irq, int level) "GPU irq #%d level %d"
 bcm2835_ic_set_cpu_irq(int irq, int level) "CPU irq #%d level %d"
 
 # apple-aic.c
-aic_enable_irq(int irq) "AIC: Enabling IRQ %u"
-aic_disable_irq(int irq) "AIC: Disabling IRQ %u"
+aic_enable_irq(int irq) "AIC: Enabling IRQ %d"
+aic_disable_irq(int irq) "AIC: Disabling IRQ %d"
+aic_set_irq(int irq, int level) "AIC: External IRQ %d level set to %d"

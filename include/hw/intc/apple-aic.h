@@ -26,6 +26,77 @@ num IRQ + (cpu_id * 2) -> self_ipi (cpuX->cpuX)
 num IRQ + (cpu_id * 2) + 1 -> other_ipi (cpuX->cpuY)
 */ 
 
+//TODO: this is hardcoded for T8030
+#define AIC_INT_COUNT   (576)
+#define AIC_CPU_COUNT   (6)
+#define AIC_VERSION     (2)
+
+#define	rAIC_REV				(0x0000)
+#define	rAIC_CAP0				(0x0004)
+#define	rAIC_CAP1				(0x0008)
+#define	rAIC_RST				(0x000C)
+
+#define	rAIC_GLB_CFG			(0x0010)
+#define		AIC_GLBCFG_IEN		(1 << 0)
+#define		AIC_GLBCFG_AEWT(_t)	((_t) << 4)
+#define		AIC_GLBCFG_SEWT(_t)	((_t) << 8)
+#define		AIC_GLBCFG_AIWT(_t)	((_t) << 12)
+#define		AIC_GLBCFG_SIWT(_t)	((_t) << 16)
+#define		AIC_GLBCFG_SYNC_ACG	(1 << 29)
+#define		AIC_GLBCFG_EIR_ACG	(1 << 30)
+#define		AIC_GLBCFG_REG_ACG	(1 << 31)
+#define		AIC_GLBCFG_WT_MASK	(15)
+#define		AIC_GLBCFG_WT_64MICRO	(7)
+
+#define	rAIC_WHOAMI				(0x2000)
+#define	rAIC_IACK				(0x2004)
+#define	rAIC_IPI_SET			(0x2008)
+#define	rAIC_IPI_CLR			(0x200C)
+#define		AIC_IPI_NORMAL		(1 << 0)
+#define		AIC_IPI_SELF		(1 << 31)
+#define rAIC_IPI_MASK_SET       (0x2024)
+#define rAIC_IPI_MASK_CLR       (0x2028)
+#define rAIC_IPI_DEFER_SET      (0x202C)
+#define rAIC_IPI_DEFER_CLR      (0x2030)
+
+#define rAIC_EIR_DEST(_n)			(0x3000 + ((_n) * 4))
+#define rAIC_EIR_SW_SET(_n)			(0x4000 + ((_n) * 4))
+#define rAIC_EIR_SW_CLR(_n)			(0x4080 + ((_n) * 4))
+#define rAIC_EIR_MASK_SET(_n)		(0x4100 + ((_n) * 4))
+#define rAIC_EIR_MASK_CLR(_n)		(0x4180 + ((_n) * 4))
+#define rAIC_EIR_INT_RO(_n)			(0x4200 + ((_n) * 4))
+
+#define rAIC_WHOAMI_Pn(_n)			(0x5000 + ((_n) * 0x80))
+#define rAIC_IACK_Pn(_n)			(0x5004 + ((_n) * 0x80))
+#define rAIC_IPI_SET_Pn(_n)			(0x5008 + ((_n) * 0x80))
+#define rAIC_IPI_CLR_Pn(_n)			(0x500C + ((_n) * 0x80))
+#define rAIC_IPI_MASK_SET_Pn(_n)	(0x5024 + ((_n) * 0x80))
+#define rAIC_IPI_MASK_CLR_Pn(_n)	(0x5028 + ((_n) * 0x80))
+#define rAIC_IPI_DEFER_SET_Pn(_n)	(0x502C + ((_n) * 0x80))
+#define rAIC_IPI_DEFER_CLR_Pn(_n)	(0x5030 + ((_n) * 0x80))
+
+#define kAIC_INT_SPURIOUS		(0x00000)
+#define kAIC_INT_EXT			(0x10000)
+#define kAIC_INT_IPI			(0x40000)
+#define kAIC_INT_IPI_NORM		(0x40001)
+#define kAIC_INT_IPI_SELF		(0x40002)
+
+#define AIC_INT_EXT(_v)			(((_v) & 0x70000) == kAIC_INT_EXT)
+#define AIC_INT_IPI(_v)			(((_v) & 0x70000) == kAIC_INT_IPI)
+
+#define AIC_INT_EXTID(_v)		((_v) & 0x3FF)
+
+#define AIC_SRC_TO_EIR(_s)		((_s) >> 5)
+#define AIC_SRC_TO_MASK(_s)		(1 << ((_s) & 0x1F))
+#define AIC_EIR_TO_SRC(_s, _v)  (((_s) << 5) + ((_v) & 0x1F))
+
+#define kAIC_MAX_EXTID			(AIC_INT_COUNT)
+#define kAIC_VEC_IPI			(kAIC_MAX_EXTID)
+#define kAIC_NUM_INTS			(kAIC_VEC_IPI + 1)
+
+#define kAIC_NUM_EIRS			AIC_SRC_TO_EIR(kAIC_MAX_EXTID)
+
+#define kAICWT 64000
 typedef enum {
     //CPU not in AppleInterruptController::handleInterrupt loop
     AIC_CPU_STATE_NONE = 0,
@@ -35,53 +106,39 @@ typedef enum {
 
 typedef struct  {
     void *aic;
+    qemu_irq irq;
+    MemoryRegion iomem;
     unsigned int cpu_id;
     unsigned int state;
-    unsigned int ack;
-    unsigned int is_ipi;
-    unsigned int ipi_source;
-    
-    unsigned int irq_source;
+    uint32_t pendingIPI;
+    uint32_t deferredIPI;
+    uint32_t ipi_mask;
 } AppleAICOpaque;
 
 struct AppleAICState {
-    DeviceState parent_obj;
-    //reg region per cpu
-    MemoryRegion* iomems;
+    SysBusDevice parent_obj;
     //timer
     QEMUTimer* timer;
     //mutex
     QemuMutex mutex;
-    //reg base address
-    hwaddr base;
-    unsigned long base_size;
-    size_t numIPID;
+    uint32_t base_size;
+    size_t numEIR;
     size_t numIRQ;
     size_t numCPU;
     //mask of IRQ in domains of 32
-    uint32_t *ipid_mask;
-    //whether IPI i is disabled (bit 31 set: self masked, bit 0 set: other masked)
-    uint32_t *ipi_mask;
+    uint32_t *eir_mask;
     //for IRQ i, if bit x is set, that IRQ should be sent to cpu x (there might be multiple bits set)
-    uint32_t *irq_affinity;
+    uint32_t *eir_dest;
     //cpu opaques
     AppleAICOpaque* cpus;
-    //cpu irqs
-    qemu_irq *cpu_irqs;
     //ext irqs state
-    bool *ext_irq_state;
-    //pending IPIs: 1: set; 0: unset
-    bool **pendingIPI;
-    //deferred IPIs: 1: set; 0: unset
-    bool **deferredIPI;
+    uint32_t *eir_state;
     //global cfg
     uint32_t global_cfg;
-    //tick counter
-    unsigned long tick;
     
 };
 
 
-AppleAICState* apple_aic_create(hwaddr soc_base, unsigned int numCPU, DTBNode* node);
+SysBusDevice* apple_aic_create(unsigned int numCPU, DTBNode* node);
 
 #endif /* APPLE_AIC_H */
