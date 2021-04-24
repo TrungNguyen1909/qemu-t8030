@@ -92,14 +92,14 @@ static void apple_aic_write(void *opaque,
                     for (int i = 0; i < s->numCPU; i++) {
                         if (val & (1 << i)) {
                             set_bit(o->cpu_id, (unsigned long*)&s->cpus[i].pendingIPI);
-                            if (s->cpus[i].pendingIPI & s->cpus[i].ipi_mask) {
+                            if (~s->cpus[i].ipi_mask & AIC_IPI_NORMAL) {
                                 qemu_irq_raise(s->cpus[i].irq);
                             }
                         }
                     }
                     if (val & AIC_IPI_SELF) {
                         set_bit(AIC_IPI_SELF, (unsigned long*)&o->pendingIPI);
-                        if (o->pendingIPI & o->ipi_mask) {
+                        if (~o->ipi_mask & AIC_IPI_SELF) {
                                 qemu_irq_raise(o->irq);
                         }
                     }
@@ -228,12 +228,16 @@ static uint64_t apple_aic_read(void *opaque,
             case rAIC_IACK:
                 {
                     qemu_irq_lower(o->irq);
-                    if (o->pendingIPI & AIC_IPI_SELF & (~o->ipi_mask)) {
+                    if (o->pendingIPI & AIC_IPI_SELF & ~o->ipi_mask) {
+                        o->ipi_mask |= kAIC_INT_IPI_SELF;
                         return kAIC_INT_IPI | kAIC_INT_IPI_SELF;
                     }
-                    for (int i = 0; i < s->numCPU; i++) {
-                        if (o->pendingIPI & (~o->ipi_mask) & (1 << i)) {
-                            return kAIC_INT_IPI | (i == o->cpu_id ? kAIC_INT_IPI_SELF : kAIC_INT_IPI_NORM);
+                    if (~o->ipi_mask & AIC_IPI_NORMAL) {
+                        for (int i = 0; i < s->numCPU; i++) {
+                            if (o->pendingIPI & (1 << i)) {
+                                o->ipi_mask |= kAIC_INT_IPI_NORM;
+                                return kAIC_INT_IPI | kAIC_INT_IPI_NORM;
+                            }
                         }
                     }
 
@@ -241,6 +245,7 @@ static uint64_t apple_aic_read(void *opaque,
                         if (unlikely(s->eir_state[i] & (~s->eir_mask[i]))) {
                             for (int j = 0; j < 32; j++) {
                                 if (((s->eir_mask[i] & (1 << j)) == 0) && (s->eir_state[i] & (1 << j)) && (s->eir_dest[AIC_EIR_TO_SRC(i, j)] & (1 << o->cpu_id))) {
+                                    s->eir_mask[i] |= (1 << j);
                                     return kAIC_INT_EXT | AIC_EIR_TO_SRC(i, j);
                                 }
                             }
