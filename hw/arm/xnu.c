@@ -40,6 +40,8 @@ const char *KEEP_COMP[] = {"uart-1,samsung\0$",
                            "aes,s8000\0$",
                            "gpio,t8030\0gpio,s5l8960x\0$",
                            "gpio,t8015\0gpio,s5l8960x\0$",
+                           "iic,soft\0$",
+                           "dock,9pin\0$",
                            "otgphyctrl,s8000\0otgphyctrl,s5l8960x\0$",
                            "usb-complex,s8000\0usb-complex,s5l8960x\0$",
                            "usb-device,s8000\0usb-device,t7000\0usb-device,s5l8900x\0$"};
@@ -47,8 +49,7 @@ const char *KEEP_COMP[] = {"uart-1,samsung\0$",
 const char *REM_NAMES[] = {"backlight\0$",
                             "dockchannel-uart\0$",
                             "sep\0$", "pmp\0$",
-                            "aop-gpio\0$", "nub-gpio\0$",
-                            "smc-gpio\0$",
+                            "aop-gpio\0$",
                             "atc-phy\0$", "usb-drd\0$"};
 
 const char *REM_DEV_TYPES[] = {"backlight\0$", "pmp\0$"};
