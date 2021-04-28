@@ -1,3 +1,4 @@
+specific_ss.add(when: ['CONFIG_SOFTMMU', 'TARGET_AARCH64'], if_true: files('apple_i2c.c'))
 i2c_ss = ss.source_set()
 i2c_ss.add(when: 'CONFIG_I2C', if_true: files('core.c'))
 i2c_ss.add(when: 'CONFIG_SMBUS', if_true: files('smbus_slave.c', 'smbus_master.c'))
