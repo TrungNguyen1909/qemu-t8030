@@ -457,9 +457,7 @@ static void T8030_add_cpregs(T8030CPUState* tcpu)
 
 static void T8030_create_s3c_uart(const T8030MachineState *tms, Chardev *chr)
 {
-    qemu_irq irq;
-    DeviceState *d;
-    SysBusDevice *s;
+    DeviceState *dev;
     hwaddr base;
     //first fetch the uart mmio address
     DTBNode *child = get_dtb_child_node_by_name(tms->device_tree, "arm-io");
@@ -473,15 +471,11 @@ static void T8030_create_s3c_uart(const T8030MachineState *tms, Chardev *chr)
     assert(prop != NULL);
     hwaddr *uart_offset = (hwaddr *)prop->value;
     base = tms->soc_base_pa + uart_offset[0];
-
-    //hack for now. create a device that is not used just to have a dummy
-    //unused interrupt
-    d = qdev_new(TYPE_PLATFORM_BUS_DEVICE);
-    s = SYS_BUS_DEVICE(d);
-    sysbus_init_irq(s, &irq);
-    //pass a dummy irq as we don't need nor want interrupts for this UART
-    DeviceState *dev = exynos4210_uart_create(base, 256, 0, chr, irq);
-    assert(dev!=NULL);
+    prop = get_dtb_prop(child, "interrupts");
+    assert(prop);
+    int vector = *(uint32_t*)prop->value;
+    dev = exynos4210_uart_create(base, 256, 0, chr, qdev_get_gpio_in(DEVICE(tms->aic), vector));
+    assert(dev);
 }
 
 static void T8030_patch_kernel(AddressSpace *nsas)
