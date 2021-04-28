@@ -78,13 +78,19 @@
 static void apple_gpio_update_pincfg(AppleGPIOState *s, int pin, uint32_t value) {
     if (value & FUNC_MASK) {
         // TODO: Is this how FUNC_ALT0 supposed to behave?
-        value &= ~DATA_1;
-        qemu_set_irq(s->out[pin], 0);
+        switch (value & FUNC_MASK) {
+            case FUNC_ALT0:
+                qemu_set_irq(s->out[pin], 1);
+                break;
+            default:
+                qemu_log_mask(LOG_UNIMP, "%s: set pin %u to unknown func %u", __func__, pin, value & FUNC_MASK);
+                break;
+        }
     } else {
         if ((value & CFG_MASK) == CFG_GP_OUT) {
             qemu_set_irq(s->out[pin], value & DATA_1);
         } else {
-            qemu_set_irq(s->out[pin], 0);
+            qemu_set_irq(s->out[pin], 1);
         }
     }
     s->gpio_cfg[pin] = value;
@@ -216,13 +222,11 @@ static void apple_gpio_reg_write(void *opaque,
                   uint64_t data,
                   unsigned size){
     AppleGPIOState *s = APPLE_GPIO(opaque);
-    qemu_log_mask(LOG_UNIMP,
-                      "%s: 0x%" HWADDR_PRIx ": " TARGET_FMT_plx "\n", __func__, addr, data);
     switch(addr) {
         case rGPIOCFG(0) ... rGPIOCFG(GPIO_MAX_PIN_NR - 1):
             if (data & FUNC_MASK) {
                 qemu_log_mask(LOG_UNIMP,
-                                "%s: alternate function " TARGET_FMT_plx " is unsupported\n", __func__, (data & FUNC_MASK) >> FUNC_SHIFT);
+                                "%s: alternate function " TARGET_FMT_plx " is unsupported\n", __func__, ((data & FUNC_MASK) >> FUNC_SHIFT) - 1);
             }
             return apple_gpio_cfg_write(s, (addr - rGPIOCFG(0)) >> 2, addr, data);
             break;
@@ -242,7 +246,6 @@ static void apple_gpio_reg_write(void *opaque,
 static uint64_t apple_gpio_reg_read(void *opaque,
                      hwaddr addr,
                      unsigned size){
-    qemu_log_mask(LOG_UNIMP, "%s: 0x%" HWADDR_PRIx "\n", __func__, addr);
     AppleGPIOState *s = APPLE_GPIO(opaque);
     switch(addr) {
         case rGPIOCFG(0) ... rGPIOCFG(GPIO_MAX_PIN_NR - 1):
