@@ -44,6 +44,7 @@
 #include "hw/intc/apple-aic.h"
 #include "hw/block/apple-ans.h"
 #include "hw/gpio/apple-gpio.h"
+#include "hw/i2c/apple_i2c.h"
 
 #include "hw/arm/exynos4210.h"
 
@@ -1065,6 +1066,74 @@ static DeviceState *T8030_get_gpio_with_role(MachineState *machine, uint32_t rol
     return NULL;
 }
 
+static void T8030_create_i2c(MachineState *machine, const char *name)
+{
+    T8030MachineState *tms = T8030_MACHINE(machine);
+    DTBNode *child = get_dtb_child_node_by_name(tms->device_tree, "arm-io");
+    DeviceState *i2c = NULL;
+    child = get_dtb_child_node_by_name(child, name);
+    assert(child);
+
+    i2c = apple_i2c_create(child);
+    assert(i2c);
+    object_property_add_child(OBJECT(machine), name, OBJECT(i2c));
+
+    DTBProp *prop = get_dtb_prop(child, "reg");
+    assert(prop);
+    uint64_t *reg = (uint64_t*)prop->value;
+    sysbus_mmio_map(SYS_BUS_DEVICE(i2c), 0, tms->soc_base_pa + reg[0]);
+    prop = get_dtb_prop(child, "interrupts");
+    assert(prop);
+    uint32_t* ints = (uint32_t*)prop->value;
+    for(int i = 0; i < prop->length / sizeof(uint32_t); i++){
+        sysbus_connect_irq(SYS_BUS_DEVICE(i2c), i, qdev_get_gpio_in(DEVICE(tms->aic), ints[i]));
+    }
+
+    uint32_t line = 0;
+    uint32_t opts = 0;
+    uint32_t role = 0;
+    DeviceState *gpio;
+    prop = get_dtb_prop(child, "gpio-iic_scl");
+    assert(prop);
+    line = ((uint32_t*)prop->value)[0];
+    opts = ((uint32_t*)prop->value)[1];
+    role = ((uint32_t*)prop->value)[2];
+    gpio = T8030_get_gpio_with_role(machine, role);
+    if (gpio) {
+        if (!get_dtb_prop(child, "function-iic_scl")) {
+            uint32_t func[] = {
+                APPLE_GPIO(gpio)->phandle,
+                0x4750494F, /* GPIO */
+                line,
+                opts
+            };
+            prop = add_dtb_prop(child, "function-iic_scl", sizeof(func), (uint8_t*)func);
+        }
+        qdev_connect_gpio_out(gpio, line, qdev_get_gpio_in(i2c, BITBANG_I2C_SCL));
+    }
+
+    prop = get_dtb_prop(child, "gpio-iic_sda");
+    assert(prop);
+    line = ((uint32_t*)prop->value)[0];
+    opts = ((uint32_t*)prop->value)[1];
+    role = ((uint32_t*)prop->value)[2];
+    gpio = T8030_get_gpio_with_role(machine, role);
+    if (gpio) {
+        if (!get_dtb_prop(child, "function-iic_sda")) {
+            uint32_t func[] = {
+                APPLE_GPIO(gpio)->phandle,
+                0x4750494F, /* GPIO */
+                line,
+                opts
+            };
+            prop = add_dtb_prop(child, "function-iic_sda", sizeof(func), (uint8_t*)func);
+        }
+        qdev_connect_gpio_out(gpio, line, qdev_get_gpio_in(i2c, BITBANG_I2C_SDA));
+        qdev_connect_gpio_out(i2c, BITBANG_I2C_SDA, qdev_get_gpio_in(gpio, line));
+    }
+    sysbus_realize_and_unref(SYS_BUS_DEVICE(i2c), &error_fatal);
+}
+
 static void T8030_cpu_reset(void *opaque)
 {
     MachineState *machine = MACHINE(opaque);
@@ -1150,6 +1219,14 @@ static void T8030_machine_init(MachineState *machine)
     T8030_create_gpio(machine, "gpio");
     T8030_create_gpio(machine, "smc-gpio");
     T8030_create_gpio(machine, "nub-gpio");
+    
+    T8030_create_i2c(machine, "i2c0");
+    T8030_create_i2c(machine, "i2c1");
+    T8030_create_i2c(machine, "i2c2");
+    T8030_create_i2c(machine, "i2c3");
+    T8030_create_i2c(machine, "smc-i2c0");
+    T8030_create_i2c(machine, "smc-i2c1");
+
     T8030_bootargs_setup(machine);
 
     qemu_register_reset(T8030_machine_reset, tms);
