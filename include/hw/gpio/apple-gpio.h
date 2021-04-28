@@ -25,6 +25,7 @@ struct AppleGPIOState {
     uint32_t *in;
     uint32_t *old_in;
     uint32_t npl;
+    uint32_t phandle;
 };
 
 DeviceState *apple_gpio_create(DTBNode* node);

@@ -1029,27 +1029,46 @@ static void T8030_create_ans(MachineState* machine){
     sysbus_realize(tms->ans, &error_fatal);
 }
 
-static void T8030_create_gpio(MachineState *machine)
+static void T8030_create_gpio(MachineState *machine, const char *name)
 {
     T8030MachineState *tms = T8030_MACHINE(machine);
     DTBNode *child = get_dtb_child_node_by_name(tms->device_tree, "arm-io");
-    child = get_dtb_child_node_by_name(child, "gpio");
+    DeviceState *gpio = NULL;
+    child = get_dtb_child_node_by_name(child, name);
     assert(child);
-    tms->gpio = apple_gpio_create(child);
-    assert(tms->gpio);
-    object_property_add_child(OBJECT(machine), "gpio", OBJECT(tms->gpio));
+    gpio = apple_gpio_create(child);
+    assert(gpio);
+    object_property_add_child(OBJECT(machine), name, OBJECT(gpio));
 
     DTBProp *prop = get_dtb_prop(child, "reg");
     assert(prop);
     uint64_t *reg = (uint64_t*)prop->value;
-    sysbus_mmio_map(SYS_BUS_DEVICE(tms->gpio), 0, tms->soc_base_pa + reg[0]);
+    sysbus_mmio_map(SYS_BUS_DEVICE(gpio), 0, tms->soc_base_pa + reg[0]);
     prop = get_dtb_prop(child, "interrupts");
     assert(prop);
     uint32_t* ints = (uint32_t*)prop->value;
     for(int i = 0; i < prop->length / sizeof(uint32_t); i++){
-        sysbus_connect_irq(SYS_BUS_DEVICE(tms->gpio), i, qdev_get_gpio_in(DEVICE(tms->aic), ints[i]));
+        sysbus_connect_irq(SYS_BUS_DEVICE(gpio), i, qdev_get_gpio_in(DEVICE(tms->aic), ints[i]));
     }
-    sysbus_realize_and_unref(SYS_BUS_DEVICE(tms->gpio), &error_fatal);
+    sysbus_realize_and_unref(SYS_BUS_DEVICE(gpio), &error_fatal);
+}
+
+static DeviceState *T8030_get_gpio_with_role(MachineState *machine, uint32_t role)
+{
+    switch (role) {
+        case 0x00005041: /* AP */
+            return DEVICE(object_property_get_link(OBJECT(machine), "gpio", &error_fatal));
+            break;
+        case 0x00434d53: /* SMC */
+            return DEVICE(object_property_get_link(OBJECT(machine), "smc-gpio", &error_fatal));
+            break;
+        case 0x0042554e: /* NUB */
+            return DEVICE(object_property_get_link(OBJECT(machine), "nub-gpio", &error_fatal));
+            break;
+        default:
+            qemu_log_mask(LOG_GUEST_ERROR, "%s: invalid gpio role %s\n", __func__, (const char*)&role);
+    }
+    return NULL;
 }
 
 static void T8030_cpu_reset(void *opaque)
@@ -1134,8 +1153,9 @@ static void T8030_machine_init(MachineState *machine)
 
     T8030_create_ans(machine);
 
-    T8030_create_gpio(machine);
-    
+    T8030_create_gpio(machine, "gpio");
+    T8030_create_gpio(machine, "smc-gpio");
+    T8030_create_gpio(machine, "nub-gpio");
     T8030_bootargs_setup(machine);
 
     qemu_register_reset(T8030_machine_reset, tms);

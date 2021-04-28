@@ -279,7 +279,9 @@ DeviceState *apple_gpio_create(DTBNode *node){
 
     s->iomem = g_new(MemoryRegion, 1);
     DTBProp *prop = get_dtb_prop(node, "reg");
-    memory_region_init_io(s->iomem, OBJECT(dev), &gpio_reg_ops, s, TYPE_APPLE_GPIO, ((uint64_t*)prop->value)[1]);
+    uint64_t mmio_size = ((hwaddr*)prop->value)[1];
+    prop = get_dtb_prop(node, "name");
+    memory_region_init_io(s->iomem, OBJECT(dev), &gpio_reg_ops, s, (const char*)prop->value, mmio_size);
     sysbus_init_mmio(sbd, s->iomem);
 
     prop = get_dtb_prop(node, "#gpio-pins");
@@ -295,6 +297,9 @@ DeviceState *apple_gpio_create(DTBNode *node){
     for(int i = 0; i < s->nirqgrps; i++){
         sysbus_init_irq(sbd, &s->irqs[i]);
     }
+    prop = get_dtb_prop(node, "AAPL,phandle");
+    assert(prop);
+    s->phandle = *(uint32_t*)prop->value;
     return dev;
 }
 

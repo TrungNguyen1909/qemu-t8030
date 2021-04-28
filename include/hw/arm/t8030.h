@@ -172,7 +172,6 @@ typedef struct
     bool pendingWakeup[MAX_CPU];
     SysBusDevice* aic;
     SysBusDevice* ans;
-    DeviceState* gpio;
     MemoryRegion* sysmem;
     struct arm_boot_info bootinfo;
     char ramdisk_filename[1024];
