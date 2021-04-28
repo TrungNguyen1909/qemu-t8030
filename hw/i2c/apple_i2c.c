@@ -97,13 +97,11 @@ static void i2c_reg_write(void *opaque,
                   uint64_t data,
                   unsigned size){
     qemu_log_mask(LOG_UNIMP, "I2C: reg WRITE @ 0x" TARGET_FMT_plx " value: 0x" TARGET_FMT_plx "\n", addr, data);    
-    AppleI2CState *s = APPLE_I2C(opaque);
 }
 static uint64_t i2c_reg_read(void *opaque,
                      hwaddr addr,
                      unsigned size){
     qemu_log_mask(LOG_UNIMP, "I2C: reg READ @ 0x" TARGET_FMT_plx "\n", addr);
-    AppleI2CState *s = APPLE_I2C(opaque);
     return 0;
 }
 static const MemoryRegionOps i2c_reg_ops = {
@@ -129,7 +127,7 @@ DeviceState *apple_i2c_create(DTBNode *node)
     g_free(prop->value);
     // Force soft I2C as we haven't support multi-master yet.
     // TODO: I2C multi-master
-    prop->value = g_strdup("iic,soft");
+    prop->value = (uint8_t*)g_strdup("iic,soft");
     prop->length = 9;
     qdev_init_gpio_in(dev, apple_i2c_gpio_set, 2);
     qdev_init_gpio_out(dev, &s->out, 1);
