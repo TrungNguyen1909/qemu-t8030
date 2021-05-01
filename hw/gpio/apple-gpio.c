@@ -283,6 +283,7 @@ DeviceState *apple_gpio_create(DTBNode *node){
     DTBProp *prop = get_dtb_prop(node, "reg");
     uint64_t mmio_size = ((hwaddr*)prop->value)[1];
     prop = get_dtb_prop(node, "name");
+    dev->id = g_strdup((const char*)prop->value);
     memory_region_init_io(s->iomem, OBJECT(dev), &gpio_reg_ops, s, (const char*)prop->value, mmio_size);
     sysbus_init_mmio(sbd, s->iomem);
 
