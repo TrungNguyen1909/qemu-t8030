@@ -51,7 +51,7 @@ Outbox: I2A
 #define MSG_SEND_HELLO                      1
 #define MSG_RECV_HELLO                      2
 #define MSG_TYPE_PING                       4
-#define MSG_TYPE_EPSTAT                     5
+#define MSG_TYPE_EPSTART                    5
 #define MSG_TYPE_POWER                      7
 #define MSG_TYPE_ROLLCALL                   8
 #define MSG_TYPE_POWERACK                   11
@@ -60,35 +60,35 @@ enum apple_iop_mailbox_ep0_state {
 	EP0_IDLE,
 	EP0_WAIT_HELLO,
     EP0_WAIT_ROLLCALL,
-    EP0_WAIT_EPSTAT,
+    EP0_WAIT_EPSTART,
     EP0_WAIT_POWERACK,
 	EP0_DONE,
 };
 
-struct iop_message{
-    union {
+struct iop_message {
+    union QEMU_PACKED {
         uint64_t data[2];
-        struct {
+        struct QEMU_PACKED {
             union {
                 uint64_t msg;
-                struct {
+                struct QEMU_PACKED {
                     union {
-                        struct {
+                        struct QEMU_PACKED {
                             uint16_t major;
                             uint16_t minor;
                         } hello;
-                        struct {
+                        struct QEMU_PACKED {
                             uint32_t seg;
                             uint16_t timestamp;
                         } ping;
-                        struct {
+                        struct QEMU_PACKED {
                             uint32_t state;
                             uint32_t ep;
                         } epstart;
-                        struct {
+                        struct QEMU_PACKED {
                             uint32_t state;
                         } power;
-                        struct {
+                        struct QEMU_PACKED {
                             uint32_t epMask;
                             //bit x set -> create endpoint ((epBlock * 32) + x)
                             uint8_t epBlock : 6; 
@@ -97,7 +97,7 @@ struct iop_message{
                         } rollcall;
                     };
                 };
-                struct {
+                struct QEMU_PACKED {
                     uint32_t field_0;
                     uint16_t field_32;
                     uint8_t field_48 : 4;
