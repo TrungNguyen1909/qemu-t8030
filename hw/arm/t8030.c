@@ -45,6 +45,7 @@
 #include "hw/block/apple-ans.h"
 #include "hw/gpio/apple-gpio.h"
 #include "hw/i2c/apple_i2c.h"
+#include "hw/usb/apple-tristar.h"
 
 #include "hw/arm/exynos4210.h"
 
@@ -1134,6 +1135,22 @@ static void T8030_create_i2c(MachineState *machine, const char *name)
     sysbus_realize_and_unref(SYS_BUS_DEVICE(i2c), &error_fatal);
 }
 
+static void T8030_create_tristar(MachineState *machine)
+{
+    T8030MachineState *tms = T8030_MACHINE(machine);
+    DTBNode *child = get_dtb_child_node_by_name(tms->device_tree, "arm-io");
+    child = get_dtb_child_node_by_name(child, "smc-i2c1");
+    child = get_dtb_child_node_by_name(child, "tristar");
+    AppleI2CState *i2c = APPLE_I2C(object_property_get_link(OBJECT(machine), "smc-i2c1", &error_fatal));
+
+    DeviceState *tristar = apple_tristar_create(child);
+    DeviceState *intc = DEVICE(object_property_get_link(OBJECT(machine), "nub-gpio", &error_fatal));
+    DTBProp *prop = get_dtb_prop(child, "interrupts");
+    uint32_t vector = *(uint32_t*)prop->value;
+    qdev_connect_gpio_out(tristar, 0, qdev_get_gpio_in(DEVICE(intc), vector));
+    i2c_slave_realize_and_unref(I2C_SLAVE(tristar), i2c->bus, &error_fatal);
+}
+
 static void T8030_cpu_reset(void *opaque)
 {
     MachineState *machine = MACHINE(opaque);
@@ -1226,6 +1243,8 @@ static void T8030_machine_init(MachineState *machine)
     T8030_create_i2c(machine, "i2c3");
     T8030_create_i2c(machine, "smc-i2c0");
     T8030_create_i2c(machine, "smc-i2c1");
+
+    T8030_create_tristar(machine);
 
     T8030_bootargs_setup(machine);
 

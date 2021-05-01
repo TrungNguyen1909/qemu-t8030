@@ -42,6 +42,8 @@ const char *KEEP_COMP[] = {"uart-1,samsung\0$",
                            "gpio,t8015\0gpio,s5l8960x\0$",
                            "iic,soft\0$",
                            "dock,9pin\0$",
+                           "accbuck,fan53740\0$",
+                           "tristar,cbtl1610\0$"
                            "otgphyctrl,s8000\0otgphyctrl,s5l8960x\0$",
                            "usb-complex,s8000\0usb-complex,s5l8960x\0$",
                            "usb-device,s8000\0usb-device,t7000\0usb-device,s5l8900x\0$"};
@@ -56,7 +58,9 @@ const char *REM_DEV_TYPES[] = {"backlight\0$", "pmp\0$"};
 
 const char *REM_PROPS[] = {"function-error_handler", "nvme-coastguard", "nand-debug",
                             "function-spi0_sclk_config", "function-spi0_mosi_config",
-                            "function-pmp_control"};
+                            "function-pmp_control",
+                            "function-vbus_voltage",
+                            "function-brick_id_voltage", "function-ldcm_bypass_en"};
 //TODO: error_handler probably needs arm-io to initialize properly
 
 static void allocate_and_copy(MemoryRegion *mem, AddressSpace *as,
