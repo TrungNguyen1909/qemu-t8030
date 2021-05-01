@@ -187,10 +187,9 @@ static uint32_t apple_gpio_cfg_read(AppleGPIOState *s, unsigned int pin, hwaddr 
     }
     uint32_t val = s->gpio_cfg[pin];
 
-    if ((val & CFG_MASK) == CFG_GP_IN) {
-        //input mode
+    if (((val & FUNC_MASK) == FUNC_GPIO) && ((val & CFG_MASK) == CFG_GP_IN)) {
         val &= ~DATA_1;
-        val |= test_bit(pin, (unsigned long*)&s->in);
+        val |= test_bit(pin, (unsigned long*)s->in);
     }
     return val;
 }
