@@ -119,9 +119,12 @@ DeviceState *apple_i2c_create(DTBNode *node)
     AppleI2CState *s = APPLE_I2C(dev);
     DTBProp *prop = get_dtb_prop(node, "reg");
     uint64_t mmio_size = ((hwaddr*)prop->value)[1];
-    s->bus = i2c_init_bus(dev, NULL);
     prop = get_dtb_prop(node, "name");
+    dev->id = g_strdup((const char*)prop->value);
     memory_region_init_io(&s->iomem, OBJECT(dev), &i2c_reg_ops, s, (const char*)prop->value, mmio_size);
+    char bus_name[32] = { 0 };
+    snprintf(bus_name, sizeof(bus_name), "%s.bus", (const char*)prop->value);
+    s->bus = i2c_init_bus(dev, (const char*)bus_name);
     sysbus_init_mmio(sbd, &s->iomem);
     prop = get_dtb_prop(node, "compatible");
     g_free(prop->value);
