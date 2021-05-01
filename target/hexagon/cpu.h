@@ -138,7 +138,7 @@ static inline HexagonCPU *hexagon_env_get_cpu(CPUHexagonState *env)
 int cpu_hexagon_signal_handler(int host_signum, void *pinfo, void *puc);
 
 static inline void cpu_get_tb_cpu_state(CPUHexagonState *env, target_ulong *pc,
-                                        target_ulong *cs_base, uint32_t *flags)
+                                        target_ulong *cs_base, uint64_t *flags)
 {
     *pc = env->gpr[HEX_REG_PC];
     *cs_base = 0;
