@@ -54,7 +54,9 @@ const char *REM_NAMES[] = {"backlight\0$",
 
 const char *REM_DEV_TYPES[] = {"backlight\0$", "pmp\0$"};
 
-const char *REM_PROPS[] = {"function-error_handler", "nvme-coastguard", "nand-debug", "function-spi0_sclk_config", "function-spi0_mosi_config", "function-pmp_control"};
+const char *REM_PROPS[] = {"function-error_handler", "nvme-coastguard", "nand-debug",
+                            "function-spi0_sclk_config", "function-spi0_mosi_config",
+                            "function-pmp_control"};
 //TODO: error_handler probably needs arm-io to initialize properly
 
 static void allocate_and_copy(MemoryRegion *mem, AddressSpace *as,
