@@ -1,7 +1,7 @@
 /*
  * Event loop thread
  *
- * Copyright Red Hat Inc., 2013
+ * Copyright Red Hat Inc., 2013, 2020
  *
  * Authors:
  *  Stefan Hajnoczi   <stefanha@redhat.com>
@@ -310,8 +310,7 @@ AioContext *iothread_get_aio_context(IOThread *iothread)
 
 static int query_one_iothread(Object *object, void *opaque)
 {
-    IOThreadInfoList ***prev = opaque;
-    IOThreadInfoList *elem;
+    IOThreadInfoList ***tail = opaque;
     IOThreadInfo *info;
     IOThread *iothread;
 
@@ -327,12 +326,7 @@ static int query_one_iothread(Object *object, void *opaque)
     info->poll_grow = iothread->poll_grow;
     info->poll_shrink = iothread->poll_shrink;
 
-    elem = g_new0(IOThreadInfoList, 1);
-    elem->value = info;
-    elem->next = NULL;
-
-    **prev = elem;
-    *prev = &elem->next;
+    QAPI_LIST_APPEND(*tail, info);
     return 0;
 }
 
@@ -374,4 +368,10 @@ void iothread_destroy(IOThread *iothread)
 IOThread *iothread_by_id(const char *id)
 {
     return IOTHREAD(object_resolve_path_type(id, TYPE_IOTHREAD, NULL));
+}
+
+bool qemu_in_iothread(void)
+{
+    return qemu_get_current_aio_context() == qemu_get_aio_context() ?
+                    false : true;
 }

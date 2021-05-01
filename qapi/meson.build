@@ -4,24 +4,27 @@ util_ss.add(files(
   'qapi-dealloc-visitor.c',
   'qapi-util.c',
   'qapi-visit-core.c',
-  'qmp-dispatch.c',
-  'qmp-event.c',
-  'qmp-registry.c',
   'qobject-input-visitor.c',
   'qobject-output-visitor.c',
   'string-input-visitor.c',
   'string-output-visitor.c',
 ))
+if have_system or have_tools
+  util_ss.add(files(
+    'qmp-dispatch.c',
+    'qmp-event.c',
+    'qmp-registry.c',
+  ))
+endif
 
 qapi_all_modules = [
-  'acpi',
-  'audio',
   'authz',
   'block',
   'block-core',
   'block-export',
   'char',
   'common',
+  'compat',
   'control',
   'crypto',
   'dump',
@@ -35,19 +38,30 @@ qapi_all_modules = [
   'misc-target',
   'net',
   'pragma',
-  'qdev',
-  'pci',
   'qom',
-  'rdma',
   'replay',
-  'rocker',
   'run-state',
   'sockets',
-  'tpm',
   'trace',
   'transaction',
-  'ui',
+  'yank',
 ]
+if have_system
+  qapi_all_modules += [
+    'acpi',
+    'audio',
+    'qdev',
+    'pci',
+    'rdma',
+    'rocker',
+    'tpm',
+  ]
+endif
+if have_system or have_tools
+  qapi_all_modules += [
+    'ui',
+  ]
+endif
 
 qapi_storage_daemon_modules = [
   'block-core',
@@ -89,11 +103,15 @@ foreach module : qapi_all_modules
     'qapi-types-@0@.h'.format(module),
     'qapi-visit-@0@.c'.format(module),
     'qapi-visit-@0@.h'.format(module),
-    'qapi-events-@0@.c'.format(module),
-    'qapi-events-@0@.h'.format(module),
-    'qapi-commands-@0@.c'.format(module),
-    'qapi-commands-@0@.h'.format(module),
   ]
+  if have_system or have_tools
+    qapi_module_outputs += [
+      'qapi-events-@0@.c'.format(module),
+      'qapi-events-@0@.h'.format(module),
+      'qapi-commands-@0@.c'.format(module),
+      'qapi-commands-@0@.h'.format(module),
+    ]
+  endif
   if module.endswith('-target')
     qapi_specific_outputs += qapi_module_outputs
   else

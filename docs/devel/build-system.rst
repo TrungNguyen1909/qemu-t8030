@@ -100,7 +100,7 @@ In meson.build::
   # Detect dependency
   sdl_image = dependency('SDL2_image', required: get_option('sdl_image'),
                          method: 'pkg-config',
-                         static: enable_static)
+                         kwargs: static_kwargs)
 
   # Create config-host.h (if applicable)
   config_host_data.set('CONFIG_SDL_IMAGE', sdl_image.found())
@@ -425,14 +425,6 @@ Built by configure:
   The variables defined here are those which are applicable to all QEMU
   build outputs. Variables which are potentially different for each
   emulator target are defined by the next file...
-
-`$TARGET-NAME/config-target.mak`
-  TARGET-NAME is the name of a system or userspace emulator, for example,
-  x86_64-softmmu denotes the system emulator for the x86_64 architecture.
-  This file contains the variables which need to vary on a per-target
-  basis. For example, it will indicate whether KVM or Xen are enabled for
-  the target and any other potential custom libraries needed for linking
-  the target.
 
 
 Built by Meson:

@@ -17,6 +17,7 @@
 #
 
 import atexit
+import bz2
 from collections import OrderedDict
 import faulthandler
 import io
@@ -24,6 +25,7 @@ import json
 import logging
 import os
 import re
+import shutil
 import signal
 import struct
 import subprocess
@@ -75,18 +77,34 @@ qemu_opts = os.environ.get('QEMU_OPTIONS', '').strip().split(' ')
 
 imgfmt = os.environ.get('IMGFMT', 'raw')
 imgproto = os.environ.get('IMGPROTO', 'file')
-test_dir = os.environ.get('TEST_DIR')
-sock_dir = os.environ.get('SOCK_DIR')
 output_dir = os.environ.get('OUTPUT_DIR', '.')
-cachemode = os.environ.get('CACHEMODE')
-aiomode = os.environ.get('AIOMODE')
-qemu_default_machine = os.environ.get('QEMU_DEFAULT_MACHINE')
+
+try:
+    test_dir = os.environ['TEST_DIR']
+    sock_dir = os.environ['SOCK_DIR']
+    cachemode = os.environ['CACHEMODE']
+    aiomode = os.environ['AIOMODE']
+    qemu_default_machine = os.environ['QEMU_DEFAULT_MACHINE']
+except KeyError:
+    # We are using these variables as proxies to indicate that we're
+    # not being run via "check". There may be other things set up by
+    # "check" that individual test cases rely on.
+    sys.stderr.write('Please run this test via the "check" script\n')
+    sys.exit(os.EX_USAGE)
 
 socket_scm_helper = os.environ.get('SOCKET_SCM_HELPER', 'socket_scm_helper')
 
 luks_default_secret_object = 'secret,id=keysec0,data=' + \
                              os.environ.get('IMGKEYSECRET', '')
 luks_default_key_secret_opt = 'key-secret=keysec0'
+
+sample_img_dir = os.environ['SAMPLE_IMG_DIR']
+
+
+def unarchive_sample_image(sample, fname):
+    sample_fname = os.path.join(sample_img_dir, sample + '.bz2')
+    with bz2.open(sample_fname) as f_in, open(fname, 'wb') as f_out:
+        shutil.copyfileobj(f_in, f_out)
 
 
 def qemu_tool_pipe_and_status(tool: str, args: Sequence[str],
@@ -101,9 +119,8 @@ def qemu_tool_pipe_and_status(tool: str, args: Sequence[str],
                             universal_newlines=True)
     output = subp.communicate()[0]
     if subp.returncode < 0:
-        sys.stderr.write('%s received signal %i: %s\n'
-                         % (tool, -subp.returncode,
-                            ' '.join(qemu_img_args + list(args))))
+        cmd = ' '.join(args)
+        sys.stderr.write(f'{tool} received signal {-subp.returncode}: {cmd}\n')
     return (output, subp.returncode)
 
 def qemu_img_pipe_and_status(*args: str) -> Tuple[str, int]:
@@ -189,14 +206,7 @@ def img_info_log(filename, filter_path=None, imgopts=False, extra_args=()):
 def qemu_io(*args):
     '''Run qemu-io and return the stdout data'''
     args = qemu_io_args + list(args)
-    subp = subprocess.Popen(args, stdout=subprocess.PIPE,
-                            stderr=subprocess.STDOUT,
-                            universal_newlines=True)
-    output = subp.communicate()[0]
-    if subp.returncode < 0:
-        sys.stderr.write('qemu-io received signal %i: %s\n'
-                         % (-subp.returncode, ' '.join(args)))
-    return output
+    return qemu_tool_pipe_and_status('qemu-io', args)[0]
 
 def qemu_io_log(*args):
     result = qemu_io(*args)
@@ -205,7 +215,12 @@ def qemu_io_log(*args):
 
 def qemu_io_silent(*args):
     '''Run qemu-io and return the exit code, suppressing stdout'''
-    args = qemu_io_args + list(args)
+    if '-f' in args or '--image-opts' in args:
+        default_args = qemu_io_args_no_fmt
+    else:
+        default_args = qemu_io_args
+
+    args = default_args + list(args)
     exitcode = subprocess.call(args, stdout=open('/dev/null', 'w'))
     if exitcode < 0:
         sys.stderr.write('qemu-io received signal %i: %s\n' %
@@ -218,11 +233,6 @@ def qemu_io_silent_check(*args):
     exitcode = subprocess.call(args, stdout=open('/dev/null', 'w'),
                                stderr=subprocess.STDOUT)
     return exitcode == 0
-
-def get_virtio_scsi_device():
-    if qemu_default_machine == 's390-ccw-virtio':
-        return 'virtio-scsi-ccw'
-    return 'virtio-scsi-pci'
 
 class QemuIoInteractive:
     def __init__(self, *args):
@@ -291,7 +301,9 @@ def qemu_nbd_list_log(*args: str) -> str:
 @contextmanager
 def qemu_nbd_popen(*args):
     '''Context manager running qemu-nbd within the context'''
-    pid_file = file_path("pid")
+    pid_file = file_path("qemu_nbd_popen-nbd-pid-file")
+
+    assert not os.path.exists(pid_file)
 
     cmd = list(qemu_nbd_args)
     cmd.extend(('--persistent', '--pid-file', pid_file))
@@ -309,6 +321,8 @@ def qemu_nbd_popen(*args):
             time.sleep(0.01)
         yield
     finally:
+        if os.path.exists(pid_file):
+            os.remove(pid_file)
         log('Kill NBD server')
         p.kill()
         p.wait()
@@ -510,12 +524,15 @@ class FilePath:
         return False
 
 
+def try_remove(img):
+    try:
+        os.remove(img)
+    except OSError:
+        pass
+
 def file_path_remover():
     for path in reversed(file_path_remover.paths):
-        try:
-            os.remove(path)
-        except OSError:
-            pass
+        try_remove(path)
 
 
 def file_path(*names, base_dir=test_dir):
@@ -1118,6 +1135,23 @@ def _verify_aio_mode(supported_aio_modes: Sequence[str] = ()) -> None:
     if supported_aio_modes and (aiomode not in supported_aio_modes):
         notrun('not suitable for this aio mode: %s' % aiomode)
 
+def _verify_formats(required_formats: Sequence[str] = ()) -> None:
+    usf_list = list(set(required_formats) - set(supported_formats()))
+    if usf_list:
+        notrun(f'formats {usf_list} are not whitelisted')
+
+
+def _verify_virtio_blk() -> None:
+    out = qemu_pipe('-M', 'none', '-device', 'help')
+    if 'virtio-blk' not in out:
+        notrun('Missing virtio-blk in QEMU binary')
+
+def _verify_virtio_scsi_pci_or_ccw() -> None:
+    out = qemu_pipe('-M', 'none', '-device', 'help')
+    if 'virtio-scsi-pci' not in out and 'virtio-scsi-ccw' not in out:
+        notrun('Missing virtio-scsi-pci or virtio-scsi-ccw in QEMU binary')
+
+
 def supports_quorum():
     return 'quorum' in qemu_img_pipe('--help')
 
@@ -1275,21 +1309,14 @@ def execute_setup_common(supported_fmts: Sequence[str] = (),
                          supported_aio_modes: Sequence[str] = (),
                          unsupported_fmts: Sequence[str] = (),
                          supported_protocols: Sequence[str] = (),
-                         unsupported_protocols: Sequence[str] = ()) -> bool:
+                         unsupported_protocols: Sequence[str] = (),
+                         required_fmts: Sequence[str] = ()) -> bool:
     """
     Perform necessary setup for either script-style or unittest-style tests.
 
     :return: Bool; Whether or not debug mode has been requested via the CLI.
     """
     # Note: Python 3.6 and pylint do not like 'Collection' so use 'Sequence'.
-
-    # We are using TEST_DIR and QEMU_DEFAULT_MACHINE as proxies to
-    # indicate that we're not being run via "check". There may be
-    # other things set up by "check" that individual test cases rely
-    # on.
-    if test_dir is None or qemu_default_machine is None:
-        sys.stderr.write('Please run this test via the "check" script\n')
-        sys.exit(os.EX_USAGE)
 
     debug = '-d' in sys.argv
     if debug:
@@ -1301,6 +1328,8 @@ def execute_setup_common(supported_fmts: Sequence[str] = (),
     _verify_platform(supported=supported_platforms)
     _verify_cache_mode(supported_cache_modes)
     _verify_aio_mode(supported_aio_modes)
+    _verify_formats(required_fmts)
+    _verify_virtio_blk()
 
     return debug
 

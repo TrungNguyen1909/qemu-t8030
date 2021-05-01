@@ -292,7 +292,7 @@ class QEMUMachine:
         for _ in range(self._console_index):
             args.extend(['-serial', 'null'])
         if self._console_set:
-            chardev = ('socket,id=console,path=%s,server,nowait' %
+            chardev = ('socket,id=console,path=%s,server=on,wait=off' %
                        self._console_address)
             args.extend(['-chardev', chardev])
             if self._console_device_type is None:
@@ -337,11 +337,11 @@ class QEMUMachine:
             self._qmp.close()
             self._qmp_connection = None
 
-        self._load_io_log()
-
         if self._qemu_log_file is not None:
             self._qemu_log_file.close()
             self._qemu_log_file = None
+
+        self._load_io_log()
 
         self._qemu_log_path = None
 

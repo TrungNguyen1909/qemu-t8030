@@ -151,22 +151,28 @@ inline void
 smmu_iotlb_inv_iova(SMMUState *s, int asid, dma_addr_t iova,
                     uint8_t tg, uint64_t num_pages, uint8_t ttl)
 {
-    if (ttl && (num_pages == 1)) {
+    /* if tg is not set we use 4KB range invalidation */
+    uint8_t granule = tg ? tg * 2 + 10 : 12;
+
+    if (ttl && (num_pages == 1) && (asid >= 0)) {
         SMMUIOTLBKey key = smmu_get_iotlb_key(asid, iova, tg, ttl);
 
-        g_hash_table_remove(s->iotlb, &key);
-    } else {
-        /* if tg is not set we use 4KB range invalidation */
-        uint8_t granule = tg ? tg * 2 + 10 : 12;
-
-        SMMUIOTLBPageInvInfo info = {
-            .asid = asid, .iova = iova,
-            .mask = (num_pages * 1 << granule) - 1};
-
-        g_hash_table_foreach_remove(s->iotlb,
-                                    smmu_hash_remove_by_asid_iova,
-                                    &info);
+        if (g_hash_table_remove(s->iotlb, &key)) {
+            return;
+        }
+        /*
+         * if the entry is not found, let's see if it does not
+         * belong to a larger IOTLB entry
+         */
     }
+
+    SMMUIOTLBPageInvInfo info = {
+        .asid = asid, .iova = iova,
+        .mask = (num_pages * 1 << granule) - 1};
+
+    g_hash_table_foreach_remove(s->iotlb,
+                                smmu_hash_remove_by_asid_iova,
+                                &info);
 }
 
 inline void smmu_iotlb_inv_asid(SMMUState *s, uint16_t asid)
@@ -465,14 +471,15 @@ IOMMUMemoryRegion *smmu_iommu_mr(SMMUState *s, uint32_t sid)
 /* Unmap the whole notifier's range */
 static void smmu_unmap_notifier_range(IOMMUNotifier *n)
 {
-    IOMMUTLBEntry entry;
+    IOMMUTLBEvent event;
 
-    entry.target_as = &address_space_memory;
-    entry.iova = n->start;
-    entry.perm = IOMMU_NONE;
-    entry.addr_mask = n->end - n->start;
+    event.type = IOMMU_NOTIFIER_UNMAP;
+    event.entry.target_as = &address_space_memory;
+    event.entry.iova = n->start;
+    event.entry.perm = IOMMU_NONE;
+    event.entry.addr_mask = n->end - n->start;
 
-    memory_region_notify_one(n, &entry);
+    memory_region_notify_iommu_one(n, &event);
 }
 
 /* Unmap all notifiers attached to @mr */

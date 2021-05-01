@@ -19,6 +19,7 @@
 
 #include "qemu/osdep.h"
 #include "qemu-common.h"
+#include "qemu/datadir.h"
 #include "qapi/error.h"
 #include "qemu/error-report.h"
 #include "qemu/units.h"
@@ -142,6 +143,24 @@ static const int sbsa_ref_irqmap[] = {
     [SBSA_SMMU] = 12, /* ... to 15 */
     [SBSA_GWDT] = 16,
 };
+
+static const char * const valid_cpus[] = {
+    ARM_CPU_TYPE_NAME("cortex-a57"),
+    ARM_CPU_TYPE_NAME("cortex-a72"),
+    ARM_CPU_TYPE_NAME("max"),
+};
+
+static bool cpu_type_valid(const char *cpu)
+{
+    int i;
+
+    for (i = 0; i < ARRAY_SIZE(valid_cpus); i++) {
+        if (strcmp(cpu, valid_cpus[i]) == 0) {
+            return true;
+        }
+    }
+    return false;
+}
 
 static uint64_t sbsa_ref_cpu_mp_affinity(SBSAMachineState *sms, int idx)
 {
@@ -301,6 +320,7 @@ static bool sbsa_firmware_init(SBSAMachineState *sms,
                                MemoryRegion *sysmem,
                                MemoryRegion *secure_sysmem)
 {
+    const char *bios_name;
     int i;
     BlockBackend *pflash_blk0;
 
@@ -314,6 +334,7 @@ static bool sbsa_firmware_init(SBSAMachineState *sms,
 
     pflash_blk0 = pflash_cfi01_get_blk(sms->flash[0]);
 
+    bios_name = MACHINE(sms)->firmware;
     if (bios_name) {
         char *fname;
         MemoryRegion *mr;
@@ -649,9 +670,8 @@ static void sbsa_ref_init(MachineState *machine)
     const CPUArchIdList *possible_cpus;
     int n, sbsa_max_cpus;
 
-    if (strcmp(machine->cpu_type, ARM_CPU_TYPE_NAME("cortex-a57"))) {
-        error_report("sbsa-ref: CPU type other than the built-in "
-                     "cortex-a57 not supported");
+    if (!cpu_type_valid(machine->cpu_type)) {
+        error_report("mach-virt: CPU type %s not supported", machine->cpu_type);
         exit(1);
     }
 

@@ -17,13 +17,13 @@ from typing import (
     Dict,
     List,
     Optional,
+    Sequence,
     Set,
 )
 
 from .common import c_name, mcgen
 from .gen import (
     QAPIGenC,
-    QAPIGenCCode,
     QAPISchemaModularCVisitor,
     build_params,
     ifcontext,
@@ -96,7 +96,7 @@ static void qmp_marshal_output_%(c_name)s(%(c_type)s ret_in,
 {
     Visitor *v;
 
-    v = qobject_output_visitor_new(ret_out);
+    v = qobject_output_visitor_new_qmp(ret_out);
     if (visit_type_%(c_name)s(v, "unused", &ret_in, errp)) {
         visit_complete(v, ret_out);
     }
@@ -126,6 +126,9 @@ def gen_marshal(name: str,
                 boxed: bool,
                 ret_type: Optional[QAPISchemaType]) -> str:
     have_args = boxed or (arg_type and not arg_type.is_empty())
+    if have_args:
+        assert arg_type is not None
+        arg_type_c_name = arg_type.c_name()
 
     ret = mcgen('''
 
@@ -147,11 +150,11 @@ def gen_marshal(name: str,
         ret += mcgen('''
     %(c_name)s arg = {0};
 ''',
-                     c_name=arg_type.c_name())
+                     c_name=arg_type_c_name)
 
     ret += mcgen('''
 
-    v = qobject_input_visitor_new(QOBJECT(args));
+    v = qobject_input_visitor_new_qmp(QOBJECT(args));
     if (!visit_start_struct(v, NULL, NULL, 0, errp)) {
         goto out;
     }
@@ -163,7 +166,7 @@ def gen_marshal(name: str,
         ok = visit_check_struct(v, errp);
     }
 ''',
-                     c_arg_type=arg_type.c_name())
+                     c_arg_type=arg_type_c_name)
     else:
         ret += mcgen('''
     ok = visit_check_struct(v, errp);
@@ -193,7 +196,7 @@ out:
         ret += mcgen('''
     visit_type_%(c_arg_type)s_members(v, &arg, NULL);
 ''',
-                     c_arg_type=arg_type.c_name())
+                     c_arg_type=arg_type_c_name)
 
     ret += mcgen('''
     visit_end_struct(v, NULL);
@@ -207,11 +210,15 @@ out:
 
 
 def gen_register_command(name: str,
+                         features: List[QAPISchemaFeature],
                          success_response: bool,
                          allow_oob: bool,
                          allow_preconfig: bool,
                          coroutine: bool) -> str:
     options = []
+
+    if 'deprecated' in [f.name for f in features]:
+        options += ['QCO_DEPRECATED']
 
     if not success_response:
         options += ['QCO_NO_SUCCESS_RESP']
@@ -234,28 +241,11 @@ def gen_register_command(name: str,
     return ret
 
 
-def gen_registry(registry: str, prefix: str) -> str:
-    ret = mcgen('''
-
-void %(c_prefix)sqmp_init_marshal(QmpCommandList *cmds)
-{
-    QTAILQ_INIT(cmds);
-
-''',
-                c_prefix=c_name(prefix, protect=False))
-    ret += registry
-    ret += mcgen('''
-}
-''')
-    return ret
-
-
 class QAPISchemaGenCommandVisitor(QAPISchemaModularCVisitor):
     def __init__(self, prefix: str):
         super().__init__(
             prefix, 'qapi-commands',
             ' * Schema-defined QAPI/QMP commands', None, __doc__)
-        self._regy = QAPIGenCCode(None)
         self._visited_ret_types: Dict[QAPIGenC, Set[QAPISchemaType]] = {}
 
     def _begin_user_module(self, name: str) -> None:
@@ -265,10 +255,9 @@ class QAPISchemaGenCommandVisitor(QAPISchemaModularCVisitor):
         visit = self._module_basename('qapi-visit', name)
         self._genc.add(mcgen('''
 #include "qemu/osdep.h"
+#include "qapi/compat-policy.h"
 #include "qapi/visitor.h"
 #include "qapi/qmp/qdict.h"
-#include "qapi/qobject-output-visitor.h"
-#include "qapi/qobject-input-visitor.h"
 #include "qapi/dealloc-visitor.h"
 #include "qapi/error.h"
 #include "%(visit)s.h"
@@ -282,26 +271,37 @@ class QAPISchemaGenCommandVisitor(QAPISchemaModularCVisitor):
 ''',
                              types=types))
 
-    def visit_end(self) -> None:
-        self._add_system_module('init', ' * QAPI Commands initialization')
+    def visit_begin(self, schema: QAPISchema) -> None:
+        self._add_module('./init', ' * QAPI Commands initialization')
         self._genh.add(mcgen('''
 #include "qapi/qmp/dispatch.h"
 
 void %(c_prefix)sqmp_init_marshal(QmpCommandList *cmds);
 ''',
                              c_prefix=c_name(self._prefix, protect=False)))
-        self._genc.preamble_add(mcgen('''
+        self._genc.add(mcgen('''
 #include "qemu/osdep.h"
 #include "%(prefix)sqapi-commands.h"
 #include "%(prefix)sqapi-init-commands.h"
+
+void %(c_prefix)sqmp_init_marshal(QmpCommandList *cmds)
+{
+    QTAILQ_INIT(cmds);
+
 ''',
-                                      prefix=self._prefix))
-        self._genc.add(gen_registry(self._regy.get_content(), self._prefix))
+                             prefix=self._prefix,
+                             c_prefix=c_name(self._prefix, protect=False)))
+
+    def visit_end(self) -> None:
+        with self._temp_module('./init'):
+            self._genc.add(mcgen('''
+}
+'''))
 
     def visit_command(self,
                       name: str,
-                      info: QAPISourceInfo,
-                      ifcond: List[str],
+                      info: Optional[QAPISourceInfo],
+                      ifcond: Sequence[str],
                       features: List[QAPISchemaFeature],
                       arg_type: Optional[QAPISchemaObjectType],
                       ret_type: Optional[QAPISchemaType],
@@ -321,15 +321,17 @@ void %(c_prefix)sqmp_init_marshal(QmpCommandList *cmds);
         if ret_type and ret_type not in self._visited_ret_types[self._genc]:
             self._visited_ret_types[self._genc].add(ret_type)
             with ifcontext(ret_type.ifcond,
-                           self._genh, self._genc, self._regy):
+                           self._genh, self._genc):
                 self._genc.add(gen_marshal_output(ret_type))
-        with ifcontext(ifcond, self._genh, self._genc, self._regy):
+        with ifcontext(ifcond, self._genh, self._genc):
             self._genh.add(gen_command_decl(name, arg_type, boxed, ret_type))
             self._genh.add(gen_marshal_decl(name))
             self._genc.add(gen_marshal(name, arg_type, boxed, ret_type))
-            self._regy.add(gen_register_command(name, success_response,
-                                                allow_oob, allow_preconfig,
-                                                coroutine))
+        with self._temp_module('./init'):
+            with ifcontext(ifcond, self._genh, self._genc):
+                self._genc.add(gen_register_command(
+                    name, features, success_response, allow_oob,
+                    allow_preconfig, coroutine))
 
 
 def gen_commands(schema: QAPISchema,

@@ -2,6 +2,15 @@ config APPLESMC
     bool
     depends on ISA_BUS
 
+config ARMSSE_CPUID
+    bool
+
+config ARMSSE_MHU
+    bool
+
+config ARMSSE_CPU_PWRCTRL
+    bool
+
 config MAX111X
     bool
 
@@ -10,6 +19,10 @@ config TMP105
     depends on I2C
 
 config TMP421
+    bool
+    depends on I2C
+
+config EMC141X
     bool
     depends on I2C
 
@@ -117,9 +130,19 @@ config IOTKIT_SYSCTL
 config IOTKIT_SYSINFO
     bool
 
-config PVPANIC
+config PVPANIC_COMMON
+    bool
+
+config PVPANIC_PCI
+    bool
+    default y if PCI_DEVICES
+    depends on PCI
+    select PVPANIC_COMMON
+
+config PVPANIC_ISA
     bool
     depends on ISA_BUS
+    select PVPANIC_COMMON
 
 config AUX
     bool
@@ -158,6 +181,9 @@ config SIFIVE_U_OTP
     bool
 
 config SIFIVE_U_PRCI
+    bool
+
+config VIRT_CTRL
     bool
 
 source macio/Kconfig

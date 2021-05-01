@@ -37,7 +37,6 @@
 #include "hw/qdev-properties.h"
 #include "hw/ppc/ppc.h"
 #include "mmu-book3s-v3.h"
-#include "sysemu/qtest.h"
 #include "qemu/cutils.h"
 #include "disas/capstone.h"
 #include "fpu/softfloat.h"
@@ -567,35 +566,71 @@ static void spr_write_601_ubatl(DisasContext *ctx, int sprn, int gprn)
 #if !defined(CONFIG_USER_ONLY)
 static void spr_read_40x_pit(DisasContext *ctx, int gprn, int sprn)
 {
+    if (tb_cflags(ctx->base.tb) & CF_USE_ICOUNT) {
+        gen_io_start();
+    }
     gen_helper_load_40x_pit(cpu_gpr[gprn], cpu_env);
+    if (tb_cflags(ctx->base.tb) & CF_USE_ICOUNT) {
+        gen_stop_exception(ctx);
+    }
 }
 
 static void spr_write_40x_pit(DisasContext *ctx, int sprn, int gprn)
 {
+    if (tb_cflags(ctx->base.tb) & CF_USE_ICOUNT) {
+        gen_io_start();
+    }
     gen_helper_store_40x_pit(cpu_env, cpu_gpr[gprn]);
+    if (tb_cflags(ctx->base.tb) & CF_USE_ICOUNT) {
+        gen_stop_exception(ctx);
+    }
 }
 
 static void spr_write_40x_dbcr0(DisasContext *ctx, int sprn, int gprn)
 {
+    if (tb_cflags(ctx->base.tb) & CF_USE_ICOUNT) {
+        gen_io_start();
+    }
     gen_store_spr(sprn, cpu_gpr[gprn]);
     gen_helper_store_40x_dbcr0(cpu_env, cpu_gpr[gprn]);
     /* We must stop translation as we may have rebooted */
     gen_stop_exception(ctx);
+    if (tb_cflags(ctx->base.tb) & CF_USE_ICOUNT) {
+        gen_stop_exception(ctx);
+    }
 }
 
 static void spr_write_40x_sler(DisasContext *ctx, int sprn, int gprn)
 {
+    if (tb_cflags(ctx->base.tb) & CF_USE_ICOUNT) {
+        gen_io_start();
+    }
     gen_helper_store_40x_sler(cpu_env, cpu_gpr[gprn]);
+    if (tb_cflags(ctx->base.tb) & CF_USE_ICOUNT) {
+        gen_stop_exception(ctx);
+    }
 }
 
 static void spr_write_booke_tcr(DisasContext *ctx, int sprn, int gprn)
 {
+    if (tb_cflags(ctx->base.tb) & CF_USE_ICOUNT) {
+        gen_io_start();
+    }
     gen_helper_store_booke_tcr(cpu_env, cpu_gpr[gprn]);
+    if (tb_cflags(ctx->base.tb) & CF_USE_ICOUNT) {
+        gen_stop_exception(ctx);
+    }
 }
 
 static void spr_write_booke_tsr(DisasContext *ctx, int sprn, int gprn)
 {
+    if (tb_cflags(ctx->base.tb) & CF_USE_ICOUNT) {
+        gen_io_start();
+    }
     gen_helper_store_booke_tsr(cpu_env, cpu_gpr[gprn]);
+    if (tb_cflags(ctx->base.tb) & CF_USE_ICOUNT) {
+        gen_stop_exception(ctx);
+    }
 }
 #endif
 
@@ -1731,6 +1766,16 @@ static void spr_write_e500_l1csr1(DisasContext *ctx, int sprn, int gprn)
     TCGv t0 = tcg_temp_new();
 
     tcg_gen_andi_tl(t0, cpu_gpr[gprn], L1CSR1_ICE | L1CSR1_CPE);
+    gen_store_spr(sprn, t0);
+    tcg_temp_free(t0);
+}
+
+static void spr_write_e500_l2csr0(DisasContext *ctx, int sprn, int gprn)
+{
+    TCGv t0 = tcg_temp_new();
+
+    tcg_gen_andi_tl(t0, cpu_gpr[gprn],
+                    ~(E500_L2CSR0_L2FI | E500_L2CSR0_L2FL | E500_L2CSR0_L2LFC));
     gen_store_spr(sprn, t0);
     tcg_temp_free(t0);
 }
@@ -5029,6 +5074,12 @@ static void init_proc_e500(CPUPPCState *env, int version)
                  SPR_NOACCESS, SPR_NOACCESS,
                  &spr_read_generic, &spr_write_e500_l1csr1,
                  0x00000000);
+    if (version != fsl_e500v1 && version != fsl_e500v2) {
+        spr_register(env, SPR_Exxx_L2CSR0, "L2CSR0",
+                     SPR_NOACCESS, SPR_NOACCESS,
+                     &spr_read_generic, &spr_write_e500_l2csr0,
+                     0x00000000);
+    }
     spr_register(env, SPR_BOOKE_MCSRR0, "MCSRR0",
                  SPR_NOACCESS, SPR_NOACCESS,
                  &spr_read_generic, &spr_write_generic,
@@ -9907,7 +9958,7 @@ static int gdb_get_float_reg(CPUPPCState *env, GByteArray *buf, int n)
 {
     uint8_t *mem_buf;
     if (n < 32) {
-        gdb_get_float64(buf, *cpu_fpr_ptr(env, n));
+        gdb_get_reg64(buf, *cpu_fpr_ptr(env, n));
         mem_buf = gdb_get_reg_ptr(buf, 8);
         ppc_maybe_bswap_register(env, mem_buf, 8);
         return 8;
@@ -9925,7 +9976,7 @@ static int gdb_set_float_reg(CPUPPCState *env, uint8_t *mem_buf, int n)
 {
     if (n < 32) {
         ppc_maybe_bswap_register(env, mem_buf, 8);
-        *cpu_fpr_ptr(env, n) = ldfq_p(mem_buf);
+        *cpu_fpr_ptr(env, n) = ldq_p(mem_buf);
         return 8;
     }
     if (n == 32) {
@@ -10470,63 +10521,6 @@ static ObjectClass *ppc_cpu_class_by_name(const char *name)
     return oc;
 }
 
-static void ppc_cpu_parse_featurestr(const char *type, char *features,
-                                     Error **errp)
-{
-    Object *machine = qdev_get_machine();
-    const PowerPCCPUClass *pcc = POWERPC_CPU_CLASS(object_class_by_name(type));
-
-    if (!features) {
-        return;
-    }
-
-    if (object_property_find(machine, "max-cpu-compat")) {
-        int i;
-        char **inpieces;
-        char *s = features;
-        Error *local_err = NULL;
-        char *compat_str = NULL;
-
-        /*
-         * Backwards compatibility hack:
-         *
-         *   CPUs had a "compat=" property which didn't make sense for
-         *   anything except pseries.  It was replaced by "max-cpu-compat"
-         *   machine option.  This supports old command lines like
-         *       -cpu POWER8,compat=power7
-         *   By stripping the compat option and applying it to the machine
-         *   before passing it on to the cpu level parser.
-         */
-        inpieces = g_strsplit(features, ",", 0);
-        *s = '\0';
-        for (i = 0; inpieces[i]; i++) {
-            if (g_str_has_prefix(inpieces[i], "compat=")) {
-                warn_report_once("CPU 'compat' property is deprecated; "
-                    "use max-cpu-compat machine property instead");
-                compat_str = inpieces[i];
-                continue;
-            }
-            if ((i != 0) && (s != features)) {
-                s = g_stpcpy(s, ",");
-            }
-            s = g_stpcpy(s, inpieces[i]);
-        }
-
-        if (compat_str) {
-            char *v = compat_str + strlen("compat=");
-            object_property_set_str(machine, "max-cpu-compat", v, &local_err);
-        }
-        g_strfreev(inpieces);
-        if (local_err) {
-            error_propagate(errp, local_err);
-            return;
-        }
-    }
-
-    /* do property processing with generic handler */
-    pcc->parent_parse_features(type, features, errp);
-}
-
 PowerPCCPUClass *ppc_cpu_get_family_class(PowerPCCPUClass *pcc)
 {
     ObjectClass *oc = OBJECT_CLASS(pcc);
@@ -10623,7 +10617,6 @@ static void ppc_cpu_defs_entry(gpointer data, gpointer user_data)
     ObjectClass *oc = data;
     CpuDefinitionInfoList **first = user_data;
     const char *typename;
-    CpuDefinitionInfoList *entry;
     CpuDefinitionInfo *info;
 
     typename = object_class_get_name(oc);
@@ -10631,10 +10624,7 @@ static void ppc_cpu_defs_entry(gpointer data, gpointer user_data)
     info->name = g_strndup(typename,
                            strlen(typename) - strlen(POWERPC_CPU_TYPE_SUFFIX));
 
-    entry = g_malloc0(sizeof(*entry));
-    entry->value = info;
-    entry->next = *first;
-    *first = entry;
+    QAPI_LIST_PREPEND(*first, info);
 }
 
 CpuDefinitionInfoList *qmp_query_cpu_definitions(Error **errp)
@@ -10650,7 +10640,6 @@ CpuDefinitionInfoList *qmp_query_cpu_definitions(Error **errp)
     for (i = 0; ppc_cpu_aliases[i].alias != NULL; i++) {
         PowerPCCPUAlias *alias = &ppc_cpu_aliases[i];
         ObjectClass *oc;
-        CpuDefinitionInfoList *entry;
         CpuDefinitionInfo *info;
 
         oc = ppc_cpu_class_by_name(alias->model);
@@ -10662,10 +10651,7 @@ CpuDefinitionInfoList *qmp_query_cpu_definitions(Error **errp)
         info->name = g_strdup(alias->alias);
         info->q_typename = g_strdup(object_class_get_name(oc));
 
-        entry = g_malloc0(sizeof(*entry));
-        entry->value = info;
-        entry->next = cpu_list;
-        cpu_list = entry;
+        QAPI_LIST_PREPEND(cpu_list, info);
     }
 
     return cpu_list;
@@ -10728,7 +10714,7 @@ static void ppc_cpu_reset(DeviceState *dev)
 #endif
 
 #if defined(TARGET_PPC64)
-    if (env->mmu_model & POWERPC_MMU_64) {
+    if (mmu_is_64bit(env->mmu_model)) {
         msr |= (1ULL << MSR_SF);
     }
 #endif
@@ -10765,6 +10751,7 @@ static void ppc_cpu_reset(DeviceState *dev)
 }
 
 #ifndef CONFIG_USER_ONLY
+
 static bool ppc_cpu_is_big_endian(CPUState *cs)
 {
     PowerPCCPU *cpu = POWERPC_CPU(cs);
@@ -10775,6 +10762,7 @@ static bool ppc_cpu_is_big_endian(CPUState *cs)
     return !msr_le;
 }
 
+#ifdef CONFIG_TCG
 static void ppc_cpu_exec_enter(CPUState *cs)
 {
     PowerPCCPU *cpu = POWERPC_CPU(cs);
@@ -10796,7 +10784,9 @@ static void ppc_cpu_exec_exit(CPUState *cs)
         vhc->cpu_exec_exit(cpu->vhyp, cpu);
     }
 }
-#endif
+#endif /* CONFIG_TCG */
+
+#endif /* !CONFIG_USER_ONLY */
 
 static void ppc_cpu_instance_init(Object *obj)
 {
@@ -10888,6 +10878,23 @@ static Property ppc_cpu_properties[] = {
     DEFINE_PROP_END_OF_LIST(),
 };
 
+#ifdef CONFIG_TCG
+#include "hw/core/tcg-cpu-ops.h"
+
+static struct TCGCPUOps ppc_tcg_ops = {
+  .initialize = ppc_translate_init,
+  .cpu_exec_interrupt = ppc_cpu_exec_interrupt,
+  .tlb_fill = ppc_cpu_tlb_fill,
+
+#ifndef CONFIG_USER_ONLY
+  .do_interrupt = ppc_cpu_do_interrupt,
+  .cpu_exec_enter = ppc_cpu_exec_enter,
+  .cpu_exec_exit = ppc_cpu_exec_exit,
+  .do_unaligned_access = ppc_cpu_do_unaligned_access,
+#endif /* !CONFIG_USER_ONLY */
+};
+#endif /* CONFIG_TCG */
+
 static void ppc_cpu_class_init(ObjectClass *oc, void *data)
 {
     PowerPCCPUClass *pcc = POWERPC_CPU_CLASS(oc);
@@ -10905,17 +10912,12 @@ static void ppc_cpu_class_init(ObjectClass *oc, void *data)
     device_class_set_parent_reset(dc, ppc_cpu_reset, &pcc->parent_reset);
 
     cc->class_by_name = ppc_cpu_class_by_name;
-    pcc->parent_parse_features = cc->parse_features;
-    cc->parse_features = ppc_cpu_parse_featurestr;
     cc->has_work = ppc_cpu_has_work;
-    cc->do_interrupt = ppc_cpu_do_interrupt;
-    cc->cpu_exec_interrupt = ppc_cpu_exec_interrupt;
     cc->dump_state = ppc_cpu_dump_state;
     cc->dump_statistics = ppc_cpu_dump_statistics;
     cc->set_pc = ppc_cpu_set_pc;
     cc->gdb_read_register = ppc_cpu_gdb_read_register;
     cc->gdb_write_register = ppc_cpu_gdb_write_register;
-    cc->do_unaligned_access = ppc_cpu_do_unaligned_access;
 #ifndef CONFIG_USER_ONLY
     cc->get_phys_page_debug = ppc_cpu_get_phys_page_debug;
     cc->vmsd = &vmstate_ppc_cpu;
@@ -10944,18 +10946,13 @@ static void ppc_cpu_class_init(ObjectClass *oc, void *data)
 #ifndef CONFIG_USER_ONLY
     cc->virtio_is_big_endian = ppc_cpu_is_big_endian;
 #endif
-#ifdef CONFIG_TCG
-    cc->tcg_initialize = ppc_translate_init;
-    cc->tlb_fill = ppc_cpu_tlb_fill;
-#endif
-#ifndef CONFIG_USER_ONLY
-    cc->cpu_exec_enter = ppc_cpu_exec_enter;
-    cc->cpu_exec_exit = ppc_cpu_exec_exit;
-#endif
-
     cc->disas_set_info = ppc_disas_set_info;
 
     dc->fw_name = "PowerPC,UNKNOWN";
+
+#ifdef CONFIG_TCG
+    cc->tcg_ops = &ppc_tcg_ops;
+#endif /* CONFIG_TCG */
 }
 
 static const TypeInfo ppc_cpu_type_info = {

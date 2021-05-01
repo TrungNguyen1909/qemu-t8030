@@ -251,13 +251,10 @@ static int mptsas_build_sgl(MPTSASState *s, MPTSASRequest *req, hwaddr addr)
 
 static void mptsas_free_request(MPTSASRequest *req)
 {
-    MPTSASState *s = req->dev;
-
     if (req->sreq != NULL) {
         req->sreq->hba_private = NULL;
         scsi_req_unref(req->sreq);
         req->sreq = NULL;
-        QTAILQ_REMOVE(&s->pending, req, next);
     }
     qemu_sglist_destroy(&req->qsg);
     g_free(req);
@@ -303,7 +300,6 @@ static int mptsas_process_scsi_io_request(MPTSASState *s,
     }
 
     req = g_new0(MPTSASRequest, 1);
-    QTAILQ_INSERT_TAIL(&s->pending, req, next);
     req->scsi_io = *scsi_io;
     req->dev = s;
 
@@ -1133,7 +1129,7 @@ static QEMUSGList *mptsas_get_sg_list(SCSIRequest *sreq)
 }
 
 static void mptsas_command_complete(SCSIRequest *sreq,
-        uint32_t status, size_t resid)
+        size_t resid)
 {
     MPTSASRequest *req = sreq->hba_private;
     MPTSASState *s = req->dev;
@@ -1143,7 +1139,8 @@ static void mptsas_command_complete(SCSIRequest *sreq,
     hwaddr sense_buffer_addr = req->dev->sense_buffer_high_addr |
             req->scsi_io.SenseBufferLowAddr;
 
-    trace_mptsas_command_complete(s, req->scsi_io.MsgContext, status, resid);
+    trace_mptsas_command_complete(s, req->scsi_io.MsgContext,
+                                  sreq->status, resid);
 
     sense_len = scsi_req_get_sense(sreq, sense_buf, SCSI_SENSE_BUF_SIZE);
     if (sense_len > 0) {
@@ -1317,8 +1314,6 @@ static void mptsas_scsi_realize(PCIDevice *dev, Error **errp)
     s->max_devices = MPTSAS_NUM_PORTS;
 
     s->request_bh = qemu_bh_new(mptsas_fetch_requests, s);
-
-    QTAILQ_INIT(&s->pending);
 
     scsi_bus_new(&s->bus, sizeof(s->bus), &dev->qdev, &mptsas_scsi_info, NULL);
 }

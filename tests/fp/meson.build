@@ -27,6 +27,7 @@ tfdir = 'berkeley-testfloat-3/source'
 sfinc = include_directories(sfdir / 'include', sfspedir)
 
 tfcflags = [
+  '-Wno-implicit-fallthrough',
   '-Wno-strict-prototypes',
   '-Wno-unknown-pragmas',
   '-Wno-uninitialized',
@@ -209,6 +210,7 @@ libtestfloat = static_library(
 )
 
 sfcflags = [
+  '-Wno-implicit-fallthrough',
   '-Wno-missing-prototypes',
   '-Wno-redundant-decls',
   '-Wno-return-type',
@@ -622,7 +624,7 @@ test('fp-test-mulAdd', fptest,
      # no fptest_rounding_args
      args: fptest_args +
            ['f16_mulAdd', 'f32_mulAdd', 'f64_mulAdd', 'f128_mulAdd'],
-     suite: ['softfloat-slow', 'softfloat-ops-slow'], timeout: 60)
+     suite: ['softfloat-slow', 'softfloat-ops-slow'], timeout: 90)
 
 fpbench = executable(
   'fp-bench',

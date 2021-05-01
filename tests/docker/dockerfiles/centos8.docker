@@ -1,4 +1,4 @@
-FROM centos:8.1.1911
+FROM centos:8.3.2011
 
 RUN dnf -y update
 ENV PACKAGES \
@@ -6,6 +6,7 @@ ENV PACKAGES \
     bzip2 \
     bzip2-devel \
     dbus-daemon \
+    diffutils \
     gcc \
     gcc-c++ \
     genisoimage \
@@ -14,6 +15,7 @@ ENV PACKAGES \
     glib2-devel \
     libaio-devel \
     libepoxy-devel \
+    libfdt-devel \
     libgcrypt-devel \
     lzo-devel \
     make \
@@ -27,10 +29,11 @@ ENV PACKAGES \
     rdma-core-devel \
     spice-glib-devel \
     spice-server \
+    systemtap-sdt-devel \
     tar \
     zlib-devel
 
 RUN dnf install -y dnf-plugins-core && \
-  dnf config-manager --set-enabled PowerTools && \
+  dnf config-manager --set-enabled powertools && \
   dnf install -y $PACKAGES
 RUN rpm -q $PACKAGES | sort > /packages.txt

@@ -37,7 +37,7 @@
 #define CS_DREGS 32
 #define CS_MAXDREG (CS_DREGS - 1)
 
-#define TYPE_CS4231 "SUNW,CS4231"
+#define TYPE_CS4231 "sun-CS4231"
 typedef struct CSState CSState;
 DECLARE_INSTANCE_CHECKER(CSState, CS4231,
                          TYPE_CS4231)
@@ -160,17 +160,12 @@ static void cs4231_init(Object *obj)
     sysbus_init_irq(dev, &s->irq);
 }
 
-static Property cs4231_properties[] = {
-    {.name = NULL},
-};
-
 static void cs4231_class_init(ObjectClass *klass, void *data)
 {
     DeviceClass *dc = DEVICE_CLASS(klass);
 
     dc->reset = cs_reset;
     dc->vmsd = &vmstate_cs4231;
-    device_class_set_props(dc, cs4231_properties);
 }
 
 static const TypeInfo cs4231_info = {

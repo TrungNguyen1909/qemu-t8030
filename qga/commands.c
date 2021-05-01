@@ -22,9 +22,9 @@
 #include "commands-common.h"
 
 /* Maximum captured guest-exec out_data/err_data - 16MB */
-#define GUEST_EXEC_MAX_OUTPUT (16*1024*1024)
+#define GUEST_EXEC_MAX_OUTPUT (16 * 1024 * 1024)
 /* Allocation and I/O buffer for reading guest-exec out_data/err_data - 4KB */
-#define GUEST_EXEC_IO_SIZE (4*1024)
+#define GUEST_EXEC_IO_SIZE (4 * 1024)
 /*
  * Maximum file size to read - 48MB
  *
@@ -66,17 +66,13 @@ static void qmp_command_info(const QmpCommand *cmd, void *opaque)
 {
     GuestAgentInfo *info = opaque;
     GuestAgentCommandInfo *cmd_info;
-    GuestAgentCommandInfoList *cmd_info_list;
 
     cmd_info = g_new0(GuestAgentCommandInfo, 1);
     cmd_info->name = g_strdup(qmp_command_name(cmd));
     cmd_info->enabled = qmp_command_is_enabled(cmd);
     cmd_info->success_response = qmp_has_success_response(cmd);
 
-    cmd_info_list = g_new0(GuestAgentCommandInfoList, 1);
-    cmd_info_list->value = cmd_info;
-    cmd_info_list->next = info->supported_commands;
-    info->supported_commands = cmd_info_list;
+    QAPI_LIST_PREPEND(info->supported_commands, cmd_info);
 }
 
 struct GuestAgentInfo *qmp_guest_info(Error **errp)

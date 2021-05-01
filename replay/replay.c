@@ -94,28 +94,7 @@ void replay_account_executed_instructions(void)
     if (replay_mode == REPLAY_MODE_PLAY) {
         g_assert(replay_mutex_locked());
         if (replay_state.instruction_count > 0) {
-            int count = (int)(replay_get_current_icount()
-                              - replay_state.current_icount);
-
-            /* Time can only go forward */
-            assert(count >= 0);
-
-            replay_state.instruction_count -= count;
-            replay_state.current_icount += count;
-            if (replay_state.instruction_count == 0) {
-                assert(replay_state.data_kind == EVENT_INSTRUCTION);
-                replay_finish_event();
-                /* Wake up iothread. This is required because
-                   timers will not expire until clock counters
-                   will be read from the log. */
-                qemu_notify_event();
-            }
-            /* Execution reached the break step */
-            if (replay_break_icount == replay_state.current_icount) {
-                /* Cannot make callback directly from the vCPU thread */
-                timer_mod_ns(replay_break_timer,
-                    qemu_clock_get_ns(QEMU_CLOCK_REALTIME));
-            }
+            replay_advance_current_icount(replay_get_current_icount());
         }
     }
 }
@@ -201,12 +180,13 @@ bool replay_checkpoint(ReplayCheckpoint checkpoint)
     }
 
     if (in_checkpoint) {
-        /* If we are already in checkpoint, then there is no need
-           for additional synchronization.
+        /*
            Recursion occurs when HW event modifies timers.
-           Timer modification may invoke the checkpoint and
-           proceed to recursion. */
-        return true;
+           Prevent performing icount warp in this case and
+           wait for another invocation of the checkpoint.
+        */
+        g_assert(replay_mode == REPLAY_MODE_PLAY);
+        return false;
     }
     in_checkpoint = true;
 

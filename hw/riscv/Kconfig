@@ -33,6 +33,7 @@ config RISCV_VIRT
     select SIFIVE_PLIC
     select SIFIVE_TEST
     select VIRTIO_MMIO
+    select FW_CFG_DMA
 
 config SIFIVE_E
     bool
@@ -52,9 +53,12 @@ config SIFIVE_U
     select SIFIVE_GPIO
     select SIFIVE_PDMA
     select SIFIVE_PLIC
+    select SIFIVE_SPI
     select SIFIVE_UART
     select SIFIVE_U_OTP
     select SIFIVE_U_PRCI
+    select SSI_M25P80
+    select SSI_SD
     select UNIMP
 
 config SPIKE

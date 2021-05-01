@@ -7,6 +7,7 @@
 
 #include "qemu.h"
 #include "disas/disas.h"
+#include "qemu/bitops.h"
 #include "qemu/path.h"
 #include "qemu/queue.h"
 #include "qemu/guest-random.h"
@@ -388,7 +389,7 @@ enum {
 
 static bool init_guest_commpage(void)
 {
-    void *want = g2h(ARM_COMMPAGE & -qemu_host_page_size);
+    void *want = g2h_untagged(ARM_COMMPAGE & -qemu_host_page_size);
     void *addr = mmap(want, qemu_host_page_size, PROT_READ | PROT_WRITE,
                       MAP_ANONYMOUS | MAP_PRIVATE | MAP_FIXED, -1, 0);
 
@@ -401,7 +402,7 @@ static bool init_guest_commpage(void)
     }
 
     /* Set kernel helper versions; rest of page is 0.  */
-    __put_user(5, (uint32_t *)g2h(0xffff0ffcu));
+    __put_user(5, (uint32_t *)g2h_untagged(0xffff0ffcu));
 
     if (mprotect(addr, qemu_host_page_size, PROT_READ)) {
         perror("Protecting guest commpage");
@@ -985,25 +986,53 @@ static void elf_core_copy_regs(target_elf_gregset_t *regs, const CPUMIPSState *e
 enum {
     HWCAP_MIPS_R6           = (1 << 0),
     HWCAP_MIPS_MSA          = (1 << 1),
+    HWCAP_MIPS_CRC32        = (1 << 2),
+    HWCAP_MIPS_MIPS16       = (1 << 3),
+    HWCAP_MIPS_MDMX         = (1 << 4),
+    HWCAP_MIPS_MIPS3D       = (1 << 5),
+    HWCAP_MIPS_SMARTMIPS    = (1 << 6),
+    HWCAP_MIPS_DSP          = (1 << 7),
+    HWCAP_MIPS_DSP2         = (1 << 8),
+    HWCAP_MIPS_DSP3         = (1 << 9),
+    HWCAP_MIPS_MIPS16E2     = (1 << 10),
+    HWCAP_LOONGSON_MMI      = (1 << 11),
+    HWCAP_LOONGSON_EXT      = (1 << 12),
+    HWCAP_LOONGSON_EXT2     = (1 << 13),
+    HWCAP_LOONGSON_CPUCFG   = (1 << 14),
 };
 
 #define ELF_HWCAP get_elf_hwcap()
+
+#define GET_FEATURE_INSN(_flag, _hwcap) \
+    do { if (cpu->env.insn_flags & (_flag)) { hwcaps |= _hwcap; } } while (0)
+
+#define GET_FEATURE_REG_SET(_reg, _mask, _hwcap) \
+    do { if (cpu->env._reg & (_mask)) { hwcaps |= _hwcap; } } while (0)
+
+#define GET_FEATURE_REG_EQU(_reg, _start, _length, _val, _hwcap) \
+    do { \
+        if (extract32(cpu->env._reg, (_start), (_length)) == (_val)) { \
+            hwcaps |= _hwcap; \
+        } \
+    } while (0)
 
 static uint32_t get_elf_hwcap(void)
 {
     MIPSCPU *cpu = MIPS_CPU(thread_cpu);
     uint32_t hwcaps = 0;
 
-#define GET_FEATURE(flag, hwcap) \
-    do { if (cpu->env.insn_flags & (flag)) { hwcaps |= hwcap; } } while (0)
-
-    GET_FEATURE(ISA_MIPS32R6 | ISA_MIPS64R6, HWCAP_MIPS_R6);
-    GET_FEATURE(ASE_MSA, HWCAP_MIPS_MSA);
-
-#undef GET_FEATURE
+    GET_FEATURE_REG_EQU(CP0_Config0, CP0C0_AR, CP0C0_AR_LENGTH,
+                        2, HWCAP_MIPS_R6);
+    GET_FEATURE_REG_SET(CP0_Config3, 1 << CP0C3_MSAP, HWCAP_MIPS_MSA);
+    GET_FEATURE_INSN(ASE_LMMI, HWCAP_LOONGSON_MMI);
+    GET_FEATURE_INSN(ASE_LEXT, HWCAP_LOONGSON_EXT);
 
     return hwcaps;
 }
+
+#undef GET_FEATURE_REG_EQU
+#undef GET_FEATURE_REG_SET
+#undef GET_FEATURE_INSN
 
 #endif /* TARGET_MIPS */
 
@@ -1358,29 +1387,6 @@ static inline void init_thread(struct target_pt_regs *regs, struct image_info *i
 
 #endif /* TARGET_S390X */
 
-#ifdef TARGET_TILEGX
-
-/* 42 bits real used address, a half for user mode */
-#define ELF_START_MMAP (0x00000020000000000ULL)
-
-#define elf_check_arch(x) ((x) == EM_TILEGX)
-
-#define ELF_CLASS   ELFCLASS64
-#define ELF_DATA    ELFDATA2LSB
-#define ELF_ARCH    EM_TILEGX
-
-static inline void init_thread(struct target_pt_regs *regs,
-                               struct image_info *infop)
-{
-    regs->pc = infop->entry;
-    regs->sp = infop->start_stack;
-
-}
-
-#define ELF_EXEC_PAGESIZE        65536 /* TILE-Gx page size is 64KB */
-
-#endif /* TARGET_TILEGX */
-
 #ifdef TARGET_RISCV
 
 #define ELF_START_MMAP 0x80000000
@@ -1484,6 +1490,22 @@ static void elf_core_copy_regs(target_elf_gregset_t *regs,
 #define ELF_EXEC_PAGESIZE       4096
 
 #endif /* TARGET_XTENSA */
+
+#ifdef TARGET_HEXAGON
+
+#define ELF_START_MMAP 0x20000000
+
+#define ELF_CLASS       ELFCLASS32
+#define ELF_ARCH        EM_HEXAGON
+
+static inline void init_thread(struct target_pt_regs *regs,
+                               struct image_info *infop)
+{
+    regs->sepc = infop->entry;
+    regs->sp = infop->start_stack;
+}
+
+#endif /* TARGET_HEXAGON */
 
 #ifndef ELF_PLATFORM
 #define ELF_PLATFORM (NULL)
@@ -1843,8 +1865,8 @@ static void zero_bss(abi_ulong elf_bss, abi_ulong last_bss, int prot)
        here is still actually needed.  For now, continue with it,
        but merge it with the "normal" mmap that would allocate the bss.  */
 
-    host_start = (uintptr_t) g2h(elf_bss);
-    host_end = (uintptr_t) g2h(last_bss);
+    host_start = (uintptr_t) g2h_untagged(elf_bss);
+    host_end = (uintptr_t) g2h_untagged(last_bss);
     host_map_start = REAL_HOST_PAGE_ALIGN(host_start);
 
     if (host_map_start < host_end) {
@@ -2106,9 +2128,9 @@ static void pgb_have_guest_base(const char *image_name, abi_ulong guest_loaddr,
     void *addr, *test;
 
     if (!QEMU_IS_ALIGNED(guest_base, align)) {
-        fprintf(stderr, "Requested guest base 0x%lx does not satisfy "
+        fprintf(stderr, "Requested guest base %p does not satisfy "
                 "host minimum alignment (0x%lx)\n",
-                guest_base, align);
+                (void *)guest_base, align);
         exit(EXIT_FAILURE);
     }
 
@@ -2142,7 +2164,7 @@ static void pgb_have_guest_base(const char *image_name, abi_ulong guest_loaddr,
     }
 
     /* Reserve the address space for the binary, or reserved_va. */
-    test = g2h(guest_loaddr);
+    test = g2h_untagged(guest_loaddr);
     addr = mmap(test, guest_hiaddr - guest_loaddr, PROT_NONE, flags, -1, 0);
     if (test != addr) {
         pgb_fail_in_use(image_name);
@@ -2187,9 +2209,8 @@ static uintptr_t pgd_find_hole_fallback(uintptr_t guest_size, uintptr_t brk,
             void * mmap_start = mmap((void *) align_start, guest_size,
                                      PROT_NONE, flags, -1, 0);
             if (mmap_start != MAP_FAILED) {
-                munmap((void *) align_start, guest_size);
-                if (MAP_FIXED_NOREPLACE != 0 ||
-                    mmap_start == (void *) align_start) {
+                munmap(mmap_start, guest_size);
+                if (mmap_start == (void *) align_start) {
                     return (uintptr_t) mmap_start + offset;
                 }
             }
@@ -2214,7 +2235,8 @@ static uintptr_t pgb_find_hole(uintptr_t guest_loaddr, uintptr_t guest_size,
     brk = (uintptr_t)sbrk(0);
 
     if (!maps) {
-        return pgd_find_hole_fallback(guest_size, brk, align, offset);
+        ret = pgd_find_hole_fallback(guest_size, brk, align, offset);
+        return ret == -1 ? -1 : ret - guest_loaddr;
     }
 
     /* The first hole is before the first map entry. */
@@ -2364,7 +2386,7 @@ static void pgb_reserved_va(const char *image_name, abi_ulong guest_loaddr,
 
     /* Reserve the memory on the host. */
     assert(guest_base != 0);
-    test = g2h(0);
+    test = g2h_untagged(0);
     addr = mmap(test, reserved_va, PROT_NONE, flags, -1, 0);
     if (addr == MAP_FAILED || addr != test) {
         error_report("Unable to reserve 0x%lx bytes of virtual address "
@@ -2776,14 +2798,16 @@ static void load_elf_image(const char *image_name, int image_fd,
             vaddr = load_bias + eppnt->p_vaddr;
             vaddr_po = TARGET_ELF_PAGEOFFSET(vaddr);
             vaddr_ps = TARGET_ELF_PAGESTART(vaddr);
-            vaddr_len = TARGET_ELF_PAGELENGTH(eppnt->p_filesz + vaddr_po);
+
+            vaddr_ef = vaddr + eppnt->p_filesz;
+            vaddr_em = vaddr + eppnt->p_memsz;
 
             /*
-             * Some segments may be completely empty without any backing file
-             * segment, in that case just let zero_bss allocate an empty buffer
-             * for it.
+             * Some segments may be completely empty, with a non-zero p_memsz
+             * but no backing file segment.
              */
             if (eppnt->p_filesz != 0) {
+                vaddr_len = TARGET_ELF_PAGELENGTH(eppnt->p_filesz + vaddr_po);
                 error = target_mmap(vaddr_ps, vaddr_len, elf_prot,
                                     MAP_PRIVATE | MAP_FIXED,
                                     image_fd, eppnt->p_offset - vaddr_po);
@@ -2791,14 +2815,22 @@ static void load_elf_image(const char *image_name, int image_fd,
                 if (error == -1) {
                     goto exit_mmap;
                 }
-            }
 
-            vaddr_ef = vaddr + eppnt->p_filesz;
-            vaddr_em = vaddr + eppnt->p_memsz;
+                /*
+                 * If the load segment requests extra zeros (e.g. bss), map it.
+                 */
+                if (eppnt->p_filesz < eppnt->p_memsz) {
+                    zero_bss(vaddr_ef, vaddr_em, elf_prot);
+                }
+            } else if (eppnt->p_memsz != 0) {
+                vaddr_len = TARGET_ELF_PAGELENGTH(eppnt->p_memsz + vaddr_po);
+                error = target_mmap(vaddr_ps, vaddr_len, elf_prot,
+                                    MAP_PRIVATE | MAP_FIXED | MAP_ANONYMOUS,
+                                    -1, 0);
 
-            /* If the load segment requests extra zeros (e.g. bss), map it.  */
-            if (vaddr_ef < vaddr_em) {
-                zero_bss(vaddr_ef, vaddr_em, elf_prot);
+                if (error == -1) {
+                    goto exit_mmap;
+                }
             }
 
             /* Find the full program boundaries.  */
@@ -3471,7 +3503,7 @@ static int vma_get_mapping_count(const struct mm_struct *mm)
 static abi_ulong vma_dump_size(const struct vm_area_struct *vma)
 {
     /* if we cannot even read the first page, skip it */
-    if (!access_ok(VERIFY_READ, vma->vma_start, TARGET_PAGE_SIZE))
+    if (!access_ok_untagged(VERIFY_READ, vma->vma_start, TARGET_PAGE_SIZE))
         return (0);
 
     /*

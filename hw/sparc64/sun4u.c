@@ -27,6 +27,7 @@
 #include "qemu/error-report.h"
 #include "qapi/error.h"
 #include "qemu-common.h"
+#include "qemu/datadir.h"
 #include "cpu.h"
 #include "hw/pci/pci.h"
 #include "hw/pci/pci_bridge.h"
@@ -578,7 +579,7 @@ static void sun4uv_init(MemoryRegion *address_space_mem,
     /* set up devices */
     ram_init(0, machine->ram_size);
 
-    prom_init(hwdef->prom_addr, bios_name);
+    prom_init(hwdef->prom_addr, machine->firmware);
 
     /* Init sabre (PCI host bridge) */
     sabre = SABRE(qdev_new(TYPE_SABRE));
@@ -690,7 +691,7 @@ static void sun4uv_init(MemoryRegion *address_space_mem,
     initrd_addr = 0;
     kernel_size = sun4u_load_kernel(machine->kernel_filename,
                                     machine->initrd_filename,
-                                    ram_size, &initrd_size, &initrd_addr,
+                                    machine->ram_size, &initrd_size, &initrd_addr,
                                     &kernel_addr, &kernel_entry);
 
     sun4u_NVRAM_set_params(nvram, NVRAM_SIZE, "Sun4u", machine->ram_size,
@@ -713,7 +714,7 @@ static void sun4uv_init(MemoryRegion *address_space_mem,
     fw_cfg = FW_CFG(dev);
     fw_cfg_add_i16(fw_cfg, FW_CFG_NB_CPUS, (uint16_t)machine->smp.cpus);
     fw_cfg_add_i16(fw_cfg, FW_CFG_MAX_CPUS, (uint16_t)machine->smp.max_cpus);
-    fw_cfg_add_i64(fw_cfg, FW_CFG_RAM_SIZE, (uint64_t)ram_size);
+    fw_cfg_add_i64(fw_cfg, FW_CFG_RAM_SIZE, (uint64_t)machine->ram_size);
     fw_cfg_add_i16(fw_cfg, FW_CFG_MACHINE_ID, hwdef->machine_id);
     fw_cfg_add_i64(fw_cfg, FW_CFG_KERNEL_ADDR, kernel_entry);
     fw_cfg_add_i64(fw_cfg, FW_CFG_KERNEL_SIZE, kernel_size);
@@ -748,9 +749,6 @@ static char *sun4u_fw_dev_path(FWPathProvider *p, BusState *bus,
                                DeviceState *dev)
 {
     PCIDevice *pci;
-    IDEBus *ide_bus;
-    IDEState *ide_s;
-    int bus_id;
 
     if (!strcmp(object_get_typename(OBJECT(dev)), "pbm-bridge")) {
         pci = PCI_DEVICE(dev);
@@ -761,18 +759,6 @@ static char *sun4u_fw_dev_path(FWPathProvider *p, BusState *bus,
         } else {
             return g_strdup_printf("pci@%x", PCI_SLOT(pci->devfn));
         }
-    }
-
-    if (!strcmp(object_get_typename(OBJECT(dev)), "ide-drive")) {
-         ide_bus = IDE_BUS(qdev_get_parent_bus(dev));
-         ide_s = idebus_active_if(ide_bus);
-         bus_id = ide_bus->bus_id;
-
-         if (ide_s->drive_kind == IDE_CD) {
-             return g_strdup_printf("ide@%x/cdrom", bus_id);
-         }
-
-         return g_strdup_printf("ide@%x/disk", bus_id);
     }
 
     if (!strcmp(object_get_typename(OBJECT(dev)), "ide-hd")) {

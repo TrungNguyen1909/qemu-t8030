@@ -83,7 +83,8 @@ static void mb_cpu_set_pc(CPUState *cs, vaddr value)
     cpu->env.iflags = 0;
 }
 
-static void mb_cpu_synchronize_from_tb(CPUState *cs, TranslationBlock *tb)
+static void mb_cpu_synchronize_from_tb(CPUState *cs,
+                                       const TranslationBlock *tb)
 {
     MicroBlazeCPU *cpu = MICROBLAZE_CPU(cs);
 
@@ -97,6 +98,38 @@ static bool mb_cpu_has_work(CPUState *cs)
 }
 
 #ifndef CONFIG_USER_ONLY
+static void mb_cpu_ns_axi_dp(void *opaque, int irq, int level)
+{
+    MicroBlazeCPU *cpu = opaque;
+    bool en = cpu->cfg.use_non_secure & USE_NON_SECURE_M_AXI_DP_MASK;
+
+    cpu->ns_axi_dp = level & en;
+}
+
+static void mb_cpu_ns_axi_ip(void *opaque, int irq, int level)
+{
+    MicroBlazeCPU *cpu = opaque;
+    bool en = cpu->cfg.use_non_secure & USE_NON_SECURE_M_AXI_IP_MASK;
+
+    cpu->ns_axi_ip = level & en;
+}
+
+static void mb_cpu_ns_axi_dc(void *opaque, int irq, int level)
+{
+    MicroBlazeCPU *cpu = opaque;
+    bool en = cpu->cfg.use_non_secure & USE_NON_SECURE_M_AXI_DC_MASK;
+
+    cpu->ns_axi_dc = level & en;
+}
+
+static void mb_cpu_ns_axi_ic(void *opaque, int irq, int level)
+{
+    MicroBlazeCPU *cpu = opaque;
+    bool en = cpu->cfg.use_non_secure & USE_NON_SECURE_M_AXI_IC_MASK;
+
+    cpu->ns_axi_ic = level & en;
+}
+
 static void microblaze_cpu_set_irq(void *opaque, int irq, int level)
 {
     MicroBlazeCPU *cpu = opaque;
@@ -247,6 +280,10 @@ static void mb_cpu_initfn(Object *obj)
 #ifndef CONFIG_USER_ONLY
     /* Inbound IRQ and FIR lines */
     qdev_init_gpio_in(DEVICE(cpu), microblaze_cpu_set_irq, 2);
+    qdev_init_gpio_in_named(DEVICE(cpu), mb_cpu_ns_axi_dp, "ns_axi_dp", 1);
+    qdev_init_gpio_in_named(DEVICE(cpu), mb_cpu_ns_axi_ip, "ns_axi_ip", 1);
+    qdev_init_gpio_in_named(DEVICE(cpu), mb_cpu_ns_axi_dc, "ns_axi_dc", 1);
+    qdev_init_gpio_in_named(DEVICE(cpu), mb_cpu_ns_axi_ic, "ns_axi_ic", 1);
 #endif
 }
 
@@ -276,6 +313,16 @@ static Property mb_properties[] = {
     DEFINE_PROP_BOOL("use-msr-instr", MicroBlazeCPU, cfg.use_msr_instr, true),
     DEFINE_PROP_BOOL("use-pcmp-instr", MicroBlazeCPU, cfg.use_pcmp_instr, true),
     DEFINE_PROP_BOOL("use-mmu", MicroBlazeCPU, cfg.use_mmu, true),
+    /*
+     * use-non-secure enables/disables the use of the non_secure[3:0] signals.
+     * It is a bitfield where 1 = non-secure for the following bits and their
+     * corresponding interfaces:
+     * 0x1 - M_AXI_DP
+     * 0x2 - M_AXI_IP
+     * 0x4 - M_AXI_DC
+     * 0x8 - M_AXI_IC
+     */
+    DEFINE_PROP_UINT8("use-non-secure", MicroBlazeCPU, cfg.use_non_secure, 0),
     DEFINE_PROP_BOOL("dcache-writeback", MicroBlazeCPU, cfg.dcache_writeback,
                      false),
     DEFINE_PROP_BOOL("endianness", MicroBlazeCPU, cfg.endi, false),
@@ -305,6 +352,21 @@ static ObjectClass *mb_cpu_class_by_name(const char *cpu_model)
     return object_class_by_name(TYPE_MICROBLAZE_CPU);
 }
 
+#include "hw/core/tcg-cpu-ops.h"
+
+static struct TCGCPUOps mb_tcg_ops = {
+    .initialize = mb_tcg_init,
+    .synchronize_from_tb = mb_cpu_synchronize_from_tb,
+    .cpu_exec_interrupt = mb_cpu_exec_interrupt,
+    .tlb_fill = mb_cpu_tlb_fill,
+
+#ifndef CONFIG_USER_ONLY
+    .do_interrupt = mb_cpu_do_interrupt,
+    .do_transaction_failed = mb_cpu_transaction_failed,
+    .do_unaligned_access = mb_cpu_do_unaligned_access,
+#endif /* !CONFIG_USER_ONLY */
+};
+
 static void mb_cpu_class_init(ObjectClass *oc, void *data)
 {
     DeviceClass *dc = DEVICE_CLASS(oc);
@@ -317,25 +379,21 @@ static void mb_cpu_class_init(ObjectClass *oc, void *data)
 
     cc->class_by_name = mb_cpu_class_by_name;
     cc->has_work = mb_cpu_has_work;
-    cc->do_interrupt = mb_cpu_do_interrupt;
-    cc->do_unaligned_access = mb_cpu_do_unaligned_access;
-    cc->cpu_exec_interrupt = mb_cpu_exec_interrupt;
+
     cc->dump_state = mb_cpu_dump_state;
     cc->set_pc = mb_cpu_set_pc;
-    cc->synchronize_from_tb = mb_cpu_synchronize_from_tb;
     cc->gdb_read_register = mb_cpu_gdb_read_register;
     cc->gdb_write_register = mb_cpu_gdb_write_register;
-    cc->tlb_fill = mb_cpu_tlb_fill;
+
 #ifndef CONFIG_USER_ONLY
-    cc->do_transaction_failed = mb_cpu_transaction_failed;
-    cc->get_phys_page_debug = mb_cpu_get_phys_page_debug;
+    cc->get_phys_page_attrs_debug = mb_cpu_get_phys_page_attrs_debug;
     dc->vmsd = &vmstate_mb_cpu;
 #endif
     device_class_set_props(dc, mb_properties);
     cc->gdb_num_core_regs = 32 + 27;
 
     cc->disas_set_info = mb_disas_set_info;
-    cc->tcg_initialize = mb_tcg_init;
+    cc->tcg_ops = &mb_tcg_ops;
 }
 
 static const TypeInfo mb_cpu_type_info = {

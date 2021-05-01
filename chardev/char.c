@@ -39,6 +39,7 @@
 #include "qemu/option.h"
 #include "qemu/id.h"
 #include "qemu/coroutine.h"
+#include "qemu/yank.h"
 
 #include "chardev-internal.h"
 
@@ -266,6 +267,7 @@ static void char_init(Object *obj)
 {
     Chardev *chr = CHARDEV(obj);
 
+    chr->handover_yank_instance = false;
     chr->logfd = -1;
     qemu_mutex_init(&chr->chr_write_lock);
 
@@ -521,7 +523,7 @@ static const ChardevClass *char_get_class(const char *driver, Error **errp)
 
     if (object_class_is_abstract(oc)) {
         error_setg(errp, QERR_INVALID_PARAMETER_VALUE, "driver",
-                   "abstract device type");
+                   "an abstract device type");
         return NULL;
     }
 
@@ -534,9 +536,10 @@ static const ChardevClass *char_get_class(const char *driver, Error **errp)
     return cc;
 }
 
-static const struct ChardevAlias {
+static struct ChardevAlias {
     const char *typename;
     const char *alias;
+    bool deprecation_warning_printed;
 } chardev_alias_table[] = {
 #ifdef HAVE_CHARDEV_PARPORT
     { "parallel", "parport" },
@@ -565,16 +568,12 @@ chardev_class_foreach(ObjectClass *klass, void *opaque)
 }
 
 static void
-chardev_name_foreach(void (*fn)(const char *name, void *opaque), void *opaque)
+chardev_name_foreach(void (*fn)(const char *name, void *opaque),
+                     void *opaque)
 {
     ChadevClassFE fe = { .fn = fn, .opaque = opaque };
-    int i;
 
     object_class_foreach(chardev_class_foreach, TYPE_CHARDEV, false, &fe);
-
-    for (i = 0; i < (int)ARRAY_SIZE(chardev_alias_table); i++) {
-        fn(chardev_alias_table[i].alias, opaque);
-    }
 }
 
 static void
@@ -590,6 +589,11 @@ static const char *chardev_alias_translate(const char *name)
     int i;
     for (i = 0; i < (int)ARRAY_SIZE(chardev_alias_table); i++) {
         if (g_strcmp0(chardev_alias_table[i].alias, name) == 0) {
+            if (!chardev_alias_table[i].deprecation_warning_printed) {
+                warn_report("The alias '%s' is deprecated, use '%s' instead",
+                            name, chardev_alias_table[i].typename);
+                chardev_alias_table[i].deprecation_warning_printed = true;
+            }
             return chardev_alias_table[i].typename;
         }
     }
@@ -776,15 +780,13 @@ static int qmp_query_chardev_foreach(Object *obj, void *data)
 {
     Chardev *chr = CHARDEV(obj);
     ChardevInfoList **list = data;
-    ChardevInfoList *info = g_malloc0(sizeof(*info));
+    ChardevInfo *value = g_malloc0(sizeof(*value));
 
-    info->value = g_malloc0(sizeof(*info->value));
-    info->value->label = g_strdup(chr->label);
-    info->value->filename = g_strdup(chr->filename);
-    info->value->frontend_open = chr->be && chr->be->fe_open;
+    value->label = g_strdup(chr->label);
+    value->filename = g_strdup(chr->filename);
+    value->frontend_open = chr->be && chr->be->fe_open;
 
-    info->next = *list;
-    *list = info;
+    QAPI_LIST_PREPEND(*list, value);
 
     return 0;
 }
@@ -803,12 +805,11 @@ static void
 qmp_prepend_backend(const char *name, void *opaque)
 {
     ChardevBackendInfoList **list = opaque;
-    ChardevBackendInfoList *info = g_malloc0(sizeof(*info));
+    ChardevBackendInfo *value;
 
-    info->value = g_malloc0(sizeof(*info->value));
-    info->value->name = g_strdup(name);
-    info->next = *list;
-    *list = info;
+    value = g_new0(ChardevBackendInfo, 1);
+    value->name = g_strdup(name);
+    QAPI_LIST_PREPEND(*list, value);
 }
 
 ChardevBackendInfoList *qmp_query_chardev_backends(Error **errp)
@@ -870,6 +871,9 @@ QemuOptsList qemu_chardev_opts = {
             .type = QEMU_OPT_BOOL,
         },{
             .name = "delay",
+            .type = QEMU_OPT_BOOL,
+        },{
+            .name = "nodelay",
             .type = QEMU_OPT_BOOL,
         },{
             .name = "reconnect",
@@ -957,6 +961,7 @@ void qemu_chr_set_feature(Chardev *chr,
 static Chardev *chardev_new(const char *id, const char *typename,
                             ChardevBackend *backend,
                             GMainContext *gcontext,
+                            bool handover_yank_instance,
                             Error **errp)
 {
     Object *obj;
@@ -965,15 +970,19 @@ static Chardev *chardev_new(const char *id, const char *typename,
     bool be_opened = true;
 
     assert(g_str_has_prefix(typename, "chardev-"));
+    assert(id);
 
     obj = object_new(typename);
     chr = CHARDEV(obj);
+    chr->handover_yank_instance = handover_yank_instance;
     chr->label = g_strdup(id);
     chr->gcontext = gcontext;
 
     qemu_char_open(chr, backend, &be_opened, &local_err);
     if (local_err) {
-        goto end;
+        error_propagate(errp, local_err);
+        object_unref(obj);
+        return NULL;
     }
 
     if (!chr->filename) {
@@ -981,22 +990,6 @@ static Chardev *chardev_new(const char *id, const char *typename,
     }
     if (be_opened) {
         qemu_chr_be_event(chr, CHR_EVENT_OPENED);
-    }
-
-    if (id) {
-        object_property_try_add_child(get_chardevs_root(), id, obj,
-                                      &local_err);
-        if (local_err) {
-            goto end;
-        }
-        object_unref(obj);
-    }
-
-end:
-    if (local_err) {
-        error_propagate(errp, local_err);
-        object_unref(obj);
-        return NULL;
     }
 
     return chr;
@@ -1007,6 +1000,7 @@ Chardev *qemu_chardev_new(const char *id, const char *typename,
                           GMainContext *gcontext,
                           Error **errp)
 {
+    Chardev *chr;
     g_autofree char *genid = NULL;
 
     if (!id) {
@@ -1014,7 +1008,19 @@ Chardev *qemu_chardev_new(const char *id, const char *typename,
         id = genid;
     }
 
-    return chardev_new(id, typename, backend, gcontext, errp);
+    chr = chardev_new(id, typename, backend, gcontext, false, errp);
+    if (!chr) {
+        return NULL;
+    }
+
+    if (!object_property_try_add_child(get_chardevs_root(), id, OBJECT(chr),
+                                       errp)) {
+        object_unref(OBJECT(chr));
+        return NULL;
+    }
+    object_unref(OBJECT(chr));
+
+    return chr;
 }
 
 ChardevReturn *qmp_chardev_add(const char *id, ChardevBackend *backend,
@@ -1030,10 +1036,17 @@ ChardevReturn *qmp_chardev_add(const char *id, ChardevBackend *backend,
     }
 
     chr = chardev_new(id, object_class_get_name(OBJECT_CLASS(cc)),
-                      backend, NULL, errp);
+                      backend, NULL, false, errp);
     if (!chr) {
         return NULL;
     }
+
+    if (!object_property_try_add_child(get_chardevs_root(), id, OBJECT(chr),
+                                       errp)) {
+        object_unref(OBJECT(chr));
+        return NULL;
+    }
+    object_unref(OBJECT(chr));
 
     ret = g_new0(ChardevReturn, 1);
     if (CHARDEV_IS_PTY(chr)) {
@@ -1048,9 +1061,10 @@ ChardevReturn *qmp_chardev_change(const char *id, ChardevBackend *backend,
                                   Error **errp)
 {
     CharBackend *be;
-    const ChardevClass *cc;
+    const ChardevClass *cc, *cc_new;
     Chardev *chr, *chr_new;
     bool closed_sent = false;
+    bool handover_yank_instance;
     ChardevReturn *ret;
 
     chr = qemu_chr_find(id);
@@ -1082,17 +1096,23 @@ ChardevReturn *qmp_chardev_change(const char *id, ChardevBackend *backend,
         return NULL;
     }
 
-    cc = char_get_class(ChardevBackendKind_str(backend->type), errp);
-    if (!cc) {
+    cc = CHARDEV_GET_CLASS(chr);
+    cc_new = char_get_class(ChardevBackendKind_str(backend->type), errp);
+    if (!cc_new) {
         return NULL;
     }
 
-    chr_new = chardev_new(NULL, object_class_get_name(OBJECT_CLASS(cc)),
-                          backend, chr->gcontext, errp);
+    /*
+     * The new chardev should not register a yank instance if the current
+     * chardev has registered one already.
+     */
+    handover_yank_instance = cc->supports_yank && cc_new->supports_yank;
+
+    chr_new = chardev_new(id, object_class_get_name(OBJECT_CLASS(cc_new)),
+                          backend, chr->gcontext, handover_yank_instance, errp);
     if (!chr_new) {
         return NULL;
     }
-    chr_new->label = g_strdup(id);
 
     if (chr->be_open && !chr_new->be_open) {
         qemu_chr_be_event(chr, CHR_EVENT_CLOSED);
@@ -1112,6 +1132,15 @@ ChardevReturn *qmp_chardev_change(const char *id, ChardevBackend *backend,
         object_unref(OBJECT(chr_new));
         return NULL;
     }
+
+    /* change successfull, clean up */
+    chr_new->handover_yank_instance = false;
+
+    /*
+     * When the old chardev is freed, it should not unregister the yank
+     * instance if the new chardev needs it.
+     */
+    chr->handover_yank_instance = handover_yank_instance;
 
     object_unparent(OBJECT(chr));
     object_property_add_child(get_chardevs_root(), chr_new->label,

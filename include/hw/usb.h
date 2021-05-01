@@ -216,7 +216,6 @@ struct USBEndpoint {
 };
 
 enum USBDeviceFlags {
-    USB_DEV_FLAG_FULL_PATH,
     USB_DEV_FLAG_IS_HOST,
     USB_DEV_FLAG_MSOS_DESC_ENABLE,
     USB_DEV_FLAG_MSOS_DESC_IN_USE,
@@ -230,6 +229,9 @@ struct USBDevice {
     char *serial;
     void *opaque;
     uint32_t flags;
+
+    char *pcap_filename;
+    FILE *pcap;
 
     /* Actual connected speed */
     int speed;
@@ -497,7 +499,7 @@ void usb_bus_new(USBBus *bus, size_t bus_size,
 void usb_bus_release(USBBus *bus);
 USBBus *usb_bus_find(int busnr);
 void usb_legacy_register(const char *typename, const char *usbdevice_name,
-                         USBDevice *(*usbdevice_init)(const char *params));
+                         USBDevice *(*usbdevice_init)(void));
 USBDevice *usb_new(const char *name);
 bool usb_realize_and_unref(USBDevice *dev, USBBus *bus, Error **errp);
 USBDevice *usb_create_simple(USBBus *bus, const char *name);
@@ -569,5 +571,10 @@ const USBDesc *usb_device_get_usb_desc(USBDevice *dev);
 int usb_get_quirks(uint16_t vendor_id, uint16_t product_id,
                    uint8_t interface_class, uint8_t interface_subclass,
                    uint8_t interface_protocol);
+
+/* pcap.c */
+void usb_pcap_init(FILE *fp);
+void usb_pcap_ctrl(USBPacket *p, bool setup);
+void usb_pcap_data(USBPacket *p, bool setup);
 
 #endif

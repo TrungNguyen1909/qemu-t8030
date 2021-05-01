@@ -176,6 +176,7 @@ typedef struct mips_elf_abiflags_v0 {
 
 #define EM_UNICORE32    110     /* UniCore32 */
 
+#define EM_HEXAGON      164     /* Qualcomm Hexagon */
 #define EM_RX           173     /* Renesas RX family */
 
 #define EM_RISCV        243     /* RISC-V */
@@ -204,8 +205,6 @@ typedef struct mips_elf_abiflags_v0 {
 #define EM_XTENSA   94      /* Tensilica Xtensa */
 
 #define EM_AARCH64  183
-
-#define EM_TILEGX   191 /* TILE-Gx */
 
 #define EM_MOXIE           223     /* Moxie processor family */
 #define EM_MOXIE_OLD       0xFEED

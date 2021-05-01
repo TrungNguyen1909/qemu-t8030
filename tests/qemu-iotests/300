@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# group: migration
 #
 # Copyright (C) 2020 Red Hat, Inc.
 #
@@ -21,13 +22,16 @@
 import os
 import random
 import re
-from typing import Dict, List, Optional, Union
+from typing import Dict, List, Optional
+
 import iotests
+
+# Import qemu after iotests.py has amended sys.path
+# pylint: disable=wrong-import-order
 import qemu
 
-BlockBitmapMapping = List[Dict[str, Union[str, List[Dict[str, str]]]]]
+BlockBitmapMapping = List[Dict[str, object]]
 
-assert iotests.sock_dir is not None
 mig_sock = os.path.join(iotests.sock_dir, 'mig_sock')
 
 
@@ -111,10 +115,14 @@ class TestDirtyBitmapMigration(iotests.QMPTestCase):
         If @msg is None, check that there has not been any error.
         """
         self.vm_b.shutdown()
+
+        log = self.vm_b.get_log()
+        assert log is not None  # Loaded after shutdown
+
         if msg is None:
-            self.assertNotIn('qemu-system-', self.vm_b.get_log())
+            self.assertNotIn('qemu-system-', log)
         else:
-            self.assertIn(msg, self.vm_b.get_log())
+            self.assertIn(msg, log)
 
     @staticmethod
     def mapping(node_name: str, node_alias: str,
@@ -181,8 +189,8 @@ class TestAliasMigration(TestDirtyBitmapMigration):
         # Check for error message on the destination
         if self.src_node_name != self.dst_node_name:
             self.verify_dest_error(f"Cannot find "
-                                   f"device={self.src_node_name} nor "
-                                   f"node_name={self.src_node_name}")
+                                   f"device='{self.src_node_name}' nor "
+                                   f"node-name='{self.src_node_name}'")
         else:
             self.verify_dest_error(None)
 
@@ -446,9 +454,13 @@ class TestBlockBitmapMappingErrors(TestDirtyBitmapMigration):
 
         # Check for the error in the source's log
         self.vm_a.shutdown()
+
+        log = self.vm_a.get_log()
+        assert log is not None  # Loaded after shutdown
+
         self.assertIn(f"Cannot migrate bitmap '{name}' on node "
                       f"'{self.src_node_name}': Name is longer than 255 bytes",
-                      self.vm_a.get_log())
+                      log)
 
         # Expect abnormal shutdown of the destination VM because of
         # the failed migration
@@ -588,6 +600,101 @@ class TestCrossAliasMigration(TestDirtyBitmapMigration):
         self.verify_dest_has_all_bitmaps()
         self.verify_dest_error(None)
 
+class TestAliasTransformMigration(TestDirtyBitmapMigration):
+    """
+    Tests the 'transform' option which modifies bitmap persistence on
+    migration.
+    """
+
+    src_node_name = 'node-a'
+    dst_node_name = 'node-b'
+    src_bmap_name = 'bmap-a'
+    dst_bmap_name = 'bmap-b'
+
+    def setUp(self) -> None:
+        TestDirtyBitmapMigration.setUp(self)
+
+        # Now create another block device and let both have two bitmaps each
+        result = self.vm_a.qmp('blockdev-add',
+                               node_name='node-b', driver='null-co',
+                               read_zeroes=False)
+        self.assert_qmp(result, 'return', {})
+
+        result = self.vm_b.qmp('blockdev-add',
+                               node_name='node-a', driver='null-co',
+                               read_zeroes=False)
+        self.assert_qmp(result, 'return', {})
+
+        bmaps_to_add = (('node-a', 'bmap-b'),
+                        ('node-b', 'bmap-a'),
+                        ('node-b', 'bmap-b'))
+
+        for (node, bmap) in bmaps_to_add:
+            result = self.vm_a.qmp('block-dirty-bitmap-add',
+                                   node=node, name=bmap)
+            self.assert_qmp(result, 'return', {})
+
+    @staticmethod
+    def transform_mapping() -> BlockBitmapMapping:
+        return [
+            {
+                'node-name': 'node-a',
+                'alias': 'node-a',
+                'bitmaps': [
+                    {
+                        'name': 'bmap-a',
+                        'alias': 'bmap-a',
+                        'transform':
+                            {
+                                'persistent': True
+                            }
+                    },
+                    {
+                        'name': 'bmap-b',
+                        'alias': 'bmap-b'
+                    }
+                ]
+            },
+            {
+                'node-name': 'node-b',
+                'alias': 'node-b',
+                'bitmaps': [
+                    {
+                        'name': 'bmap-a',
+                        'alias': 'bmap-a'
+                    },
+                    {
+                        'name': 'bmap-b',
+                        'alias': 'bmap-b'
+                    }
+                ]
+            }
+        ]
+
+    def verify_dest_bitmap_state(self) -> None:
+        bitmaps = self.vm_b.query_bitmaps()
+
+        for node in bitmaps:
+            bitmaps[node] = sorted(((bmap['name'], bmap['persistent'])
+                                    for bmap in bitmaps[node]))
+
+        self.assertEqual(bitmaps,
+                         {'node-a': [('bmap-a', True), ('bmap-b', False)],
+                          'node-b': [('bmap-a', False), ('bmap-b', False)]})
+
+    def test_transform_on_src(self) -> None:
+        self.set_mapping(self.vm_a, self.transform_mapping())
+
+        self.migrate()
+        self.verify_dest_bitmap_state()
+        self.verify_dest_error(None)
+
+    def test_transform_on_dst(self) -> None:
+        self.set_mapping(self.vm_b, self.transform_mapping())
+
+        self.migrate()
+        self.verify_dest_bitmap_state()
+        self.verify_dest_error(None)
 
 if __name__ == '__main__':
     iotests.main(supported_protocols=['file'])

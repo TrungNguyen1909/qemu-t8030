@@ -16,19 +16,9 @@
 #include "fuse_opt.h"
 #include "fuse_virtio.h"
 
-#include <assert.h>
-#include <errno.h>
-#include <glib.h>
-#include <limits.h>
-#include <stdbool.h>
-#include <stddef.h>
-#include <stdio.h>
-#include <stdlib.h>
-#include <string.h>
 #include <sys/file.h>
-#include <unistd.h>
 
-#define THREAD_POOL_SIZE 64
+#define THREAD_POOL_SIZE 0
 
 #define OFFSET_MAX 0x7fffffffffffffffLL
 
@@ -865,7 +855,7 @@ static void do_setattr(fuse_req_t req, fuse_ino_t nodeid,
                       FUSE_SET_ATTR_GID | FUSE_SET_ATTR_SIZE |
                       FUSE_SET_ATTR_ATIME | FUSE_SET_ATTR_MTIME |
                       FUSE_SET_ATTR_ATIME_NOW | FUSE_SET_ATTR_MTIME_NOW |
-                      FUSE_SET_ATTR_CTIME;
+                      FUSE_SET_ATTR_CTIME | FUSE_SET_ATTR_KILL_SUIDGID;
 
         req->se->op.setattr(req, nodeid, &stbuf, arg->valid, fi);
     } else {
@@ -1079,6 +1069,7 @@ static void do_create(fuse_req_t req, fuse_ino_t nodeid,
 
         memset(&fi, 0, sizeof(fi));
         fi.flags = arg->flags;
+        fi.kill_priv = arg->open_flags & FUSE_OPEN_KILL_SUIDGID;
 
         req->ctx.umask = arg->umask;
 
@@ -1102,6 +1093,7 @@ static void do_open(fuse_req_t req, fuse_ino_t nodeid,
 
     memset(&fi, 0, sizeof(fi));
     fi.flags = arg->flags;
+    fi.kill_priv = arg->open_flags & FUSE_OPEN_KILL_SUIDGID;
 
     if (req->se->op.open) {
         req->se->op.open(req, nodeid, &fi);
@@ -1993,6 +1985,9 @@ static void do_init(fuse_req_t req, fuse_ino_t nodeid,
     if (arg->flags & FUSE_SUBMOUNTS) {
         se->conn.capable |= FUSE_CAP_SUBMOUNTS;
     }
+    if (arg->flags & FUSE_HANDLE_KILLPRIV_V2) {
+        se->conn.capable |= FUSE_CAP_HANDLE_KILLPRIV_V2;
+    }
 #ifdef HAVE_SPLICE
 #ifdef HAVE_VMSPLICE
     se->conn.capable |= FUSE_CAP_SPLICE_WRITE | FUSE_CAP_SPLICE_MOVE;
@@ -2124,6 +2119,10 @@ static void do_init(fuse_req_t req, fuse_ino_t nodeid,
     outarg.congestion_threshold = se->conn.congestion_threshold;
     outarg.time_gran = se->conn.time_gran;
 
+    if (se->conn.want & FUSE_CAP_HANDLE_KILLPRIV_V2) {
+        outarg.flags |= FUSE_HANDLE_KILLPRIV_V2;
+    }
+
     fuse_log(FUSE_LOG_DEBUG, "   INIT: %u.%u\n", outarg.major, outarg.minor);
     fuse_log(FUSE_LOG_DEBUG, "   flags=0x%08x\n", outarg.flags);
     fuse_log(FUSE_LOG_DEBUG, "   max_readahead=0x%08x\n", outarg.max_readahead);
@@ -2151,104 +2150,6 @@ static void do_destroy(fuse_req_t req, fuse_ino_t nodeid,
     }
 
     send_reply_ok(req, NULL, 0);
-}
-
-static int send_notify_iov(struct fuse_session *se, int notify_code,
-                           struct iovec *iov, int count)
-{
-    struct fuse_out_header out = {
-        .error = notify_code,
-    };
-
-    if (!se->got_init) {
-        return -ENOTCONN;
-    }
-
-    iov[0].iov_base = &out;
-    iov[0].iov_len = sizeof(struct fuse_out_header);
-
-    return fuse_send_msg(se, NULL, iov, count);
-}
-
-int fuse_lowlevel_notify_poll(struct fuse_pollhandle *ph)
-{
-    if (ph != NULL) {
-        struct fuse_notify_poll_wakeup_out outarg = {
-            .kh = ph->kh,
-        };
-        struct iovec iov[2];
-
-        iov[1].iov_base = &outarg;
-        iov[1].iov_len = sizeof(outarg);
-
-        return send_notify_iov(ph->se, FUSE_NOTIFY_POLL, iov, 2);
-    } else {
-        return 0;
-    }
-}
-
-int fuse_lowlevel_notify_inval_inode(struct fuse_session *se, fuse_ino_t ino,
-                                     off_t off, off_t len)
-{
-    struct fuse_notify_inval_inode_out outarg = {
-        .ino = ino,
-        .off = off,
-        .len = len,
-    };
-    struct iovec iov[2];
-
-    if (!se) {
-        return -EINVAL;
-    }
-
-    iov[1].iov_base = &outarg;
-    iov[1].iov_len = sizeof(outarg);
-
-    return send_notify_iov(se, FUSE_NOTIFY_INVAL_INODE, iov, 2);
-}
-
-int fuse_lowlevel_notify_inval_entry(struct fuse_session *se, fuse_ino_t parent,
-                                     const char *name, size_t namelen)
-{
-    struct fuse_notify_inval_entry_out outarg = {
-        .parent = parent,
-        .namelen = namelen,
-    };
-    struct iovec iov[3];
-
-    if (!se) {
-        return -EINVAL;
-    }
-
-    iov[1].iov_base = &outarg;
-    iov[1].iov_len = sizeof(outarg);
-    iov[2].iov_base = (void *)name;
-    iov[2].iov_len = namelen + 1;
-
-    return send_notify_iov(se, FUSE_NOTIFY_INVAL_ENTRY, iov, 3);
-}
-
-int fuse_lowlevel_notify_delete(struct fuse_session *se, fuse_ino_t parent,
-                                fuse_ino_t child, const char *name,
-                                size_t namelen)
-{
-    struct fuse_notify_delete_out outarg = {
-        .parent = parent,
-        .child = child,
-        .namelen = namelen,
-    };
-    struct iovec iov[3];
-
-    if (!se) {
-        return -EINVAL;
-    }
-
-    iov[1].iov_base = &outarg;
-    iov[1].iov_len = sizeof(outarg);
-    iov[2].iov_base = (void *)name;
-    iov[2].iov_len = namelen + 1;
-
-    return send_notify_iov(se, FUSE_NOTIFY_DELETE, iov, 3);
 }
 
 int fuse_lowlevel_notify_store(struct fuse_session *se, fuse_ino_t ino,
@@ -2549,6 +2450,7 @@ void fuse_lowlevel_help(void)
     printf(
         "    -o allow_root              allow access by root\n"
         "    --socket-path=PATH         path for the vhost-user socket\n"
+        "    --socket-group=GRNAME      name of group for the vhost-user socket\n"
         "    --fd=FDNUM                 fd number of vhost-user socket\n"
         "    --thread-pool-size=NUM     thread pool size limit (default %d)\n",
         THREAD_POOL_SIZE);

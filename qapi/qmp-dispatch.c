@@ -14,14 +14,35 @@
 #include "qemu/osdep.h"
 
 #include "block/aio.h"
+#include "qapi/compat-policy.h"
 #include "qapi/error.h"
 #include "qapi/qmp/dispatch.h"
 #include "qapi/qmp/qdict.h"
 #include "qapi/qmp/qjson.h"
+#include "qapi/qobject-input-visitor.h"
+#include "qapi/qobject-output-visitor.h"
 #include "sysemu/runstate.h"
 #include "qapi/qmp/qbool.h"
 #include "qemu/coroutine.h"
 #include "qemu/main-loop.h"
+
+CompatPolicy compat_policy;
+
+Visitor *qobject_input_visitor_new_qmp(QObject *obj)
+{
+    Visitor *v = qobject_input_visitor_new(obj);
+
+    qobject_input_visitor_set_policy(v, compat_policy.deprecated_input);
+    return v;
+}
+
+Visitor *qobject_output_visitor_new_qmp(QObject **result)
+{
+    Visitor *v = qobject_output_visitor_new(result);
+
+    qobject_output_visitor_set_policy(v, compat_policy.deprecated_output);
+    return v;
+}
 
 static QDict *qmp_dispatch_check_obj(QDict *dict, bool allow_oob,
                                      Error **errp)
@@ -155,10 +176,26 @@ QDict *qmp_dispatch(const QmpCommandList *cmds, QObject *request,
                   "The command %s has not been found", command);
         goto out;
     }
+    if (cmd->options & QCO_DEPRECATED) {
+        switch (compat_policy.deprecated_input) {
+        case COMPAT_POLICY_INPUT_ACCEPT:
+            break;
+        case COMPAT_POLICY_INPUT_REJECT:
+            error_set(&err, ERROR_CLASS_COMMAND_NOT_FOUND,
+                      "Deprecated command %s disabled by policy",
+                      command);
+            goto out;
+        case COMPAT_POLICY_INPUT_CRASH:
+        default:
+            abort();
+        }
+    }
     if (!cmd->enabled) {
         error_set(&err, ERROR_CLASS_COMMAND_NOT_FOUND,
-                  "The command %s has been disabled for this instance",
-                  command);
+                  "Command %s has been disabled%s%s",
+                  command,
+                  cmd->disable_reason ? ": " : "",
+                  cmd->disable_reason ?: "");
         goto out;
     }
     if (oob && !(cmd->options & QCO_ALLOW_OOB)) {
@@ -167,10 +204,7 @@ QDict *qmp_dispatch(const QmpCommandList *cmds, QObject *request,
         goto out;
     }
 
-    if (runstate_check(RUN_STATE_PRECONFIG) &&
-        !(cmd->options & QCO_ALLOW_PRECONFIG)) {
-        error_setg(&err, "The command '%s' isn't permitted in '%s' state",
-                   cmd->name, RunState_str(RUN_STATE_PRECONFIG));
+    if (!qmp_command_available(cmd, &err)) {
         goto out;
     }
 

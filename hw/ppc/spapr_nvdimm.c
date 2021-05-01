@@ -27,10 +27,8 @@
 #include "hw/ppc/spapr_nvdimm.h"
 #include "hw/mem/nvdimm.h"
 #include "qemu/nvdimm-utils.h"
-#include "qemu/option.h"
 #include "hw/ppc/fdt.h"
 #include "qemu/range.h"
-#include "sysemu/sysemu.h"
 #include "hw/ppc/spapr_numa.h"
 
 bool spapr_nvdimm_validate(HotplugHandler *hotplug_dev, NVDIMMDevice *nvdimm,
@@ -38,7 +36,6 @@ bool spapr_nvdimm_validate(HotplugHandler *hotplug_dev, NVDIMMDevice *nvdimm,
 {
     const MachineClass *mc = MACHINE_GET_CLASS(hotplug_dev);
     const MachineState *ms = MACHINE(hotplug_dev);
-    const char *nvdimm_opt = qemu_opt_get(qemu_get_machine_opts(), "nvdimm");
     g_autofree char *uuidstr = NULL;
     QemuUUID uuid;
     int ret;
@@ -48,16 +45,7 @@ bool spapr_nvdimm_validate(HotplugHandler *hotplug_dev, NVDIMMDevice *nvdimm,
         return false;
     }
 
-    /*
-     * NVDIMM support went live in 5.1 without considering that, in
-     * other archs, the user needs to enable NVDIMM support with the
-     * 'nvdimm' machine option and the default behavior is NVDIMM
-     * support disabled. It is too late to roll back to the standard
-     * behavior without breaking 5.1 guests. What we can do is to
-     * ensure that, if the user sets nvdimm=off, we error out
-     * regardless of being 5.1 or newer.
-     */
-    if (!ms->nvdimms_state->is_enabled && nvdimm_opt) {
+    if (!ms->nvdimms_state->is_enabled) {
         error_setg(errp, "nvdimm device found but 'nvdimm=off' was set");
         return false;
     }
@@ -89,7 +77,7 @@ bool spapr_nvdimm_validate(HotplugHandler *hotplug_dev, NVDIMMDevice *nvdimm,
 }
 
 
-bool spapr_add_nvdimm(DeviceState *dev, uint64_t slot, Error **errp)
+void spapr_add_nvdimm(DeviceState *dev, uint64_t slot)
 {
     SpaprDrc *drc;
     bool hotplugged = spapr_drc_hotplugged(dev);
@@ -97,14 +85,15 @@ bool spapr_add_nvdimm(DeviceState *dev, uint64_t slot, Error **errp)
     drc = spapr_drc_by_id(TYPE_SPAPR_DRC_PMEM, slot);
     g_assert(drc);
 
-    if (!spapr_drc_attach(drc, dev, errp)) {
-        return false;
-    }
+    /*
+     * pc_dimm_get_free_slot() provided a free slot at pre-plug. The
+     * corresponding DRC is thus assumed to be attachable.
+     */
+    spapr_drc_attach(drc, dev);
 
     if (hotplugged) {
         spapr_hotplug_req_add_by_index(drc);
     }
-    return true;
 }
 
 static int spapr_dt_nvdimm(SpaprMachineState *spapr, void *fdt,

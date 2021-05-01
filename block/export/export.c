@@ -17,6 +17,7 @@
 #include "sysemu/block-backend.h"
 #include "sysemu/iothread.h"
 #include "block/export.h"
+#include "block/fuse.h"
 #include "block/nbd.h"
 #include "qapi/error.h"
 #include "qapi/qapi-commands-block-export.h"
@@ -30,6 +31,9 @@ static const BlockExportDriver *blk_exp_drivers[] = {
     &blk_exp_nbd,
 #ifdef CONFIG_VHOST_USER_BLK_SERVER
     &blk_exp_vhost_user_blk,
+#endif
+#ifdef CONFIG_FUSE
+    &blk_exp_fuse,
 #endif
 };
 
@@ -338,11 +342,10 @@ void qmp_block_export_del(const char *id,
 
 BlockExportInfoList *qmp_query_block_exports(Error **errp)
 {
-    BlockExportInfoList *head = NULL, **p_next = &head;
+    BlockExportInfoList *head = NULL, **tail = &head;
     BlockExport *exp;
 
     QLIST_FOREACH(exp, &block_exports, next) {
-        BlockExportInfoList *entry = g_new0(BlockExportInfoList, 1);
         BlockExportInfo *info = g_new(BlockExportInfo, 1);
         *info = (BlockExportInfo) {
             .id             = g_strdup(exp->id),
@@ -351,9 +354,7 @@ BlockExportInfoList *qmp_query_block_exports(Error **errp)
             .shutting_down  = !exp->user_owned,
         };
 
-        entry->value = info;
-        *p_next = entry;
-        p_next = &entry->next;
+        QAPI_LIST_APPEND(tail, info);
     }
 
     return head;

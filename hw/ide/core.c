@@ -2537,7 +2537,7 @@ int ide_init_drive(IDEState *s, BlockBackend *blk, IDEDriveKind kind,
             error_setg(errp, "Device needs media, but drive is empty");
             return -1;
         }
-        if (blk_is_read_only(blk)) {
+        if (!blk_is_writable(blk)) {
             error_setg(errp, "Can't use a read-only drive");
             return -1;
         }
@@ -2677,7 +2677,7 @@ static void ide_restart_bh(void *opaque)
     }
 }
 
-static void ide_restart_cb(void *opaque, int running, RunState state)
+static void ide_restart_cb(void *opaque, bool running, RunState state)
 {
     IDEBus *bus = opaque;
 
@@ -2716,7 +2716,6 @@ void ide_init2(IDEBus *bus, qemu_irq irq)
 
 void ide_exit(IDEState *s)
 {
-    timer_del(s->sector_write_timer);
     timer_free(s->sector_write_timer);
     qemu_vfree(s->smart_selftest_data);
     qemu_vfree(s->io_buffer);

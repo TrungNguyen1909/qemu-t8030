@@ -42,8 +42,6 @@ typedef uintptr_t ram_addr_t;
 #  define RAM_ADDR_FMT "%" PRIxPTR
 #endif
 
-extern ram_addr_t ram_size;
-
 /* memory API */
 
 void qemu_ram_remap(ram_addr_t addr, ram_addr_t length);
@@ -106,5 +104,8 @@ int qemu_ram_foreach_block(RAMBlockIterFunc func, void *opaque);
 int ram_block_discard_range(RAMBlock *rb, uint64_t start, size_t length);
 
 #endif
+
+/* vl.c */
+extern int singlestep;
 
 #endif /* CPU_COMMON_H */

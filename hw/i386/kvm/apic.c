@@ -17,7 +17,7 @@
 #include "hw/pci/msi.h"
 #include "sysemu/hw_accel.h"
 #include "sysemu/kvm.h"
-#include "target/i386/kvm_i386.h"
+#include "kvm/kvm_i386.h"
 
 static inline void kvm_apic_set_reg(struct kvm_lapic_state *kapic,
                                     int reg_id, uint32_t val)
@@ -182,6 +182,13 @@ static void kvm_apic_external_nmi(APICCommonState *s)
 static void kvm_send_msi(MSIMessage *msg)
 {
     int ret;
+
+    /*
+     * The message has already passed through interrupt remapping if enabled,
+     * but the legacy extended destination ID in low bits still needs to be
+     * handled.
+     */
+    msg->address = kvm_swizzle_msi_ext_dest_id(msg->address);
 
     ret = kvm_irqchip_send_msi(kvm_state, *msg);
     if (ret < 0) {

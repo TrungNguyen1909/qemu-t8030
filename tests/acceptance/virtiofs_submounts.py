@@ -5,13 +5,9 @@ import subprocess
 import time
 
 from avocado import skipUnless
-from avocado_qemu import Test, BUILD_DIR
+from avocado_qemu import LinuxTest, BUILD_DIR
 from avocado_qemu import wait_for_console_pattern
 from avocado.utils import ssh
-
-from qemu.accel import kvm_available
-
-from boot_linux import BootLinux
 
 
 def run_cmd(args):
@@ -71,7 +67,7 @@ def has_cmds(*cmds):
     return (True, '')
 
 
-class VirtiofsSubmountsTest(BootLinux):
+class VirtiofsSubmountsTest(LinuxTest):
     """
     :avocado: tags=arch:x86_64
     """
@@ -83,20 +79,21 @@ class VirtiofsSubmountsTest(BootLinux):
                               command_line='info usernet')
         for line in res.split('\r\n'):
             match = \
-                re.search(r'TCP.HOST_FORWARD.*127\.0\.0\.1\s*(\d+)\s+10\.',
+                re.search(r'TCP.HOST_FORWARD.*127\.0\.0\.1\s+(\d+)\s+10\.',
                           line)
             if match is not None:
-                port = match[1]
+                port = int(match[1])
                 break
 
         self.assertIsNotNone(port)
-        self.log.debug('sshd listening on port: ' + port)
+        self.assertGreater(port, 0)
+        self.log.debug('sshd listening on port: %d', port)
         return port
 
     def ssh_connect(self, username, keyfile):
         self.ssh_logger = logging.getLogger('ssh')
         port = self.get_portfwd()
-        self.ssh_session = ssh.Session('127.0.0.1', port=int(port),
+        self.ssh_session = ssh.Session('127.0.0.1', port=port,
                                        user=username, key=keyfile)
         for i in range(10):
             try:
@@ -105,7 +102,7 @@ class VirtiofsSubmountsTest(BootLinux):
             except:
                 time.sleep(4)
                 pass
-        self.fail('sshd timeout')
+        self.fail('ssh connection timeout')
 
     def ssh_command(self, command):
         self.ssh_logger.info(command)
@@ -136,8 +133,7 @@ class VirtiofsSubmountsTest(BootLinux):
         return (stdout, stderr, ret)
 
     def set_up_shared_dir(self):
-        atwd = os.getenv('AVOCADO_TEST_WORKDIR')
-        self.shared_dir = os.path.join(atwd, 'virtiofs-shared')
+        self.shared_dir = os.path.join(self.workdir, 'virtiofs-shared')
 
         os.mkdir(self.shared_dir)
 
@@ -228,16 +224,27 @@ class VirtiofsSubmountsTest(BootLinux):
     def setUp(self):
         vmlinuz = self.params.get('vmlinuz')
         if vmlinuz is None:
+            """
+            The Linux kernel supports FUSE auto-submounts only as of 5.10.
+            boot_linux.py currently provides Fedora 31, whose kernel is too
+            old, so this test cannot pass with the on-image kernel (you are
+            welcome to try, hence the option to force such a test with
+            -p vmlinuz='').  Therefore, for now the user must provide a
+            sufficiently new custom kernel, or effectively explicitly
+            request failure with -p vmlinuz=''.
+            Once an image with a sufficiently new kernel is available
+            (probably Fedora 34), we can make -p vmlinuz='' the default, so
+            that this parameter no longer needs to be specified.
+            """
             self.cancel('vmlinuz parameter not set; you must point it to a '
                         'Linux kernel binary to test (to run this test with ' \
                         'the on-image kernel, set it to an empty string)')
 
         self.seed = self.params.get('seed')
 
-        atwd = os.getenv('AVOCADO_TEST_WORKDIR')
-        self.ssh_key = os.path.join(atwd, 'id_ed25519')
+        self.ssh_key = os.path.join(self.workdir, 'id_ed25519')
 
-        self.run(('ssh-keygen', '-t', 'ed25519', '-f', self.ssh_key))
+        self.run(('ssh-keygen', '-N', '', '-t', 'ed25519', '-f', self.ssh_key))
 
         pubkey = open(self.ssh_key + '.pub').read()
 
@@ -249,10 +256,9 @@ class VirtiofsSubmountsTest(BootLinux):
 
         # Allow us to connect to SSH
         self.vm.add_args('-netdev', 'user,id=vnet,hostfwd=:127.0.0.1:0-:22',
-                         '-device', 'e1000,netdev=vnet')
+                         '-device', 'virtio-net,netdev=vnet')
 
-        if not kvm_available(self.arch, self.qemu_bin):
-            self.cancel(KVM_NOT_AVAILABLE)
+        self.require_accelerator("kvm")
         self.vm.add_args('-accel', 'kvm')
 
     def tearDown(self):

@@ -212,6 +212,11 @@ static int spapr_tce_notify_flag_changed(IOMMUMemoryRegion *iommu,
 {
     struct SpaprTceTable *tbl = container_of(iommu, SpaprTceTable, iommu);
 
+    if (new & IOMMU_NOTIFIER_DEVIOTLB_UNMAP) {
+        error_setg(errp, "spart_tce does not support dev-iotlb yet");
+        return -EINVAL;
+    }
+
     if (old == IOMMU_NOTIFIER_NONE && new != IOMMU_NOTIFIER_NONE) {
         spapr_tce_set_need_vfio(tbl, true);
     } else if (old != IOMMU_NOTIFIER_NONE && new == IOMMU_NOTIFIER_NONE) {
@@ -445,7 +450,7 @@ static void spapr_tce_reset(DeviceState *dev)
 static target_ulong put_tce_emu(SpaprTceTable *tcet, target_ulong ioba,
                                 target_ulong tce)
 {
-    IOMMUTLBEntry entry;
+    IOMMUTLBEvent event;
     hwaddr page_mask = IOMMU_PAGE_MASK(tcet->page_shift);
     unsigned long index = (ioba - tcet->bus_offset) >> tcet->page_shift;
 
@@ -457,12 +462,13 @@ static target_ulong put_tce_emu(SpaprTceTable *tcet, target_ulong ioba,
 
     tcet->table[index] = tce;
 
-    entry.target_as = &address_space_memory,
-    entry.iova = (ioba - tcet->bus_offset) & page_mask;
-    entry.translated_addr = tce & page_mask;
-    entry.addr_mask = ~page_mask;
-    entry.perm = spapr_tce_iommu_access_flags(tce);
-    memory_region_notify_iommu(&tcet->iommu, 0, entry);
+    event.entry.target_as = &address_space_memory,
+    event.entry.iova = (ioba - tcet->bus_offset) & page_mask;
+    event.entry.translated_addr = tce & page_mask;
+    event.entry.addr_mask = ~page_mask;
+    event.entry.perm = spapr_tce_iommu_access_flags(tce);
+    event.type = event.entry.perm ? IOMMU_NOTIFIER_MAP : IOMMU_NOTIFIER_UNMAP;
+    memory_region_notify_iommu(&tcet->iommu, 0, event);
 
     return H_SUCCESS;
 }

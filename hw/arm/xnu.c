@@ -546,7 +546,7 @@ void macho_map_raw_file(const char *filename, AddressSpace *as, MemoryRegion *me
     mr = g_new(MemoryRegion, 1);
     *size = file_info.st_size;
 
-    memory_region_init_ram_from_file(mr, NULL, name, *size & (~0xffffUL), 0, 0, filename, &err);
+    memory_region_init_ram_from_file(mr, NULL, name, *size & (~0xffffUL), 0, 0, filename, false, &err);
     if (err) {
         error_report_err(err);
         fprintf(stderr, "Couldn't mmap file. Loading into RAM.\n");

@@ -13,11 +13,21 @@
 #ifndef GENERIC_FUZZ_CONFIGS_H
 #define GENERIC_FUZZ_CONFIGS_H
 
-#include "qemu/osdep.h"
 
 typedef struct generic_fuzz_config {
     const char *name, *args, *objects;
+    gchar* (*argfunc)(void); /* Result must be freeable by g_free() */
 } generic_fuzz_config;
+
+static inline gchar *generic_fuzzer_virtio_9p_args(void){
+    char tmpdir[] = "/tmp/qemu-fuzz.XXXXXX";
+    g_assert_nonnull(mkdtemp(tmpdir));
+
+    return g_strdup_printf("-machine q35 -nodefaults "
+    "-device virtio-9p,fsdev=hshare,mount_tag=hshare "
+    "-fsdev local,id=hshare,path=%s,security_model=mapped-xattr,"
+    "writeout=immediate,fmode=0600,dmode=0700", tmpdir);
+}
 
 const generic_fuzz_config predefined_configs[] = {
     {
@@ -61,6 +71,16 @@ const generic_fuzz_config predefined_configs[] = {
         .args = "-machine q35 -nodefaults -device virtio-mouse",
         .objects = "virtio*",
     },{
+        .name = "virtio-9p",
+        .argfunc = generic_fuzzer_virtio_9p_args,
+        .objects = "virtio*",
+    },{
+        .name = "virtio-9p-synth",
+        .args = "-machine q35 -nodefaults "
+        "-device virtio-9p,fsdev=hshare,mount_tag=hshare "
+        "-fsdev synth,id=hshare",
+        .objects = "virtio*",
+    },{
         .name = "e1000",
         .args = "-M q35 -nodefaults "
         "-device e1000,netdev=net0 -netdev user,id=net0",
@@ -86,16 +106,34 @@ const generic_fuzz_config predefined_configs[] = {
         .objects = "intel-hda",
     },{
         .name = "ide-hd",
+        .args = "-machine pc -nodefaults "
+        "-drive file=null-co://,if=none,format=raw,id=disk0 "
+        "-device ide-hd,drive=disk0",
+        .objects = "*ide*",
+    },{
+        .name = "ide-atapi",
+        .args = "-machine pc -nodefaults "
+        "-drive file=null-co://,if=none,format=raw,id=disk0 "
+        "-device ide-cd,drive=disk0",
+        .objects = "*ide*",
+    },{
+        .name = "ahci-hd",
         .args = "-machine q35 -nodefaults "
         "-drive file=null-co://,if=none,format=raw,id=disk0 "
         "-device ide-hd,drive=disk0",
-        .objects = "ahci*",
+        .objects = "*ahci*",
+    },{
+        .name = "ahci-atapi",
+        .args = "-machine q35 -nodefaults "
+        "-drive file=null-co://,if=none,format=raw,id=disk0 "
+        "-device ide-cd,drive=disk0",
+        .objects = "*ahci*",
     },{
         .name = "floppy",
         .args = "-machine pc -nodefaults -device floppy,id=floppy0 "
-        "-drive id=disk0,file=null-co://,file.read-zeroes=on,if=none "
+        "-drive id=disk0,file=null-co://,file.read-zeroes=on,if=none,format=raw "
         "-device floppy,drive=disk0,drive-type=288",
-        .objects = "fd* floppy*",
+        .objects = "fd* floppy* i8257",
     },{
         .name = "xhci",
         .args = "-machine q35 -nodefaults "
@@ -115,6 +153,92 @@ const generic_fuzz_config predefined_configs[] = {
         .name = "pc-q35",
         .args = "-machine q35",
         .objects = "*",
+    },{
+        .name = "vmxnet3",
+        .args = "-machine q35 -nodefaults "
+        "-device vmxnet3,netdev=net0 -netdev user,id=net0",
+        .objects = "vmxnet3"
+    },{
+        .name = "ne2k_pci",
+        .args = "-machine q35 -nodefaults "
+        "-device ne2k_pci,netdev=net0 -netdev user,id=net0",
+        .objects = "ne2k*"
+    },{
+        .name = "pcnet",
+        .args = "-machine q35 -nodefaults "
+        "-device pcnet,netdev=net0 -netdev user,id=net0",
+        .objects = "pcnet"
+    },{
+        .name = "rtl8139",
+        .args = "-machine q35 -nodefaults "
+        "-device rtl8139,netdev=net0 -netdev user,id=net0",
+        .objects = "rtl8139"
+    },{
+        .name = "i82550",
+        .args = "-machine q35 -nodefaults "
+        "-device i82550,netdev=net0 -netdev user,id=net0",
+        .objects = "i8255*"
+    },{
+        .name = "sdhci-v3",
+        .args = "-nodefaults -device sdhci-pci,sd-spec-version=3 "
+        "-device sd-card,drive=mydrive "
+        "-drive if=none,index=0,file=null-co://,format=raw,id=mydrive -nographic",
+        .objects = "sd*"
+    },{
+        .name = "ehci",
+        .args = "-machine q35 -nodefaults "
+        "-device ich9-usb-ehci1,bus=pcie.0,addr=1d.7,"
+        "multifunction=on,id=ich9-ehci-1 "
+        "-device ich9-usb-uhci1,bus=pcie.0,addr=1d.0,"
+        "multifunction=on,masterbus=ich9-ehci-1.0,firstport=0 "
+        "-device ich9-usb-uhci2,bus=pcie.0,addr=1d.1,"
+        "multifunction=on,masterbus=ich9-ehci-1.0,firstport=2 "
+        "-device ich9-usb-uhci3,bus=pcie.0,addr=1d.2,"
+        "multifunction=on,masterbus=ich9-ehci-1.0,firstport=4 "
+        "-drive if=none,id=usbcdrom,media=cdrom "
+        "-device usb-tablet,bus=ich9-ehci-1.0,port=1,usb_version=1 "
+        "-device usb-storage,bus=ich9-ehci-1.0,port=2,drive=usbcdrom",
+        .objects = "*usb* *hci*",
+    },{
+        .name = "ohci",
+        .args = "-machine q35 -nodefaults  -device pci-ohci -device usb-kbd",
+        .objects = "*usb* *ohci*",
+    },{
+        .name = "megaraid",
+        .args = "-machine q35 -nodefaults -device megasas -device scsi-cd,drive=null0 "
+        "-blockdev driver=null-co,read-zeroes=on,node-name=null0",
+        .objects = "megasas*",
+    },{
+        .name = "am53c974",
+        .args = "-device am53c974,id=scsi -device scsi-hd,drive=disk0 "
+                 "-drive id=disk0,if=none,file=null-co://,format=raw "
+                 "-nodefaults",
+        .objects = "*esp* *scsi* *am53c974*",
+    },{
+        .name = "ac97",
+        .args = "-machine q35 -nodefaults "
+        "-device ac97,audiodev=snd0 -audiodev none,id=snd0 -nodefaults",
+        .objects = "ac97*",
+    },{
+        .name = "cs4231a",
+        .args = "-machine q35 -nodefaults "
+        "-device cs4231a,audiodev=snd0 -audiodev none,id=snd0 -nodefaults",
+        .objects = "cs4231a* i8257*",
+    },{
+        .name = "es1370",
+        .args = "-machine q35 -nodefaults "
+        "-device es1370,audiodev=snd0 -audiodev none,id=snd0 -nodefaults",
+        .objects = "es1370*",
+    },{
+        .name = "sb16",
+        .args = "-machine q35 -nodefaults "
+        "-device sb16,audiodev=snd0 -audiodev none,id=snd0 -nodefaults",
+        .objects = "sb16* i8257*",
+    },{
+        .name = "parallel",
+        .args = "-machine q35 -nodefaults "
+        "-parallel file:/dev/null",
+        .objects = "parallel*",
     }
 };
 

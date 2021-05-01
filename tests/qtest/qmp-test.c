@@ -252,7 +252,7 @@ static void test_qmp_oob(void)
      * Try any command that does not support OOB but with OOB flag. We
      * should get failure.
      */
-    resp = qtest_qmp(qts, "{ 'exec-oob': 'query-cpus' }");
+    resp = qtest_qmp(qts, "{ 'exec-oob': 'query-cpus-fast' }");
     g_assert(qdict_haskey(resp, "error"));
     qobject_unref(resp);
 
@@ -289,13 +289,13 @@ static void test_qmp_preconfig(void)
     g_assert(!qmp_rsp_is_err(qtest_qmp(qs, "{ 'execute': 'query-commands' }")));
 
     /* forbidden commands, expected error */
-    g_assert(qmp_rsp_is_err(qtest_qmp(qs, "{ 'execute': 'query-cpus' }")));
+    g_assert(qmp_rsp_is_err(qtest_qmp(qs, "{ 'execute': 'query-cpus-fast' }")));
 
     /* check that query-status returns preconfig state */
     rsp = qtest_qmp(qs, "{ 'execute': 'query-status' }");
     ret = qdict_get_qdict(rsp, "return");
     g_assert(ret);
-    g_assert_cmpstr(qdict_get_try_str(ret, "status"), ==, "preconfig");
+    g_assert_cmpstr(qdict_get_try_str(ret, "status"), ==, "prelaunch");
     qobject_unref(rsp);
 
     /* exit preconfig state */
@@ -313,7 +313,7 @@ static void test_qmp_preconfig(void)
     g_assert(qmp_rsp_is_err(qtest_qmp(qs, "{ 'execute': 'x-exit-preconfig' }")));
 
     /* enabled commands, no error expected  */
-    g_assert(!qmp_rsp_is_err(qtest_qmp(qs, "{ 'execute': 'query-cpus' }")));
+    g_assert(!qmp_rsp_is_err(qtest_qmp(qs, "{ 'execute': 'query-cpus-fast' }")));
 
     qtest_quit(qs);
 }

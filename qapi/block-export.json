@@ -54,7 +54,7 @@
 #
 # Returns: error if the server is already running.
 #
-# Since: 1.3.0
+# Since: 1.3
 ##
 { 'command': 'nbd-server-start',
   'data': { 'addr': 'SocketAddressLegacy',
@@ -121,6 +121,25 @@
             '*num-queues': 'uint16'} }
 
 ##
+# @BlockExportOptionsFuse:
+#
+# Options for exporting a block graph node on some (file) mountpoint
+# as a raw image.
+#
+# @mountpoint: Path on which to export the block device via FUSE.
+#              This must point to an existing regular file.
+#
+# @growable: Whether writes beyond the EOF should grow the block node
+#            accordingly. (default: false)
+#
+# Since: 6.0
+##
+{ 'struct': 'BlockExportOptionsFuse',
+  'data': { 'mountpoint': 'str',
+            '*growable': 'bool' },
+  'if': 'defined(CONFIG_FUSE)' }
+
+##
 # @NbdServerAddOptions:
 #
 # An NBD block export, per legacy nbd-server-add command.
@@ -155,7 +174,7 @@
 # Returns: error if the server is not running, or export with the same name
 #          already exists.
 #
-# Since: 1.3.0
+# Since: 1.3
 ##
 { 'command': 'nbd-server-add',
   'data': 'NbdServerAddOptions', 'boxed': true, 'features': ['deprecated'] }
@@ -211,7 +230,7 @@
 # Stop QEMU's embedded NBD server, and unregister all devices previously
 # added via @nbd-server-add.
 #
-# Since: 1.3.0
+# Since: 1.3
 ##
 { 'command': 'nbd-server-stop' }
 
@@ -222,11 +241,13 @@
 #
 # @nbd: NBD export
 # @vhost-user-blk: vhost-user-blk export (since 5.2)
+# @fuse: FUSE export (since: 6.0)
 #
 # Since: 4.2
 ##
 { 'enum': 'BlockExportType',
-  'data': [ 'nbd', 'vhost-user-blk' ] }
+  'data': [ 'nbd', 'vhost-user-blk',
+            { 'name': 'fuse', 'if': 'defined(CONFIG_FUSE)' } ] }
 
 ##
 # @BlockExportOptions:
@@ -267,7 +288,9 @@
   'discriminator': 'type',
   'data': {
       'nbd': 'BlockExportOptionsNbd',
-      'vhost-user-blk': 'BlockExportOptionsVhostUserBlk'
+      'vhost-user-blk': 'BlockExportOptionsVhostUserBlk',
+      'fuse': { 'type': 'BlockExportOptionsFuse',
+                'if': 'defined(CONFIG_FUSE)' }
    } }
 
 ##

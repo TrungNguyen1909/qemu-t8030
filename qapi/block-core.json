@@ -302,7 +302,7 @@
 # @ro: true if the backing device was open read-only
 #
 # @drv: the name of the block format used to open the backing device. As of
-#       0.14.0 this can be: 'blkdebug', 'bochs', 'cloop', 'cow', 'dmg',
+#       0.14 this can be: 'blkdebug', 'bochs', 'cloop', 'cow', 'dmg',
 #       'file', 'file', 'ftp', 'ftps', 'host_cdrom', 'host_device',
 #       'http', 'https', 'luks', 'nbd', 'parallels', 'qcow',
 #       'qcow2', 'raw', 'vdi', 'vmdk', 'vpc', 'vvfat'
@@ -318,8 +318,6 @@
 # @backing_file_depth: number of files in the backing file chain (since: 1.2)
 #
 # @encrypted: true if the backing device is encrypted
-#
-# @encryption_key_missing: always false
 #
 # @detect_zeroes: detect and optimize zero writes (Since 2.1)
 #
@@ -385,19 +383,13 @@
 # @dirty-bitmaps: dirty bitmaps information (only present if node
 #                 has one or more dirty bitmaps) (Since 4.2)
 #
-# Features:
-# @deprecated: Member @encryption_key_missing is deprecated.  It is
-#              always false.
-#
-# Since: 0.14.0
+# Since: 0.14
 #
 ##
 { 'struct': 'BlockDeviceInfo',
   'data': { 'file': 'str', '*node-name': 'str', 'ro': 'bool', 'drv': 'str',
             '*backing_file': 'str', 'backing_file_depth': 'int',
             'encrypted': 'bool',
-            'encryption_key_missing': { 'type': 'bool',
-                                        'features': [ 'deprecated' ] },
             'detect_zeroes': 'BlockdevDetectZeroesOptions',
             'bps': 'int', 'bps_rd': 'int', 'bps_wr': 'int',
             'iops': 'int', 'iops_rd': 'int', 'iops_wr': 'int',
@@ -427,43 +419,6 @@
 { 'enum': 'BlockDeviceIoStatus', 'data': [ 'ok', 'failed', 'nospace' ] }
 
 ##
-# @DirtyBitmapStatus:
-#
-# An enumeration of possible states that a dirty bitmap can report to the user.
-#
-# @frozen: The bitmap is currently in-use by some operation and is immutable.
-#          If the bitmap was @active prior to the operation, new writes by the
-#          guest are being recorded in a temporary buffer, and will not be lost.
-#          Generally, bitmaps are cleared on successful use in an operation and
-#          the temporary buffer is committed into the bitmap. On failure, the
-#          temporary buffer is merged back into the bitmap without first
-#          clearing it.
-#          Please refer to the documentation for each bitmap-using operation,
-#          See also @blockdev-backup, @drive-backup.
-#
-# @disabled: The bitmap is not currently recording new writes by the guest.
-#            This is requested explicitly via @block-dirty-bitmap-disable.
-#            It can still be cleared, deleted, or used for backup operations.
-#
-# @active: The bitmap is actively monitoring for new writes, and can be cleared,
-#          deleted, or used for backup operations.
-#
-# @locked: The bitmap is currently in-use by some operation and is immutable.
-#          If the bitmap was @active prior to the operation, it is still
-#          recording new writes. If the bitmap was @disabled, it is not
-#          recording new writes. (Since 2.12)
-#
-# @inconsistent: This is a persistent dirty bitmap that was marked in-use on
-#                disk, and is unusable by QEMU. It can only be deleted.
-#                Please rely on the inconsistent field in @BlockDirtyInfo
-#                instead, as the status field is deprecated. (Since 4.0)
-#
-# Since: 2.4
-##
-{ 'enum': 'DirtyBitmapStatus',
-  'data': ['active', 'disabled', 'frozen', 'locked', 'inconsistent'] }
-
-##
 # @BlockDirtyInfo:
 #
 # Block dirty bitmap information.
@@ -473,8 +428,6 @@
 # @count: number of dirty bytes according to the dirty bitmap
 #
 # @granularity: granularity of the dirty bitmap in bytes (since 1.4)
-#
-# @status: current status of the dirty bitmap (since 2.4)
 #
 # @recording: true if the bitmap is recording new writes from the guest.
 #             Replaces `active` and `disabled` statuses. (since 4.0)
@@ -491,17 +444,11 @@
 #                @busy to be false. This bitmap cannot be used. To remove
 #                it, use @block-dirty-bitmap-remove. (Since 4.0)
 #
-# Features:
-# @deprecated: Member @status is deprecated.  Use @recording and
-#              @locked instead.
-#
 # Since: 1.3
 ##
 { 'struct': 'BlockDirtyInfo',
   'data': {'*name': 'str', 'count': 'int', 'granularity': 'uint32',
            'recording': 'bool', 'busy': 'bool',
-           'status': { 'type': 'DirtyBitmapStatus',
-                       'features': [ 'deprecated' ] },
            'persistent': 'bool', '*inconsistent': 'bool' } }
 
 ##
@@ -592,9 +539,6 @@
 # @tray_open: True if the device's tray is open
 #             (only present if it has a tray)
 #
-# @dirty-bitmaps: dirty bitmaps information (only present if the
-#                 driver has one or more dirty bitmaps) (Since 2.0)
-#
 # @io-status: @BlockDeviceIoStatus. Only present if the device
 #             supports it and the VM is configured to stop on errors
 #             (supported device models: virtio-blk, IDE, SCSI except
@@ -603,18 +547,12 @@
 # @inserted: @BlockDeviceInfo describing the device if media is
 #            present
 #
-# Features:
-# @deprecated: Member @dirty-bitmaps is deprecated.  Use @inserted
-#              member @dirty-bitmaps instead.
-#
-# Since:  0.14.0
+# Since:  0.14
 ##
 { 'struct': 'BlockInfo',
   'data': {'device': 'str', '*qdev': 'str', 'type': 'str', 'removable': 'bool',
            'locked': 'bool', '*inserted': 'BlockDeviceInfo',
-           '*tray_open': 'bool', '*io-status': 'BlockDeviceIoStatus',
-           '*dirty-bitmaps': { 'type': ['BlockDirtyInfo'],
-                               'features': [ 'deprecated' ] } } }
+           '*tray_open': 'bool', '*io-status': 'BlockDeviceIoStatus' } }
 
 ##
 # @BlockMeasureInfo:
@@ -655,7 +593,7 @@
 # Returns: a list of @BlockInfo describing each virtual block device. Filter
 #          nodes that were created implicitly are skipped over.
 #
-# Since: 0.14.0
+# Since: 0.14
 #
 # Example:
 #
@@ -812,17 +750,17 @@
 # @wr_operations: The number of write operations performed by the device.
 #
 # @flush_operations: The number of cache flush operations performed by the
-#                    device (since 0.15.0)
+#                    device (since 0.15)
 #
 # @unmap_operations: The number of unmap operations performed by the device
 #                    (Since 4.2)
 #
-# @rd_total_time_ns: Total time spent on reads in nanoseconds (since 0.15.0).
+# @rd_total_time_ns: Total time spent on reads in nanoseconds (since 0.15).
 #
-# @wr_total_time_ns: Total time spent on writes in nanoseconds (since 0.15.0).
+# @wr_total_time_ns: Total time spent on writes in nanoseconds (since 0.15).
 #
 # @flush_total_time_ns: Total time spent on cache flushes in nanoseconds
-#                       (since 0.15.0).
+#                       (since 0.15).
 #
 # @unmap_total_time_ns: Total time spent on unmap operations in nanoseconds
 #                       (Since 4.2)
@@ -884,7 +822,7 @@
 #
 # @flush_latency_histogram: @BlockLatencyHistogramInfo. (Since 4.0)
 #
-# Since: 0.14.0
+# Since: 0.14
 ##
 { 'struct': 'BlockDeviceStats',
   'data': {'rd_bytes': 'int', 'wr_bytes': 'int', 'unmap_bytes' : 'int',
@@ -987,7 +925,7 @@
 # @backing: This describes the backing block device if it has one.
 #           (Since 2.0)
 #
-# Since: 0.14.0
+# Since: 0.14
 ##
 { 'struct': 'BlockStats',
   'data': {'*device': 'str', '*qdev': 'str', '*node-name': 'str',
@@ -1011,7 +949,7 @@
 #
 # Returns: A list of @BlockStats for each virtual block devices.
 #
-# Since: 0.14.0
+# Since: 0.14
 #
 # Example:
 #
@@ -1270,20 +1208,6 @@
 { 'command': 'query-block-jobs', 'returns': ['BlockJobInfo'] }
 
 ##
-# @block_passwd:
-#
-# This command sets the password of a block device that has not been open
-# with a password and requires one.
-#
-# This command is now obsolete and will always return an error since 2.10
-#
-##
-{ 'command': 'block_passwd',
-  'data': { '*device': 'str',
-            '*node-name': 'str',
-            'password': 'str' } }
-
-##
 # @block_resize:
 #
 # Resize a block image while a guest is running.
@@ -1299,7 +1223,7 @@
 # Returns: - nothing on success
 #          - If @device is not a valid block device, DeviceNotFound
 #
-# Since: 0.14.0
+# Since: 0.14
 #
 # Example:
 #
@@ -1372,6 +1296,30 @@
   'data': { 'node': 'str', 'overlay': 'str' } }
 
 ##
+# @BackupPerf:
+#
+# Optional parameters for backup. These parameters don't affect
+# functionality, but may significantly affect performance.
+#
+# @use-copy-range: Use copy offloading. Default false.
+#
+# @max-workers: Maximum number of parallel requests for the sustained background
+#               copying process. Doesn't influence copy-before-write operations.
+#               Default 64.
+#
+# @max-chunk: Maximum request length for the sustained background copying
+#             process. Doesn't influence copy-before-write operations.
+#             0 means unlimited. If max-chunk is non-zero then it should not be
+#             less than job cluster size which is calculated as maximum of
+#             target image cluster size and 64k. Default 0.
+#
+# Since: 6.0
+##
+{ 'struct': 'BackupPerf',
+  'data': { '*use-copy-range': 'bool',
+            '*max-workers': 'int', '*max-chunk': 'int64' } }
+
+##
 # @BackupCommon:
 #
 # @job-id: identifier for the newly-created block job. If
@@ -1426,6 +1374,8 @@
 #                    above node specified by @drive. If this option is not given,
 #                    a node name is autogenerated. (Since: 4.2)
 #
+# @x-perf: Performance options. (Since 6.0)
+#
 # Note: @on-source-error and @on-target-error only affect background
 #       I/O.  If an error occurs during a guest write request, the device's
 #       rerror/werror actions will be used.
@@ -1440,7 +1390,7 @@
             '*on-source-error': 'BlockdevOnError',
             '*on-target-error': 'BlockdevOnError',
             '*auto-finalize': 'bool', '*auto-dismiss': 'bool',
-            '*filter-node-name': 'str' } }
+            '*filter-node-name': 'str', '*x-perf': 'BackupPerf'  } }
 
 ##
 # @DriveBackup:
@@ -1484,7 +1434,7 @@
 # Returns: - nothing on success
 #          - If @device is not a valid block device, DeviceNotFound
 #
-# Since: 0.14.0
+# Since: 0.14
 #
 # Example:
 #
@@ -2479,6 +2429,33 @@
             '*iops-size' : 'int' } }
 
 ##
+# @ThrottleGroupProperties:
+#
+# Properties for throttle-group objects.
+#
+# The options starting with x- are aliases for the same key without x- in
+# the @limits object. As indicated by the x- prefix, this is not a stable
+# interface and may be removed or changed incompatibly in the future. Use
+# @limits for a supported stable interface.
+#
+# @limits: limits to apply for this throttle group
+#
+# Since: 2.11
+##
+{ 'struct': 'ThrottleGroupProperties',
+  'data': { '*limits': 'ThrottleLimits',
+            '*x-iops-total' : 'int', '*x-iops-total-max' : 'int',
+            '*x-iops-total-max-length' : 'int', '*x-iops-read' : 'int',
+            '*x-iops-read-max' : 'int', '*x-iops-read-max-length' : 'int',
+            '*x-iops-write' : 'int', '*x-iops-write-max' : 'int',
+            '*x-iops-write-max-length' : 'int', '*x-bps-total' : 'int',
+            '*x-bps-total-max' : 'int', '*x-bps-total-max-length' : 'int',
+            '*x-bps-read' : 'int', '*x-bps-read-max' : 'int',
+            '*x-bps-read-max-length' : 'int', '*x-bps-write' : 'int',
+            '*x-bps-write-max' : 'int', '*x-bps-write-max-length' : 'int',
+            '*x-iops-size' : 'int' } }
+
+##
 # @block-stream:
 #
 # Copy data from a backing file into a block device.
@@ -2517,10 +2494,14 @@
 # @device: the device or node name of the top image
 #
 # @base: the common backing file name.
-#        It cannot be set if @base-node is also set.
+#        It cannot be set if @base-node or @bottom is also set.
 #
 # @base-node: the node name of the backing file.
-#             It cannot be set if @base is also set. (Since 2.8)
+#             It cannot be set if @base or @bottom is also set. (Since 2.8)
+#
+# @bottom: the last node in the chain that should be streamed into
+#          top. It cannot be set if @base or @base-node is also set.
+#          It cannot be filter node. (Since 6.0)
 #
 # @backing-file: The backing file string to write into the top
 #                image. This filename is not validated.
@@ -2542,6 +2523,11 @@
 # @on-error: the action to take on an error (default report).
 #            'stop' and 'enospc' can only be used if the block device
 #            supports io-status (see BlockInfo).  Since 1.3.
+#
+# @filter-node-name: the node name that should be assigned to the
+#                    filter driver that the stream job inserts into the graph
+#                    above @device. If this option is not given, a node name is
+#                    autogenerated. (Since: 6.0)
 #
 # @auto-finalize: When false, this job will wait in a PENDING state after it has
 #                 finished its work, waiting for @block-job-finalize before
@@ -2571,8 +2557,9 @@
 ##
 { 'command': 'block-stream',
   'data': { '*job-id': 'str', 'device': 'str', '*base': 'str',
-            '*base-node': 'str', '*backing-file': 'str', '*speed': 'int',
-            '*on-error': 'BlockdevOnError',
+            '*base-node': 'str', '*backing-file': 'str', '*bottom': 'str',
+            '*speed': 'int', '*on-error': 'BlockdevOnError',
+            '*filter-node-name': 'str',
             '*auto-finalize': 'bool', '*auto-dismiss': 'bool' } }
 
 ##
@@ -2829,7 +2816,7 @@
             'cloop', 'compress', 'copy-on-read', 'dmg', 'file', 'ftp', 'ftps',
             'gluster', 'host_cdrom', 'host_device', 'http', 'https', 'iscsi',
             'luks', 'nbd', 'nfs', 'null-aio', 'null-co', 'nvme', 'parallels',
-            'qcow', 'qcow2', 'qed', 'quorum', 'raw', 'rbd',
+            'preallocate', 'qcow', 'qcow2', 'qed', 'quorum', 'raw', 'rbd',
             { 'name': 'replication', 'if': 'defined(CONFIG_REPLICATION)' },
             'sheepdog',
             'ssh', 'throttle', 'vdi', 'vhdx', 'vmdk', 'vpc', 'vvfat' ] }
@@ -3097,6 +3084,23 @@
   'discriminator': 'format',
   'data': { 'aes': 'QCryptoBlockOptionsQCow',
             'luks': 'QCryptoBlockOptionsLUKS'} }
+
+##
+# @BlockdevOptionsPreallocate:
+#
+# Filter driver intended to be inserted between format and protocol node
+# and do preallocation in protocol node on write.
+#
+# @prealloc-align: on preallocation, align file length to this number,
+#                  default 1048576 (1M)
+#
+# @prealloc-size: how much to preallocate, default 134217728 (128M)
+#
+# Since: 6.0
+##
+{ 'struct': 'BlockdevOptionsPreallocate',
+  'base': 'BlockdevOptionsGenericFormat',
+  'data': { '*prealloc-align': 'int', '*prealloc-size': 'int' } }
 
 ##
 # @BlockdevOptionsQcow2:
@@ -3936,6 +3940,24 @@
   'data': { 'throttle-group': 'str',
             'file' : 'BlockdevRef'
              } }
+
+##
+# @BlockdevOptionsCor:
+#
+# Driver specific block device options for the copy-on-read driver.
+#
+# @bottom: The name of a non-filter node (allocation-bearing layer) that
+#          limits the COR operations in the backing chain (inclusive), so
+#          that no data below this node will be copied by this filter.
+#          If option is absent, the limit is not applied, so that data
+#          from all backing layers may be copied.
+#
+# Since: 6.0
+##
+{ 'struct': 'BlockdevOptionsCor',
+  'base': 'BlockdevOptionsGenericFormat',
+  'data': { '*bottom': 'str' } }
+
 ##
 # @BlockdevOptions:
 #
@@ -3988,7 +4010,7 @@
       'bochs':      'BlockdevOptionsGenericFormat',
       'cloop':      'BlockdevOptionsGenericFormat',
       'compress':   'BlockdevOptionsGenericFormat',
-      'copy-on-read':'BlockdevOptionsGenericFormat',
+      'copy-on-read':'BlockdevOptionsCor',
       'dmg':        'BlockdevOptionsGenericFormat',
       'file':       'BlockdevOptionsFile',
       'ftp':        'BlockdevOptionsCurlFtp',
@@ -4006,6 +4028,7 @@
       'null-co':    'BlockdevOptionsNull',
       'nvme':       'BlockdevOptionsNVMe',
       'parallels':  'BlockdevOptionsGenericFormat',
+      'preallocate':'BlockdevOptionsPreallocate',
       'qcow2':      'BlockdevOptionsQcow2',
       'qcow':       'BlockdevOptionsQcow',
       'qed':        'BlockdevOptionsGenericCOWFormat',
@@ -4852,7 +4875,7 @@
 # Note: If action is "stop", a STOP event will eventually follow the
 #       BLOCK_IO_ERROR event
 #
-# Since: 0.13.0
+# Since: 0.13
 #
 # Example:
 #

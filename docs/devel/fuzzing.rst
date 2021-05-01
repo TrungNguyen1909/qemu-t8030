@@ -119,7 +119,7 @@ Adding a new fuzzer
 
 Coverage over virtual devices can be improved by adding additional fuzzers.
 Fuzzers are kept in ``tests/qtest/fuzz/`` and should be added to
-``tests/qtest/fuzz/Makefile.include``
+``tests/qtest/fuzz/meson.build``
 
 Fuzzers can rely on both qtest and libqos to communicate with virtual devices.
 
@@ -128,8 +128,7 @@ Fuzzers can rely on both qtest and libqos to communicate with virtual devices.
 2. Write the fuzzing code using the libqtest/libqos API. See existing fuzzers
    for reference.
 
-3. Register the fuzzer in ``tests/fuzz/Makefile.include`` by appending the
-   corresponding object to fuzz-obj-y
+3. Add the fuzzer to ``tests/qtest/fuzz/meson.build``.
 
 Fuzzers can be more-or-less thought of as special qtest programs which can
 modify the qtest commands and/or qtest command arguments based on inputs
@@ -180,6 +179,92 @@ To ensure that these env variables have been configured correctly, we can use::
     ./qemu-fuzz-i386 --fuzz-target=generic-fuzz -runs=0
 
 The output should contain a complete list of matched MemoryRegions.
+
+OSS-Fuzz
+--------
+QEMU is continuously fuzzed on `OSS-Fuzz` __(https://github.com/google/oss-fuzz).
+By default, the OSS-Fuzz build will try to fuzz every fuzz-target. Since the
+generic-fuzz target requires additional information provided in environment
+variables, we pre-define some generic-fuzz configs in
+``tests/qtest/fuzz/generic_fuzz_configs.h``. Each config must specify:
+
+- ``.name``: To identify the fuzzer config
+
+- ``.args`` OR ``.argfunc``: A string or pointer to a function returning a
+  string.  These strings are used to specify the ``QEMU_FUZZ_ARGS``
+  environment variable.  ``argfunc`` is useful when the config relies on e.g.
+  a dynamically created temp directory, or a free tcp/udp port.
+
+- ``.objects``: A string that specifies the ``QEMU_FUZZ_OBJECTS`` environment
+  variable.
+
+To fuzz additional devices/device configuration on OSS-Fuzz, send patches for
+either a new device-specific fuzzer or a new generic-fuzz config.
+
+Build details:
+
+- The Dockerfile that sets up the environment for building QEMU's
+  fuzzers on OSS-Fuzz can be fund in the OSS-Fuzz repository
+  __(https://github.com/google/oss-fuzz/blob/master/projects/qemu/Dockerfile)
+
+- The script responsible for building the fuzzers can be found in the
+  QEMU source tree at ``scripts/oss-fuzz/build.sh``
+
+Building Crash Reproducers
+-----------------------------------------
+When we find a crash, we should try to create an independent reproducer, that
+can be used on a non-fuzzer build of QEMU. This filters out any potential
+false-positives, and improves the debugging experience for developers.
+Here are the steps for building a reproducer for a crash found by the
+generic-fuzz target.
+
+- Ensure the crash reproduces::
+
+    qemu-fuzz-i386 --fuzz-target... ./crash-...
+
+- Gather the QTest output for the crash::
+
+    QEMU_FUZZ_TIMEOUT=0 QTEST_LOG=1 FUZZ_SERIALIZE_QTEST=1 \
+    qemu-fuzz-i386 --fuzz-target... ./crash-... &> /tmp/trace
+
+- Reorder and clean-up the resulting trace::
+
+    scripts/oss-fuzz/reorder_fuzzer_qtest_trace.py /tmp/trace > /tmp/reproducer
+
+- Get the arguments needed to start qemu, and provide a path to qemu::
+
+    less /tmp/trace # The args should be logged at the top of this file
+    export QEMU_ARGS="-machine ..."
+    export QEMU_PATH="path/to/qemu-system"
+
+- Ensure the crash reproduces in qemu-system::
+
+    $QEMU_PATH $QEMU_ARGS -qtest stdio < /tmp/reproducer
+
+- From the crash output, obtain some string that identifies the crash. This
+  can be a line in the stack-trace, for example::
+
+    export CRASH_TOKEN="hw/usb/hcd-xhci.c:1865"
+
+- Minimize the reproducer::
+
+    scripts/oss-fuzz/minimize_qtest_trace.py -M1 -M2 \
+      /tmp/reproducer /tmp/reproducer-minimized
+
+- Confirm that the minimized reproducer still crashes::
+
+    $QEMU_PATH $QEMU_ARGS -qtest stdio < /tmp/reproducer-minimized
+
+- Create a one-liner reproducer that can be sent over email::
+
+    ./scripts/oss-fuzz/output_reproducer.py -bash /tmp/reproducer-minimized
+
+- Output the C source code for a test case that will reproduce the bug::
+
+    ./scripts/oss-fuzz/output_reproducer.py -owner "John Smith <john@smith.com>"\
+      -name "test_function_name" /tmp/reproducer-minimized
+
+- Report the bug and send a patch with the C reproducer upstream
 
 Implementation Details / Fuzzer Lifecycle
 -----------------------------------------

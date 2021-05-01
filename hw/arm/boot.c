@@ -9,6 +9,7 @@
 
 #include "qemu/osdep.h"
 #include "qemu-common.h"
+#include "qemu/datadir.h"
 #include "qemu/error-report.h"
 #include "qapi/error.h"
 #include <libfdt.h>
@@ -1298,7 +1299,7 @@ void arm_load_kernel(ARMCPU *cpu, MachineState *ms, struct arm_boot_info *info)
     info->kernel_filename = ms->kernel_filename;
     info->kernel_cmdline = ms->kernel_cmdline;
     info->initrd_filename = ms->initrd_filename;
-    info->dtb_filename = qemu_opt_get(qemu_get_machine_opts(), "dtb");
+    info->dtb_filename = ms->dtb;
     info->dtb_limit = 0;
 
     /* Load the kernel.  */

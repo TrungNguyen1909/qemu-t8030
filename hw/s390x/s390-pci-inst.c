@@ -284,10 +284,15 @@ int clp_service_call(S390CPU *cpu, uint8_t r2, uintptr_t ra)
         stq_p(&resquery->sdma, pbdev->zpci_fn.sdma);
         stq_p(&resquery->edma, pbdev->zpci_fn.edma);
         stw_p(&resquery->pchid, pbdev->zpci_fn.pchid);
+        stw_p(&resquery->vfn, pbdev->zpci_fn.vfn);
         resquery->flags = pbdev->zpci_fn.flags;
         resquery->pfgid = pbdev->zpci_fn.pfgid;
+        resquery->pft = pbdev->zpci_fn.pft;
+        resquery->fmbl = pbdev->zpci_fn.fmbl;
         stl_p(&resquery->fid, pbdev->zpci_fn.fid);
         stl_p(&resquery->uid, pbdev->zpci_fn.uid);
+        memcpy(resquery->pfip, pbdev->zpci_fn.pfip, CLP_PFIP_NR_SEGMENTS);
+        memcpy(resquery->util_str, pbdev->zpci_fn.util_str, CLP_UTIL_STR_LEN);
 
         for (i = 0; i < PCI_BAR_COUNT; i++) {
             uint32_t data = pci_get_long(pbdev->pdev->config +
@@ -602,15 +607,18 @@ static uint32_t s390_pci_update_iotlb(S390PCIIOMMU *iommu,
                                       S390IOTLBEntry *entry)
 {
     S390IOTLBEntry *cache = g_hash_table_lookup(iommu->iotlb, &entry->iova);
-    IOMMUTLBEntry notify = {
-        .target_as = &address_space_memory,
-        .iova = entry->iova,
-        .translated_addr = entry->translated_addr,
-        .perm = entry->perm,
-        .addr_mask = ~PAGE_MASK,
+    IOMMUTLBEvent event = {
+        .type = entry->perm ? IOMMU_NOTIFIER_MAP : IOMMU_NOTIFIER_UNMAP,
+        .entry = {
+            .target_as = &address_space_memory,
+            .iova = entry->iova,
+            .translated_addr = entry->translated_addr,
+            .perm = entry->perm,
+            .addr_mask = ~PAGE_MASK,
+        },
     };
 
-    if (entry->perm == IOMMU_NONE) {
+    if (event.type == IOMMU_NOTIFIER_UNMAP) {
         if (!cache) {
             goto out;
         }
@@ -623,9 +631,11 @@ static uint32_t s390_pci_update_iotlb(S390PCIIOMMU *iommu,
                 goto out;
             }
 
-            notify.perm = IOMMU_NONE;
-            memory_region_notify_iommu(&iommu->iommu_mr, 0, notify);
-            notify.perm = entry->perm;
+            event.type = IOMMU_NOTIFIER_UNMAP;
+            event.entry.perm = IOMMU_NONE;
+            memory_region_notify_iommu(&iommu->iommu_mr, 0, event);
+            event.type = IOMMU_NOTIFIER_MAP;
+            event.entry.perm = entry->perm;
         }
 
         cache = g_new(S390IOTLBEntry, 1);
@@ -637,7 +647,7 @@ static uint32_t s390_pci_update_iotlb(S390PCIIOMMU *iommu,
         dec_dma_avail(iommu);
     }
 
-    memory_region_notify_iommu(&iommu->iommu_mr, 0, notify);
+    memory_region_notify_iommu(&iommu->iommu_mr, 0, event);
 
 out:
     return iommu->dma_limit ? iommu->dma_limit->avail : 1;
@@ -750,7 +760,7 @@ int pcistb_service_call(S390CPU *cpu, uint8_t r1, uint8_t r3, uint64_t gaddr,
     int i;
     uint32_t fh;
     uint8_t pcias;
-    uint8_t len;
+    uint16_t len;
     uint8_t buffer[128];
 
     if (env->psw.mask & PSW_MASK_PSTATE) {
@@ -760,7 +770,7 @@ int pcistb_service_call(S390CPU *cpu, uint8_t r1, uint8_t r3, uint64_t gaddr,
 
     fh = env->regs[r1] >> 32;
     pcias = (env->regs[r1] >> 16) & 0xf;
-    len = env->regs[r1] & 0xff;
+    len = env->regs[r1] & 0x1fff;
     offset = env->regs[r3];
 
     if (!(fh & FH_MASK_ENABLE)) {
@@ -816,10 +826,12 @@ int pcistb_service_call(S390CPU *cpu, uint8_t r1, uint8_t r3, uint64_t gaddr,
     mr = s390_get_subregion(mr, offset, len);
     offset -= mr->addr;
 
-    if (!memory_region_access_valid(mr, offset, len, true,
-                                    MEMTXATTRS_UNSPECIFIED)) {
-        s390_program_interrupt(env, PGM_OPERAND, ra);
-        return 0;
+    for (i = 0; i < len; i += 8) {
+        if (!memory_region_access_valid(mr, offset + i, 8, true,
+                                        MEMTXATTRS_UNSPECIFIED)) {
+            s390_program_interrupt(env, PGM_OPERAND, ra);
+            return 0;
+        }
     }
 
     if (s390_cpu_virt_mem_read(cpu, gaddr, ar, buffer, len)) {
@@ -948,7 +960,6 @@ void pci_dereg_ioat(S390PCIIOMMU *iommu)
 void fmb_timer_free(S390PCIBusDevice *pbdev)
 {
     if (pbdev->fmb_timer) {
-        timer_del(pbdev->fmb_timer);
         timer_free(pbdev->fmb_timer);
         pbdev->fmb_timer = NULL;
     }

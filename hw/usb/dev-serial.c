@@ -14,6 +14,7 @@
 #include "qemu/error-report.h"
 #include "qemu/module.h"
 #include "hw/qdev-properties.h"
+#include "hw/qdev-properties-system.h"
 #include "hw/usb.h"
 #include "migration/vmstate.h"
 #include "desc.h"
@@ -613,7 +614,7 @@ static void usb_serial_realize(USBDevice *dev, Error **errp)
     s->intr = usb_ep_get(dev, USB_TOKEN_IN, 1);
 }
 
-static USBDevice *usb_braille_init(const char *unused)
+static USBDevice *usb_braille_init(void)
 {
     USBDevice *dev;
     Chardev *cdrv;

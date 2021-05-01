@@ -34,17 +34,17 @@ If you are writing new code in QEMU, consider adding a unit test, especially
 for utility modules that are relatively stateless or have few dependencies. To
 add a new unit test:
 
-1. Create a new source file. For example, ``tests/foo-test.c``.
+1. Create a new source file. For example, ``tests/unit/foo-test.c``.
 
 2. Write the test. Normally you would include the header file which exports
    the module API, then verify the interface behaves as expected from your
    test. The test code should be organized with the glib testing framework.
    Copying and modifying an existing test is usually a good idea.
 
-3. Add the test to ``tests/meson.build``. The unit tests are listed in a
+3. Add the test to ``tests/unit/meson.build``. The unit tests are listed in a
    dictionary called ``tests``.  The values are any additional sources and
    dependencies to be linked with the test.  For a simple test whose source
-   is in ``tests/foo-test.c``, it is enough to add an entry like::
+   is in ``tests/unit/foo-test.c``, it is enough to add an entry like::
 
      {
        ...
@@ -111,7 +111,7 @@ check-block
 -----------
 
 ``make check-block`` runs a subset of the block layer iotests (the tests that
-are in the "auto" group in ``tests/qemu-iotests/group``).
+are in the "auto" group).
 See the "QEMU iotests" section below for more information.
 
 GCC gcov support
@@ -224,21 +224,76 @@ another application on the host may have locked the file, possibly leading to a
 test failure.  If using such devices are explicitly desired, consider adding
 ``locking=off`` option to disable image locking.
 
-.. _docker-ref:
+Test case groups
+----------------
 
-Docker based tests
-==================
+"Tests may belong to one or more test groups, which are defined in the form
+of a comment in the test source file. By convention, test groups are listed
+in the second line of the test file, after the "#!/..." line, like this:
+
+.. code::
+
+  #!/usr/bin/env python3
+  # group: auto quick
+  #
+  ...
+
+Another way of defining groups is creating the tests/qemu-iotests/group.local
+file. This should be used only for downstream (this file should never appear
+in upstream). This file may be used for defining some downstream test groups
+or for temporarily disabling tests, like this:
+
+.. code::
+
+  # groups for some company downstream process
+  #
+  # ci - tests to run on build
+  # down - our downstream tests, not for upstream
+  #
+  # Format of each line is:
+  # TEST_NAME TEST_GROUP [TEST_GROUP ]...
+
+  013 ci
+  210 disabled
+  215 disabled
+  our-ugly-workaround-test down ci
+
+Note that the following group names have a special meaning:
+
+- quick: Tests in this group should finish within a few seconds.
+
+- auto: Tests in this group are used during "make check" and should be
+  runnable in any case. That means they should run with every QEMU binary
+  (also non-x86), with every QEMU configuration (i.e. must not fail if
+  an optional feature is not compiled in - but reporting a "skip" is ok),
+  work at least with the qcow2 file format, work with all kind of host
+  filesystems and users (e.g. "nobody" or "root") and must not take too
+  much memory and disk space (since CI pipelines tend to fail otherwise).
+
+- disabled: Tests in this group are disabled and ignored by check.
+
+.. _container-ref:
+
+Container based tests
+=====================
 
 Introduction
 ------------
 
-The Docker testing framework in QEMU utilizes public Docker images to build and
-test QEMU in predefined and widely accessible Linux environments.  This makes
-it possible to expand the test coverage across distros, toolchain flavors and
-library versions.
+The container testing framework in QEMU utilizes public images to
+build and test QEMU in predefined and widely accessible Linux
+environments. This makes it possible to expand the test coverage
+across distros, toolchain flavors and library versions. The support
+was originally written for Docker although we also support Podman as
+an alternative container runtime. Although the many of the target
+names and scripts are prefixed with "docker" the system will
+automatically run on whichever is configured.
 
-Prerequisites
--------------
+The container images are also used to augment the generation of tests
+for testing TCG. See :ref:`checktcg-ref` for more details.
+
+Docker Prerequisites
+--------------------
 
 Install "docker" with the system package manager and start the Docker service
 on your development machine, then make sure you have the privilege to run
@@ -268,26 +323,53 @@ Note that any one of above configurations makes it possible for the user to
 exploit the whole host with Docker bind mounting or other privileged
 operations.  So only do it on development machines.
 
-Quickstart
-----------
+Podman Prerequisites
+--------------------
 
-From source tree, type ``make docker`` to see the help. Testing can be started
-without configuring or building QEMU (``configure`` and ``make`` are done in
-the container, with parameters defined by the make target):
+Install "podman" with the system package manager.
 
 .. code::
 
-  make docker-test-build@min-glib
+  $ sudo dnf install podman
+  $ podman ps
 
-This will create a container instance using the ``min-glib`` image (the image
+The last command should print an empty table, to verify the system is ready.
+
+Quickstart
+----------
+
+From source tree, type ``make docker-help`` to see the help. Testing
+can be started without configuring or building QEMU (``configure`` and
+``make`` are done in the container, with parameters defined by the
+make target):
+
+.. code::
+
+  make docker-test-build@centos8
+
+This will create a container instance using the ``centos8`` image (the image
 is downloaded and initialized automatically), in which the ``test-build`` job
 is executed.
+
+Registry
+--------
+
+The QEMU project has a container registry hosted by GitLab at
+``registry.gitlab.com/qemu-project/qemu`` which will automatically be
+used to pull in pre-built layers. This avoids unnecessary strain on
+the distro archives created by multiple developers running the same
+container build steps over and over again. This can be overridden
+locally by using the ``NOCACHE`` build option:
+
+.. code::
+
+   make docker-image-debian10 NOCACHE=1
 
 Images
 ------
 
-Along with many other images, the ``min-glib`` image is defined in a Dockerfile
-in ``tests/docker/dockerfiles/``, called ``min-glib.docker``. ``make docker``
+Along with many other images, the ``centos8`` image is defined in a Dockerfile
+in ``tests/docker/dockerfiles/``, called ``centos8.docker``. ``make docker-help``
 command will list all the available images.
 
 To add a new image, simply create a new ``.docker`` file under the
@@ -307,21 +389,7 @@ QEMU.  Docker tests are the executables under ``tests/docker`` named
 library, ``tests/docker/common.rc``, which provides helpers to find the QEMU
 source and build it.
 
-The full list of tests is printed in the ``make docker`` help.
-
-Tools
------
-
-There are executables that are created to run in a specific Docker environment.
-This makes it easy to write scripts that have heavy or special dependencies,
-but are still very easy to use.
-
-Currently the only tool is ``travis``, which mimics the Travis-CI tests in a
-container. It runs in the ``travis`` image:
-
-.. code::
-
-  make docker-travis@travis
+The full list of tests is printed in the ``make docker-help`` help.
 
 Debugging a Docker test failure
 -------------------------------
@@ -717,9 +785,6 @@ and hypothetical example follows:
 
 
   class MultipleMachines(Test):
-      """
-      :avocado: enable
-      """
       def test_multiple_machines(self):
           first_machine = self.get_vm()
           second_machine = self.get_vm()
@@ -871,6 +936,68 @@ qemu_bin
 
 The exact QEMU binary to be used on QEMUMachine.
 
+Skipping tests
+--------------
+The Avocado framework provides Python decorators which allow for easily skip
+tests running under certain conditions. For example, on the lack of a binary
+on the test system or when the running environment is a CI system. For further
+information about those decorators, please refer to::
+
+  https://avocado-framework.readthedocs.io/en/latest/guides/writer/chapters/writing.html#skipping-tests
+
+While the conditions for skipping tests are often specifics of each one, there
+are recurring scenarios identified by the QEMU developers and the use of
+environment variables became a kind of standard way to enable/disable tests.
+
+Here is a list of the most used variables:
+
+AVOCADO_ALLOW_LARGE_STORAGE
+~~~~~~~~~~~~~~~~~~~~~~~~~~~
+Tests which are going to fetch or produce assets considered *large* are not
+going to run unless that `AVOCADO_ALLOW_LARGE_STORAGE=1` is exported on
+the environment.
+
+The definition of *large* is a bit arbitrary here, but it usually means an
+asset which occupies at least 1GB of size on disk when uncompressed.
+
+AVOCADO_ALLOW_UNTRUSTED_CODE
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+There are tests which will boot a kernel image or firmware that can be
+considered not safe to run on the developer's workstation, thus they are
+skipped by default. The definition of *not safe* is also arbitrary but
+usually it means a blob which either its source or build process aren't
+public available.
+
+You should export `AVOCADO_ALLOW_UNTRUSTED_CODE=1` on the environment in
+order to allow tests which make use of those kind of assets.
+
+AVOCADO_TIMEOUT_EXPECTED
+~~~~~~~~~~~~~~~~~~~~~~~~
+The Avocado framework has a timeout mechanism which interrupts tests to avoid the
+test suite of getting stuck. The timeout value can be set via test parameter or
+property defined in the test class, for further details::
+
+  https://avocado-framework.readthedocs.io/en/latest/guides/writer/chapters/writing.html#setting-a-test-timeout
+
+Even though the timeout can be set by the test developer, there are some tests
+that may not have a well-defined limit of time to finish under certain
+conditions. For example, tests that take longer to execute when QEMU is
+compiled with debug flags. Therefore, the `AVOCADO_TIMEOUT_EXPECTED` variable
+has been used to determine whether those tests should run or not.
+
+GITLAB_CI
+~~~~~~~~~
+A number of tests are flagged to not run on the GitLab CI. Usually because
+they proved to the flaky or there are constraints on the CI environment which
+would make them fail. If you encounter a similar situation then use that
+variable as shown on the code snippet below to skip the test:
+
+.. code::
+
+  @skipIf(os.getenv('GITLAB_CI'), 'Running on GitLab')
+  def test(self):
+      do_something()
+
 Uninstalling Avocado
 --------------------
 
@@ -886,6 +1013,8 @@ And remove any package you want with::
 
 If you've used ``make check-acceptance``, the Python virtual environment where
 Avocado is installed will be cleaned up as part of ``make check-clean``.
+
+.. _checktcg-ref:
 
 Testing with "make check-tcg"
 =============================
@@ -908,10 +1037,17 @@ for the architecture in question, for example::
 There is also a ``--cross-cc-flags-ARCH`` flag in case additional
 compiler flags are needed to build for a given target.
 
-If you have the ability to run containers as the user you can also
-take advantage of the build systems "Docker" support. It will then use
-containers to build any test case for an enabled guest where there is
-no system compiler available. See :ref:`docker-ref` for details.
+If you have the ability to run containers as the user the build system
+will automatically use them where no system compiler is available. For
+architectures where we also support building QEMU we will generally
+use the same container to build tests. However there are a number of
+additional containers defined that have a minimal cross-build
+environment that is only suitable for building test cases. Sometimes
+we may use a bleeding edge distribution for compiler features needed
+for test cases that aren't yet in the LTS distros we support for QEMU
+itself.
+
+See :ref:`container-ref` for more details.
 
 Running subset of tests
 -----------------------

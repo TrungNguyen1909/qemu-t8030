@@ -29,7 +29,6 @@
 #include "hw/sysbus.h"
 #include "hw/qdev-properties.h"
 #include "sysemu/sysemu.h"
-#include "sysemu/qtest.h"
 #include "cpu.h"
 #include "qom/object.h"
 
@@ -244,15 +243,6 @@ static void rx62n_realize(DeviceState *dev, Error **errp)
     memory_region_init_rom(&s->c_flash, OBJECT(dev), "flash-code",
                            rxc->rom_flash_size, &error_abort);
     memory_region_add_subregion(s->sysmem, RX62N_CFLASH_BASE, &s->c_flash);
-
-    if (!s->kernel) {
-        if (bios_name) {
-            rom_add_file_fixed(bios_name, RX62N_CFLASH_BASE, 0);
-        }  else if (!qtest_enabled()) {
-            error_report("No bios or kernel specified");
-            exit(1);
-        }
-    }
 
     /* Initialize CPU */
     object_initialize_child(OBJECT(s), "cpu", &s->cpu, TYPE_RX62N_CPU);

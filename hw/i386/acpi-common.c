@@ -72,7 +72,8 @@ void pc_madt_cpu_entry(AcpiDeviceIf *adev, int uid,
 }
 
 void acpi_build_madt(GArray *table_data, BIOSLinker *linker,
-                     X86MachineState *x86ms, AcpiDeviceIf *adev)
+                     X86MachineState *x86ms, AcpiDeviceIf *adev,
+                     const char *oem_id, const char *oem_table_id)
 {
     MachineClass *mc = MACHINE_GET_CLASS(x86ms);
     const CPUArchIdList *apic_ids = mc->possible_cpu_arch_ids(MACHINE(x86ms));
@@ -102,6 +103,16 @@ void acpi_build_madt(GArray *table_data, BIOSLinker *linker,
     io_apic->io_apic_id = ACPI_BUILD_IOAPIC_ID;
     io_apic->address = cpu_to_le32(IO_APIC_DEFAULT_ADDRESS);
     io_apic->interrupt = cpu_to_le32(0);
+
+    if (x86ms->ioapic2) {
+        AcpiMadtIoApic *io_apic2;
+        io_apic2 = acpi_data_push(table_data, sizeof *io_apic);
+        io_apic2->type = ACPI_APIC_IO;
+        io_apic2->length = sizeof(*io_apic);
+        io_apic2->io_apic_id = ACPI_BUILD_IOAPIC_ID + 1;
+        io_apic2->address = cpu_to_le32(IO_APIC_SECONDARY_ADDRESS);
+        io_apic2->interrupt = cpu_to_le32(IO_APIC_SECONDARY_IRQBASE);
+    }
 
     if (x86ms->apic_xrupt_override) {
         intsrcovr = acpi_data_push(table_data, sizeof *intsrcovr);
@@ -147,6 +158,6 @@ void acpi_build_madt(GArray *table_data, BIOSLinker *linker,
 
     build_header(linker, table_data,
                  (void *)(table_data->data + madt_start), "APIC",
-                 table_data->len - madt_start, 1, NULL, NULL);
+                 table_data->len - madt_start, 1, oem_id, oem_table_id);
 }
 

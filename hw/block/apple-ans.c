@@ -379,13 +379,16 @@ SysBusDevice* apple_ans_create(DTBNode* node) {
     pci->bus = pci_register_root_bus(dev, "anspcie.0", apple_ans_set_irq,
                                      pci_swizzle_map_irq_fn, s, &s->io_mmio,
                                      &s->io_ioport, 0, 4, TYPE_PCIE_BUS);
-    pci_realize_and_unref(PCI_DEVICE(&s->nvme), pci->bus, &error_fatal);
-    sysbus_init_mmio(sbd, &s->nvme.iomem);
+
+    s->iomems[3] = g_new(MemoryRegion, 1);
+    memory_region_init_alias(s->iomems[3], OBJECT(dev), TYPE_APPLE_ANS ".nvme", &s->nvme.iomem, 0, reg[7]);
+    sysbus_init_mmio(sbd, s->iomems[3]);
     return sbd;
 }
 static void apple_ans_realize(DeviceState *dev, Error **errp){
-    AppleANSState* s = APPLE_ANS(dev);
-
+    AppleANSState *s = APPLE_ANS(dev);
+    PCIHostState *pci = PCI_HOST_BRIDGE(dev);
+    pci_realize_and_unref(PCI_DEVICE(&s->nvme), pci->bus, &error_fatal);
     if(iop_inbox_empty(s)){
         qemu_irq_raise(s->irqs[IRQ_IOP_INBOX]);
     }

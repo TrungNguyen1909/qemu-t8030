@@ -16,6 +16,7 @@
 #include "qapi/qmp/qbool.h"
 #include "qapi/qmp/qnull.h"
 #include "qapi/qmp/qstring.h"
+#include "qobject-internal.h"
 
 /**
  * qdict_new(): Create a new QDict
@@ -38,12 +39,13 @@ QDict *qdict_new(void)
  */
 static unsigned int tdb_hash(const char *name)
 {
-    unsigned value;	/* Used to compute the hash value.  */
-    unsigned   i;	/* Used to cycle through random values. */
+    unsigned value;    /* Used to compute the hash value.  */
+    unsigned   i;      /* Used to cycle through random values. */
 
     /* Set the initial value from the key size. */
-    for (value = 0x238F13AF * strlen(name), i=0; name[i]; i++)
-        value = (value + (((const unsigned char *)name)[i] << (i*5 % 24)));
+    for (value = 0x238F13AF * strlen(name), i = 0; name[i]; i++) {
+        value = (value + (((const unsigned char *)name)[i] << (i * 5 % 24)));
+    }
 
     return (1103515243 * value + 12345);
 }
@@ -92,8 +94,9 @@ static QDictEntry *qdict_find(const QDict *qdict,
     QDictEntry *entry;
 
     QLIST_FOREACH(entry, &qdict->table[bucket], next)
-        if (!strcmp(entry->key, key))
+        if (!strcmp(entry->key, key)) {
             return entry;
+        }
 
     return NULL;
 }

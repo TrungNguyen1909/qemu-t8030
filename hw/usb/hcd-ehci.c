@@ -1192,7 +1192,7 @@ static int ehci_init_transfer(EHCIPacket *p)
 
     while (bytes > 0) {
         if (cpage > 4) {
-            fprintf(stderr, "cpage out of range (%d)\n", cpage);
+            fprintf(stderr, "cpage out of range (%u)\n", cpage);
             qemu_sglist_destroy(&p->sgl);
             return -1;
         }
@@ -1598,7 +1598,7 @@ static int ehci_state_fetchentry(EHCIState *ehci, int async)
 
     default:
         /* TODO: handle FSTN type */
-        fprintf(stderr, "FETCHENTRY: entry at %X is of type %d "
+        fprintf(stderr, "FETCHENTRY: entry at %X is of type %u "
                 "which is not supported yet\n", entry, NLPTR_TYPE_GET(entry));
         return -1;
     }
@@ -2436,7 +2436,7 @@ static int usb_ehci_post_load(void *opaque, int version_id)
     return 0;
 }
 
-static void usb_ehci_vm_state_change(void *opaque, int running, RunState state)
+static void usb_ehci_vm_state_change(void *opaque, bool running, RunState state)
 {
     EHCIState *ehci = opaque;
 
@@ -2514,6 +2514,11 @@ void usb_ehci_realize(EHCIState *s, DeviceState *dev, Error **errp)
         return;
     }
 
+    memory_region_add_subregion(&s->mem, s->capsbase, &s->mem_caps);
+    memory_region_add_subregion(&s->mem, s->opregbase, &s->mem_opreg);
+    memory_region_add_subregion(&s->mem, s->opregbase + s->portscbase,
+                                &s->mem_ports);
+
     usb_bus_new(&s->bus, sizeof(s->bus), s->companion_enable ?
                 &ehci_bus_ops_companion : &ehci_bus_ops_standalone, dev);
     for (i = 0; i < s->portnr; i++) {
@@ -2534,7 +2539,6 @@ void usb_ehci_unrealize(EHCIState *s, DeviceState *dev)
     trace_usb_ehci_unrealize();
 
     if (s->frame_timer) {
-        timer_del(s->frame_timer);
         timer_free(s->frame_timer);
         s->frame_timer = NULL;
     }
@@ -2582,11 +2586,6 @@ void usb_ehci_init(EHCIState *s, DeviceState *dev)
                           "operational", s->portscbase);
     memory_region_init_io(&s->mem_ports, OBJECT(dev), &ehci_mmio_port_ops, s,
                           "ports", 4 * s->portnr);
-
-    memory_region_add_subregion(&s->mem, s->capsbase, &s->mem_caps);
-    memory_region_add_subregion(&s->mem, s->opregbase, &s->mem_opreg);
-    memory_region_add_subregion(&s->mem, s->opregbase + s->portscbase,
-                                &s->mem_ports);
 }
 
 void usb_ehci_finalize(EHCIState *s)

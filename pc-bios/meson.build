@@ -1,8 +1,4 @@
-if 'arm-softmmu' in target_dirs or \
-    'aarch64-softmmu' in target_dirs or \
-    'i386-softmmu' in target_dirs or \
-    'x86_64-softmmu' in target_dirs
-  bzip2 = find_program('bzip2', required: true)
+if install_edk2_blobs
   fds = [
     'edk2-aarch64-code.fd',
     'edk2-arm-code.fd',
@@ -16,6 +12,7 @@ if 'arm-softmmu' in target_dirs or \
 
   foreach f : fds
     custom_target(f,
+                  build_by_default: have_system,
                   output: f,
                   input: '@0@.bz2'.format(f),
                   capture: true,

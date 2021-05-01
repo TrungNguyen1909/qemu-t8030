@@ -27,6 +27,7 @@
 #include "scsi/constants.h"
 #include "hw/virtio/virtio-bus.h"
 #include "hw/virtio/virtio-access.h"
+#include "trace.h"
 
 static inline int virtio_scsi_get_lun(uint8_t *lun)
 {
@@ -239,7 +240,11 @@ static void virtio_scsi_cancel_notify(Notifier *notifier, void *data)
                                                notifier);
 
     if (--n->tmf_req->remaining == 0) {
-        virtio_scsi_complete_req(n->tmf_req);
+        VirtIOSCSIReq *req = n->tmf_req;
+
+        trace_virtio_scsi_tmf_resp(virtio_scsi_get_lun(req->req.tmf.lun),
+                                   req->req.tmf.tag, req->resp.tmf.response);
+        virtio_scsi_complete_req(req);
     }
     g_free(n);
 }
@@ -272,6 +277,9 @@ static int virtio_scsi_do_tmf(VirtIOSCSI *s, VirtIOSCSIReq *req)
      */
     req->req.tmf.subtype =
         virtio_tswap32(VIRTIO_DEVICE(s), req->req.tmf.subtype);
+
+    trace_virtio_scsi_tmf_req(virtio_scsi_get_lun(req->req.tmf.lun),
+                              req->req.tmf.tag, req->req.tmf.subtype);
 
     switch (req->req.tmf.subtype) {
     case VIRTIO_SCSI_T_TMF_ABORT_TASK:
@@ -429,11 +437,23 @@ static void virtio_scsi_handle_ctrl_req(VirtIOSCSI *s, VirtIOSCSIReq *req)
             virtio_scsi_bad_req(req);
             return;
         } else {
+            req->req.an.event_requested =
+                virtio_tswap32(VIRTIO_DEVICE(s), req->req.an.event_requested);
+            trace_virtio_scsi_an_req(virtio_scsi_get_lun(req->req.an.lun),
+                                     req->req.an.event_requested);
             req->resp.an.event_actual = 0;
             req->resp.an.response = VIRTIO_SCSI_S_OK;
         }
     }
     if (r == 0) {
+        if (type == VIRTIO_SCSI_T_TMF)
+            trace_virtio_scsi_tmf_resp(virtio_scsi_get_lun(req->req.tmf.lun),
+                                       req->req.tmf.tag,
+                                       req->resp.tmf.response);
+        else if (type == VIRTIO_SCSI_T_AN_QUERY ||
+                 type == VIRTIO_SCSI_T_AN_SUBSCRIBE)
+            trace_virtio_scsi_an_resp(virtio_scsi_get_lun(req->req.an.lun),
+                                      req->resp.an.response);
         virtio_scsi_complete_req(req);
     } else {
         assert(r == -EINPROGRESS);
@@ -469,6 +489,10 @@ static void virtio_scsi_handle_ctrl(VirtIODevice *vdev, VirtQueue *vq)
 
 static void virtio_scsi_complete_cmd_req(VirtIOSCSIReq *req)
 {
+    trace_virtio_scsi_cmd_resp(virtio_scsi_get_lun(req->req.cmd.lun),
+                               req->req.cmd.tag,
+                               req->resp.cmd.response,
+                               req->resp.cmd.status);
     /* Sense data is not in req->resp and is copied separately
      * in virtio_scsi_command_complete.
      */
@@ -476,8 +500,52 @@ static void virtio_scsi_complete_cmd_req(VirtIOSCSIReq *req)
     virtio_scsi_complete_req(req);
 }
 
-static void virtio_scsi_command_complete(SCSIRequest *r, uint32_t status,
-                                         size_t resid)
+static void virtio_scsi_command_failed(SCSIRequest *r)
+{
+    VirtIOSCSIReq *req = r->hba_private;
+
+    if (r->io_canceled) {
+        return;
+    }
+
+    req->resp.cmd.status = GOOD;
+    switch (r->host_status) {
+    case SCSI_HOST_NO_LUN:
+        req->resp.cmd.response = VIRTIO_SCSI_S_INCORRECT_LUN;
+        break;
+    case SCSI_HOST_BUSY:
+        req->resp.cmd.response = VIRTIO_SCSI_S_BUSY;
+        break;
+    case SCSI_HOST_TIME_OUT:
+    case SCSI_HOST_ABORTED:
+        req->resp.cmd.response = VIRTIO_SCSI_S_ABORTED;
+        break;
+    case SCSI_HOST_BAD_RESPONSE:
+        req->resp.cmd.response = VIRTIO_SCSI_S_BAD_TARGET;
+        break;
+    case SCSI_HOST_RESET:
+        req->resp.cmd.response = VIRTIO_SCSI_S_RESET;
+        break;
+    case SCSI_HOST_TRANSPORT_DISRUPTED:
+        req->resp.cmd.response = VIRTIO_SCSI_S_TRANSPORT_FAILURE;
+        break;
+    case SCSI_HOST_TARGET_FAILURE:
+        req->resp.cmd.response = VIRTIO_SCSI_S_TARGET_FAILURE;
+        break;
+    case SCSI_HOST_RESERVATION_ERROR:
+        req->resp.cmd.response = VIRTIO_SCSI_S_NEXUS_FAILURE;
+        break;
+    case SCSI_HOST_ALLOCATION_FAILURE:
+    case SCSI_HOST_MEDIUM_ERROR:
+    case SCSI_HOST_ERROR:
+    default:
+        req->resp.cmd.response = VIRTIO_SCSI_S_FAILURE;
+        break;
+    }
+    virtio_scsi_complete_cmd_req(req);
+}
+
+static void virtio_scsi_command_complete(SCSIRequest *r, size_t resid)
 {
     VirtIOSCSIReq *req = r->hba_private;
     uint8_t sense[SCSI_SENSE_BUF_SIZE];
@@ -489,7 +557,7 @@ static void virtio_scsi_command_complete(SCSIRequest *r, uint32_t status,
     }
 
     req->resp.cmd.response = VIRTIO_SCSI_S_OK;
-    req->resp.cmd.status = status;
+    req->resp.cmd.status = r->status;
     if (req->resp.cmd.status == GOOD) {
         req->resp.cmd.resid = virtio_tswap32(vdev, resid);
     } else {
@@ -566,6 +634,8 @@ static int virtio_scsi_handle_cmd_req_prepare(VirtIOSCSI *s, VirtIOSCSIReq *req)
             return -EINVAL;
         }
     }
+    trace_virtio_scsi_cmd_req(virtio_scsi_get_lun(req->req.cmd.lun),
+                              req->req.cmd.tag, req->req.cmd.cdb[0]);
 
     d = virtio_scsi_device_get(s, req->req.cmd.lun);
     if (!d) {
@@ -767,6 +837,8 @@ void virtio_scsi_push_event(VirtIOSCSI *s, SCSIDevice *dev,
         }
         evt->lun[3] = dev->lun & 0xFF;
     }
+    trace_virtio_scsi_event(virtio_scsi_get_lun(evt->lun), event, reason);
+     
     virtio_scsi_complete_req(req);
 }
 
@@ -821,15 +893,17 @@ static void virtio_scsi_hotplug(HotplugHandler *hotplug_dev, DeviceState *dev,
     VirtIODevice *vdev = VIRTIO_DEVICE(hotplug_dev);
     VirtIOSCSI *s = VIRTIO_SCSI(vdev);
     SCSIDevice *sd = SCSI_DEVICE(dev);
+    AioContext *old_context;
     int ret;
 
     if (s->ctx && !s->dataplane_fenced) {
         if (blk_op_is_blocked(sd->conf.blk, BLOCK_OP_TYPE_DATAPLANE, errp)) {
             return;
         }
-        virtio_scsi_acquire(s);
+        old_context = blk_get_aio_context(sd->conf.blk);
+        aio_context_acquire(old_context);
         ret = blk_set_aio_context(sd->conf.blk, s->ctx, errp);
-        virtio_scsi_release(s);
+        aio_context_release(old_context);
         if (ret < 0) {
             return;
         }
@@ -879,6 +953,7 @@ static struct SCSIBusInfo virtio_scsi_scsi_info = {
     .max_lun = VIRTIO_SCSI_MAX_LUN,
 
     .complete = virtio_scsi_command_complete,
+    .fail = virtio_scsi_command_failed,
     .cancel = virtio_scsi_request_cancelled,
     .change = virtio_scsi_change,
     .parse_cdb = virtio_scsi_parse_cdb,

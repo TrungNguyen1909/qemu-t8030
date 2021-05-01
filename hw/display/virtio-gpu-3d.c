@@ -179,10 +179,8 @@ static void virgl_cmd_set_scanout(VirtIOGPU *g,
             info.width, info.height,
             ss.r.x, ss.r.y, ss.r.width, ss.r.height);
     } else {
-        if (ss.scanout_id != 0) {
-            dpy_gfx_replace_surface(
-                g->parent_obj.scanout[ss.scanout_id].con, NULL);
-        }
+        dpy_gfx_replace_surface(
+            g->parent_obj.scanout[ss.scanout_id].con, NULL);
         dpy_gl_scanout_disable(g->parent_obj.scanout[ss.scanout_id].con);
     }
     g->parent_obj.scanout[ss.scanout_id].resource_id = ss.resource_id;
@@ -440,7 +438,7 @@ void virtio_gpu_virgl_process_cmd(VirtIOGPU *g,
         break;
     case VIRTIO_GPU_CMD_RESOURCE_FLUSH:
         virgl_cmd_resource_flush(g, cmd);
-       break;
+        break;
     case VIRTIO_GPU_CMD_RESOURCE_UNREF:
         virgl_cmd_resource_unref(g, cmd);
         break;
@@ -458,7 +456,6 @@ void virtio_gpu_virgl_process_cmd(VirtIOGPU *g,
     case VIRTIO_GPU_CMD_GET_CAPSET:
         virgl_cmd_get_capset(g, cmd);
         break;
-
     case VIRTIO_GPU_CMD_GET_DISPLAY_INFO:
         virtio_gpu_get_display_info(g, cmd);
         break;
@@ -595,9 +592,7 @@ void virtio_gpu_virgl_reset(VirtIOGPU *g)
 
     virgl_renderer_reset();
     for (i = 0; i < g->parent_obj.conf.max_outputs; i++) {
-        if (i != 0) {
-            dpy_gfx_replace_surface(g->parent_obj.scanout[i].con, NULL);
-        }
+        dpy_gfx_replace_surface(g->parent_obj.scanout[i].con, NULL);
         dpy_gl_scanout_disable(g->parent_obj.scanout[i].con);
     }
 }

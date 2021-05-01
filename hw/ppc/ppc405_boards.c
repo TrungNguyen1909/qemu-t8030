@@ -26,6 +26,7 @@
 #include "qemu/units.h"
 #include "qapi/error.h"
 #include "qemu-common.h"
+#include "qemu/datadir.h"
 #include "cpu.h"
 #include "hw/ppc/ppc.h"
 #include "hw/qdev-properties.h"
@@ -141,6 +142,7 @@ static void ref405ep_fpga_init(MemoryRegion *sysmem, uint32_t base)
 static void ref405ep_init(MachineState *machine)
 {
     MachineClass *mc = MACHINE_GET_CLASS(machine);
+    const char *bios_name = machine->firmware ?: BIOS_FILENAME;
     const char *kernel_filename = machine->kernel_filename;
     const char *kernel_cmdline = machine->kernel_cmdline;
     const char *initrd_filename = machine->initrd_filename;
@@ -149,7 +151,6 @@ static void ref405ep_init(MachineState *machine)
     CPUPPCState *env;
     DeviceState *dev;
     SysBusDevice *s;
-    qemu_irq *pic;
     MemoryRegion *bios;
     MemoryRegion *sram = g_new(MemoryRegion, 1);
     ram_addr_t bdloc;
@@ -165,6 +166,7 @@ static void ref405ep_init(MachineState *machine)
     int len;
     DriveInfo *dinfo;
     MemoryRegion *sysmem = get_system_memory();
+    DeviceState *uicdev;
 
     if (machine->ram_size != mc->default_ram_size) {
         char *sz = size_to_str(mc->default_ram_size);
@@ -182,7 +184,7 @@ static void ref405ep_init(MachineState *machine)
     ram_bases[1] = 0x00000000;
     ram_sizes[1] = 0x00000000;
     env = ppc405ep_init(sysmem, ram_memories, ram_bases, ram_sizes,
-                        33333333, &pic, kernel_filename == NULL ? 0 : 1);
+                        33333333, &uicdev, kernel_filename == NULL ? 0 : 1);
     /* allocate SRAM */
     sram_size = 512 * KiB;
     memory_region_init_ram(sram, NULL, "ef405ep.sram", sram_size,
@@ -206,8 +208,6 @@ static void ref405ep_init(MachineState *machine)
         memory_region_init_rom(bios, NULL, "ef405ep.bios", BIOS_SIZE,
                                &error_fatal);
 
-        if (bios_name == NULL)
-            bios_name = BIOS_FILENAME;
         filename = qemu_find_file(QEMU_FILE_TYPE_BIOS, bios_name);
         if (filename) {
             bios_size = load_image_size(filename,
@@ -425,10 +425,10 @@ static void taihu_cpld_init(MemoryRegion *sysmem, uint32_t base)
 static void taihu_405ep_init(MachineState *machine)
 {
     MachineClass *mc = MACHINE_GET_CLASS(machine);
+    const char *bios_name = machine->firmware ?: BIOS_FILENAME;
     const char *kernel_filename = machine->kernel_filename;
     const char *initrd_filename = machine->initrd_filename;
     char *filename;
-    qemu_irq *pic;
     MemoryRegion *sysmem = get_system_memory();
     MemoryRegion *bios;
     MemoryRegion *ram_memories = g_new(MemoryRegion, 2);
@@ -439,6 +439,7 @@ static void taihu_405ep_init(MachineState *machine)
     int linux_boot;
     int fl_idx;
     DriveInfo *dinfo;
+    DeviceState *uicdev;
 
     if (machine->ram_size != mc->default_ram_size) {
         char *sz = size_to_str(mc->default_ram_size);
@@ -458,7 +459,7 @@ static void taihu_405ep_init(MachineState *machine)
                              "taihu_405ep.ram-1", machine->ram, ram_bases[1],
                              ram_sizes[1]);
     ppc405ep_init(sysmem, ram_memories, ram_bases, ram_sizes,
-                  33333333, &pic, kernel_filename == NULL ? 0 : 1);
+                  33333333, &uicdev, kernel_filename == NULL ? 0 : 1);
     /* allocate and load BIOS */
     fl_idx = 0;
 #if defined(USE_FLASH_BIOS)
@@ -475,8 +476,6 @@ static void taihu_405ep_init(MachineState *machine)
     } else
 #endif
     {
-        if (bios_name == NULL)
-            bios_name = BIOS_FILENAME;
         bios = g_new(MemoryRegion, 1);
         memory_region_init_rom(bios, NULL, "taihu_405ep.bios", BIOS_SIZE,
                                &error_fatal);

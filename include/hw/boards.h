@@ -6,7 +6,7 @@
 #include "exec/memory.h"
 #include "sysemu/hostmem.h"
 #include "sysemu/blockdev.h"
-#include "sysemu/accel.h"
+#include "qemu/accel.h"
 #include "qapi/qapi-types-machine.h"
 #include "qemu/module.h"
 #include "qom/object.h"
@@ -26,6 +26,7 @@ OBJECT_DECLARE_TYPE(MachineState, MachineClass, MACHINE)
 extern MachineState *current_machine;
 
 void machine_run_board_init(MachineState *machine);
+bool machine_smp_parse(MachineState *ms, QemuOpts *opts, Error **errp);
 bool machine_usb(MachineState *machine);
 int machine_phandle_start(MachineState *machine);
 bool machine_dump_guest_core(MachineState *machine);
@@ -35,7 +36,46 @@ void machine_set_cpu_numa_node(MachineState *machine,
                                const CpuInstanceProperties *props,
                                Error **errp);
 
+/**
+ * machine_class_allow_dynamic_sysbus_dev: Add type to list of valid devices
+ * @mc: Machine class
+ * @type: type to allow (should be a subtype of TYPE_SYS_BUS_DEVICE)
+ *
+ * Add the QOM type @type to the list of devices of which are subtypes
+ * of TYPE_SYS_BUS_DEVICE but which are still permitted to be dynamically
+ * created (eg by the user on the command line with -device).
+ * By default if the user tries to create any devices on the command line
+ * that are subtypes of TYPE_SYS_BUS_DEVICE they will get an error message;
+ * for the special cases which are permitted for this machine model, the
+ * machine model class init code must call this function to add them
+ * to the list of specifically permitted devices.
+ */
 void machine_class_allow_dynamic_sysbus_dev(MachineClass *mc, const char *type);
+
+/**
+ * device_is_dynamic_sysbus: test whether device is a dynamic sysbus device
+ * @mc: Machine class
+ * @dev: device to check
+ *
+ * Returns: true if @dev is a sysbus device on the machine's list
+ * of dynamically pluggable sysbus devices; otherwise false.
+ *
+ * This function checks whether @dev is a valid dynamic sysbus device,
+ * by first confirming that it is a sysbus device and then checking it
+ * against the list of permitted dynamic sysbus devices which has been
+ * set up by the machine using machine_class_allow_dynamic_sysbus_dev().
+ *
+ * It is valid to call this with something that is not a subclass of
+ * TYPE_SYS_BUS_DEVICE; the function will return false in this case.
+ * This allows hotplug callback functions to be written as:
+ *     if (device_is_dynamic_sysbus(mc, dev)) {
+ *         handle dynamic sysbus case;
+ *     } else if (some other kind of hotplug) {
+ *         handle that;
+ *     }
+ */
+bool device_is_dynamic_sysbus(MachineClass *mc, DeviceState *dev);
+
 /*
  * Checks that backend isn't used, preps it for exclusive usage and
  * returns migratable MemoryRegion provided by backend.
@@ -127,6 +167,7 @@ typedef struct {
  * @kvm_type:
  *    Return the type of KVM corresponding to the kvm-type string option or
  *    computed based on other criteria such as the host kernel capabilities.
+ *    kvm-type may be NULL if it is not needed.
  * @numa_mem_supported:
  *    true if '--numa node.mem' option is supported and false otherwise
  * @smp_parse:
@@ -257,6 +298,7 @@ struct MachineState {
 
     /*< public >*/
 
+    void *fdt;
     char *dtb;
     char *dumpdtb;
     int phandle_start;
@@ -269,7 +311,7 @@ struct MachineState {
     bool iommu;
     bool suppress_vmdesc;
     bool enable_graphics;
-    char *memory_encryption;
+    ConfidentialGuestSupport *cgs;
     char *ram_memdev_id;
     /*
      * convenience alias to ram_memdev_id backend memory region
@@ -282,6 +324,7 @@ struct MachineState {
     ram_addr_t maxram_size;
     uint64_t   ram_slots;
     const char *boot_order;
+    const char *boot_once;
     char *kernel_filename;
     char *kernel_cmdline;
     char *initrd_filename;
@@ -309,6 +352,9 @@ struct MachineState {
         type_register_static(&machine_initfn##_typeinfo); \
     } \
     type_init(machine_initfn##_register_types)
+
+extern GlobalProperty hw_compat_5_2[];
+extern const size_t hw_compat_5_2_len;
 
 extern GlobalProperty hw_compat_5_1[];
 extern const size_t hw_compat_5_1_len;

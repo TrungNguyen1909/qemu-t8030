@@ -24,6 +24,7 @@
 
 #include "qemu/osdep.h"
 #include <dirent.h>
+#include "hw/qdev-core.h"
 #include "monitor-internal.h"
 #include "qapi/error.h"
 #include "qapi/qmp/qdict.h"
@@ -213,6 +214,11 @@ static bool cmd_can_preconfig(const HMPCommand *cmd)
     return strchr(cmd->flags, 'p');
 }
 
+static bool cmd_available(const HMPCommand *cmd)
+{
+    return phase_check(PHASE_MACHINE_READY) || cmd_can_preconfig(cmd);
+}
+
 static void help_cmd_dump_one(Monitor *mon,
                               const HMPCommand *cmd,
                               char **prefix_args,
@@ -220,7 +226,7 @@ static void help_cmd_dump_one(Monitor *mon,
 {
     int i;
 
-    if (runstate_check(RUN_STATE_PRECONFIG) && !cmd_can_preconfig(cmd)) {
+    if (!cmd_available(cmd)) {
         return;
     }
 
@@ -248,8 +254,7 @@ static void help_cmd_dump(Monitor *mon, const HMPCommand *cmds,
     /* Find one entry to dump */
     for (cmd = cmds; cmd->name != NULL; cmd++) {
         if (hmp_compare_cmd(args[arg_index], cmd->name) &&
-            ((!runstate_check(RUN_STATE_PRECONFIG) ||
-                cmd_can_preconfig(cmd)))) {
+            cmd_available(cmd)) {
             if (cmd->sub_table) {
                 /* continue with next arg */
                 help_cmd_dump(mon, cmd->sub_table,
@@ -653,9 +658,9 @@ static const HMPCommand *monitor_parse_command(MonitorHMP *hmp_mon,
                        (int)(p - cmdp_start), cmdp_start);
         return NULL;
     }
-    if (runstate_check(RUN_STATE_PRECONFIG) && !cmd_can_preconfig(cmd)) {
-        monitor_printf(mon, "Command '%.*s' not available with -preconfig "
-                            "until after exit_preconfig.\n",
+    if (!cmd_available(cmd)) {
+        monitor_printf(mon, "Command '%.*s' not available "
+                            "until machine initialization has completed.\n",
                        (int)(p - cmdp_start), cmdp_start);
         return NULL;
     }
@@ -1225,8 +1230,7 @@ static void monitor_find_completion_by_table(MonitorHMP *mon,
         }
         readline_set_completion_index(mon->rs, strlen(cmdname));
         for (cmd = cmd_table; cmd->name != NULL; cmd++) {
-            if (!runstate_check(RUN_STATE_PRECONFIG) ||
-                 cmd_can_preconfig(cmd)) {
+            if (cmd_available(cmd)) {
                 cmd_completion(mon, cmdname, cmd->name);
             }
         }
@@ -1234,8 +1238,7 @@ static void monitor_find_completion_by_table(MonitorHMP *mon,
         /* find the command */
         for (cmd = cmd_table; cmd->name != NULL; cmd++) {
             if (hmp_compare_cmd(args[0], cmd->name) &&
-                (!runstate_check(RUN_STATE_PRECONFIG) ||
-                 cmd_can_preconfig(cmd))) {
+                cmd_available(cmd)) {
                 break;
             }
         }

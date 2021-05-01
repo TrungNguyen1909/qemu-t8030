@@ -46,7 +46,7 @@
 # @pages-per-second: the number of memory pages transferred per second
 #                    (Since 4.0)
 #
-# Since: 0.14.0
+# Since: 0.14
 ##
 { 'struct': 'MigrationStats',
   'data': {'transferred': 'int', 'remaining': 'int', 'total': 'int' ,
@@ -78,7 +78,7 @@
 # Since: 1.2
 ##
 { 'struct': 'XBZRLECacheStats',
-  'data': {'cache-size': 'int', 'bytes': 'int', 'pages': 'int',
+  'data': {'cache-size': 'size', 'bytes': 'int', 'pages': 'int',
            'cache-miss': 'int', 'cache-miss-rate': 'number',
            'encoding-rate': 'number', 'overflow': 'int' } }
 
@@ -224,7 +224,16 @@
 #        only returned if VFIO device is present, migration is supported by all
 #        VFIO devices and status is 'active' or 'completed' (since 5.2)
 #
-# Since: 0.14.0
+# @blocked-reasons: A list of reasons an outgoing migration is blocked.
+#                   Present and non-empty when migration is blocked.
+#                   (since 6.0)
+#
+# @blocked: True if outgoing migration is blocked (since 6.0)
+#
+# Features:
+# @deprecated: Member @blocked is deprecated.  Use @blocked-reasons instead.
+#
+# Since: 0.14
 ##
 { 'struct': 'MigrationInfo',
   'data': {'*status': 'MigrationStatus', '*ram': 'MigrationStats',
@@ -237,6 +246,8 @@
            '*setup-time': 'int',
            '*cpu-throttle-percentage': 'int',
            '*error-desc': 'str',
+           'blocked': { 'type': 'bool', 'features': [ 'deprecated' ] },
+           '*blocked-reasons': ['str'],
            '*postcopy-blocktime' : 'uint32',
            '*postcopy-vcpu-blocktime': ['uint32'],
            '*compression': 'CompressionStats',
@@ -252,7 +263,7 @@
 #
 # Returns: @MigrationInfo
 #
-# Since: 0.14.0
+# Since: 0.14
 #
 # Example:
 #
@@ -442,6 +453,11 @@
 # @validate-uuid: Send the UUID of the source to allow the destination
 #                 to ensure it is the same. (since 4.2)
 #
+# @background-snapshot: If enabled, the migration stream will be a snapshot
+#                       of the VM exactly at the point when the migration
+#                       procedure starts. The VM RAM is saved with running VM.
+#                       (since 6.0)
+#
 # Since: 1.2
 ##
 { 'enum': 'MigrationCapability',
@@ -449,7 +465,7 @@
            'compress', 'events', 'postcopy-ram', 'x-colo', 'release-ram',
            'block', 'return-path', 'pause-before-switchover', 'multifd',
            'dirty-bitmaps', 'postcopy-blocktime', 'late-block-activate',
-           'x-ignore-shared', 'validate-uuid' ] }
+           'x-ignore-shared', 'validate-uuid', 'background-snapshot'] }
 
 ##
 # @MigrationCapabilityStatus:
@@ -526,6 +542,19 @@
             { 'name': 'zstd', 'if': 'defined(CONFIG_ZSTD)' } ] }
 
 ##
+# @BitmapMigrationBitmapAliasTransform:
+#
+# @persistent: If present, the bitmap will be made persistent
+#              or transient depending on this parameter.
+#
+# Since: 6.0
+##
+{ 'struct': 'BitmapMigrationBitmapAliasTransform',
+  'data': {
+      '*persistent': 'bool'
+  } }
+
+##
 # @BitmapMigrationBitmapAlias:
 #
 # @name: The name of the bitmap.
@@ -533,12 +562,16 @@
 # @alias: An alias name for migration (for example the bitmap name on
 #         the opposite site).
 #
+# @transform: Allows the modification of the migrated bitmap.
+#             (since 6.0)
+#
 # Since: 5.2
 ##
 { 'struct': 'BitmapMigrationBitmapAlias',
   'data': {
       'name': 'str',
-      'alias': 'str'
+      'alias': 'str',
+      '*transform': 'BitmapMigrationBitmapAliasTransform'
   } }
 
 ##
@@ -885,28 +918,28 @@
             '*announce-max': 'size',
             '*announce-rounds': 'size',
             '*announce-step': 'size',
-            '*compress-level': 'int',
-            '*compress-threads': 'int',
+            '*compress-level': 'uint8',
+            '*compress-threads': 'uint8',
             '*compress-wait-thread': 'bool',
-            '*decompress-threads': 'int',
-            '*throttle-trigger-threshold': 'int',
-            '*cpu-throttle-initial': 'int',
-            '*cpu-throttle-increment': 'int',
+            '*decompress-threads': 'uint8',
+            '*throttle-trigger-threshold': 'uint8',
+            '*cpu-throttle-initial': 'uint8',
+            '*cpu-throttle-increment': 'uint8',
             '*cpu-throttle-tailslow': 'bool',
             '*tls-creds': 'StrOrNull',
             '*tls-hostname': 'StrOrNull',
             '*tls-authz': 'StrOrNull',
-            '*max-bandwidth': 'int',
-            '*downtime-limit': 'int',
-            '*x-checkpoint-delay': 'int',
+            '*max-bandwidth': 'size',
+            '*downtime-limit': 'uint64',
+            '*x-checkpoint-delay': 'uint32',
             '*block-incremental': 'bool',
-            '*multifd-channels': 'int',
+            '*multifd-channels': 'uint8',
             '*xbzrle-cache-size': 'size',
             '*max-postcopy-bandwidth': 'size',
-            '*max-cpu-throttle': 'int',
+            '*max-cpu-throttle': 'uint8',
             '*multifd-compression': 'MultiFDCompression',
-            '*multifd-zlib-level': 'int',
-            '*multifd-zstd-level': 'int',
+            '*multifd-zlib-level': 'uint8',
+            '*multifd-zstd-level': 'uint8',
             '*block-bitmap-mapping': [ 'BitmapMigrationNodeAlias' ] } }
 
 ##
@@ -1093,7 +1126,7 @@
             '*max-bandwidth': 'size',
             '*downtime-limit': 'uint64',
             '*x-checkpoint-delay': 'uint32',
-            '*block-incremental': 'bool' ,
+            '*block-incremental': 'bool',
             '*multifd-channels': 'uint8',
             '*xbzrle-cache-size': 'size',
             '*max-postcopy-bandwidth': 'size',
@@ -1143,7 +1176,7 @@
 # @tls-port:     spice tcp port for tls-secured channels
 # @cert-subject: server certificate subject
 #
-# Since: 0.14.0
+# Since: 0.14
 #
 # Example:
 #
@@ -1343,7 +1376,7 @@
 #
 # Notes: This command succeeds even if there is no migration process running.
 #
-# Since: 0.14.0
+# Since: 0.14
 #
 # Example:
 #
@@ -1371,104 +1404,6 @@
 { 'command': 'migrate-continue', 'data': {'state': 'MigrationStatus'} }
 
 ##
-# @migrate_set_downtime:
-#
-# Set maximum tolerated downtime for migration.
-#
-# @value: maximum downtime in seconds
-#
-# Features:
-# @deprecated: This command is deprecated.  Use
-#              'migrate-set-parameters' instead.
-#
-# Returns: nothing on success
-#
-# Since: 0.14.0
-#
-# Example:
-#
-# -> { "execute": "migrate_set_downtime", "arguments": { "value": 0.1 } }
-# <- { "return": {} }
-#
-##
-{ 'command': 'migrate_set_downtime', 'data': {'value': 'number'},
-  'features': [ 'deprecated' ] }
-
-##
-# @migrate_set_speed:
-#
-# Set maximum speed for migration.
-#
-# @value: maximum speed in bytes per second.
-#
-# Features:
-# @deprecated: This command is deprecated.  Use
-#              'migrate-set-parameters' instead.
-#
-# Returns: nothing on success
-#
-# Since: 0.14.0
-#
-# Example:
-#
-# -> { "execute": "migrate_set_speed", "arguments": { "value": 1024 } }
-# <- { "return": {} }
-#
-##
-{ 'command': 'migrate_set_speed', 'data': {'value': 'int'},
-  'features': [ 'deprecated' ] }
-
-##
-# @migrate-set-cache-size:
-#
-# Set cache size to be used by XBZRLE migration
-#
-# @value: cache size in bytes
-#
-# Features:
-# @deprecated: This command is deprecated.  Use
-#              'migrate-set-parameters' instead.
-#
-# The size will be rounded down to the nearest power of 2.
-# The cache size can be modified before and during ongoing migration
-#
-# Returns: nothing on success
-#
-# Since: 1.2
-#
-# Example:
-#
-# -> { "execute": "migrate-set-cache-size",
-#      "arguments": { "value": 536870912 } }
-# <- { "return": {} }
-#
-##
-{ 'command': 'migrate-set-cache-size', 'data': {'value': 'int'},
-  'features': [ 'deprecated' ] }
-
-##
-# @query-migrate-cache-size:
-#
-# Query migration XBZRLE cache size
-#
-# Features:
-# @deprecated: This command is deprecated.  Use
-#              'query-migrate-parameters' instead.
-#
-# Returns: XBZRLE cache size in bytes
-#
-# Since: 1.2
-#
-# Example:
-#
-# -> { "execute": "query-migrate-cache-size" }
-# <- { "return": 67108864 }
-#
-##
-{ 'command': 'query-migrate-cache-size', 'returns': 'int',
-  'features': [ 'deprecated' ] }
-
-##
 # @migrate:
 #
 # Migrates the current running guest to another Virtual Machine.
@@ -1486,7 +1421,7 @@
 #
 # Returns: nothing on success
 #
-# Since: 0.14.0
+# Since: 0.14
 #
 # Notes:
 #
@@ -1843,3 +1778,176 @@
 # Since: 5.2
 ##
 { 'command': 'query-dirty-rate', 'returns': 'DirtyRateInfo' }
+
+##
+# @snapshot-save:
+#
+# Save a VM snapshot
+#
+# @job-id: identifier for the newly created job
+# @tag: name of the snapshot to create
+# @vmstate: block device node name to save vmstate to
+# @devices: list of block device node names to save a snapshot to
+#
+# Applications should not assume that the snapshot save is complete
+# when this command returns. The job commands / events must be used
+# to determine completion and to fetch details of any errors that arise.
+#
+# Note that execution of the guest CPUs may be stopped during the
+# time it takes to save the snapshot. A future version of QEMU
+# may ensure CPUs are executing continuously.
+#
+# It is strongly recommended that @devices contain all writable
+# block device nodes if a consistent snapshot is required.
+#
+# If @tag already exists, an error will be reported
+#
+# Returns: nothing
+#
+# Example:
+#
+# -> { "execute": "snapshot-save",
+#      "data": {
+#         "job-id": "snapsave0",
+#         "tag": "my-snap",
+#         "vmstate": "disk0",
+#         "devices": ["disk0", "disk1"]
+#      }
+#    }
+# <- { "return": { } }
+# <- {"event": "JOB_STATUS_CHANGE",
+#     "data": {"status": "created", "id": "snapsave0"}}
+# <- {"event": "JOB_STATUS_CHANGE",
+#     "data": {"status": "running", "id": "snapsave0"}}
+# <- {"event": "STOP"}
+# <- {"event": "RESUME"}
+# <- {"event": "JOB_STATUS_CHANGE",
+#     "data": {"status": "waiting", "id": "snapsave0"}}
+# <- {"event": "JOB_STATUS_CHANGE",
+#     "data": {"status": "pending", "id": "snapsave0"}}
+# <- {"event": "JOB_STATUS_CHANGE",
+#     "data": {"status": "concluded", "id": "snapsave0"}}
+# -> {"execute": "query-jobs"}
+# <- {"return": [{"current-progress": 1,
+#                 "status": "concluded",
+#                 "total-progress": 1,
+#                 "type": "snapshot-save",
+#                 "id": "snapsave0"}]}
+#
+# Since: 6.0
+##
+{ 'command': 'snapshot-save',
+  'data': { 'job-id': 'str',
+            'tag': 'str',
+            'vmstate': 'str',
+            'devices': ['str'] } }
+
+##
+# @snapshot-load:
+#
+# Load a VM snapshot
+#
+# @job-id: identifier for the newly created job
+# @tag: name of the snapshot to load.
+# @vmstate: block device node name to load vmstate from
+# @devices: list of block device node names to load a snapshot from
+#
+# Applications should not assume that the snapshot load is complete
+# when this command returns. The job commands / events must be used
+# to determine completion and to fetch details of any errors that arise.
+#
+# Note that execution of the guest CPUs will be stopped during the
+# time it takes to load the snapshot.
+#
+# It is strongly recommended that @devices contain all writable
+# block device nodes that can have changed since the original
+# @snapshot-save command execution.
+#
+# Returns: nothing
+#
+# Example:
+#
+# -> { "execute": "snapshot-load",
+#      "data": {
+#         "job-id": "snapload0",
+#         "tag": "my-snap",
+#         "vmstate": "disk0",
+#         "devices": ["disk0", "disk1"]
+#      }
+#    }
+# <- { "return": { } }
+# <- {"event": "JOB_STATUS_CHANGE",
+#     "data": {"status": "created", "id": "snapload0"}}
+# <- {"event": "JOB_STATUS_CHANGE",
+#     "data": {"status": "running", "id": "snapload0"}}
+# <- {"event": "STOP"}
+# <- {"event": "RESUME"}
+# <- {"event": "JOB_STATUS_CHANGE",
+#     "data": {"status": "waiting", "id": "snapload0"}}
+# <- {"event": "JOB_STATUS_CHANGE",
+#     "data": {"status": "pending", "id": "snapload0"}}
+# <- {"event": "JOB_STATUS_CHANGE",
+#     "data": {"status": "concluded", "id": "snapload0"}}
+# -> {"execute": "query-jobs"}
+# <- {"return": [{"current-progress": 1,
+#                 "status": "concluded",
+#                 "total-progress": 1,
+#                 "type": "snapshot-load",
+#                 "id": "snapload0"}]}
+#
+# Since: 6.0
+##
+{ 'command': 'snapshot-load',
+  'data': { 'job-id': 'str',
+            'tag': 'str',
+            'vmstate': 'str',
+            'devices': ['str'] } }
+
+##
+# @snapshot-delete:
+#
+# Delete a VM snapshot
+#
+# @job-id: identifier for the newly created job
+# @tag: name of the snapshot to delete.
+# @devices: list of block device node names to delete a snapshot from
+#
+# Applications should not assume that the snapshot delete is complete
+# when this command returns. The job commands / events must be used
+# to determine completion and to fetch details of any errors that arise.
+#
+# Returns: nothing
+#
+# Example:
+#
+# -> { "execute": "snapshot-delete",
+#      "data": {
+#         "job-id": "snapdelete0",
+#         "tag": "my-snap",
+#         "devices": ["disk0", "disk1"]
+#      }
+#    }
+# <- { "return": { } }
+# <- {"event": "JOB_STATUS_CHANGE",
+#     "data": {"status": "created", "id": "snapdelete0"}}
+# <- {"event": "JOB_STATUS_CHANGE",
+#     "data": {"status": "running", "id": "snapdelete0"}}
+# <- {"event": "JOB_STATUS_CHANGE",
+#     "data": {"status": "waiting", "id": "snapdelete0"}}
+# <- {"event": "JOB_STATUS_CHANGE",
+#     "data": {"status": "pending", "id": "snapdelete0"}}
+# <- {"event": "JOB_STATUS_CHANGE",
+#     "data": {"status": "concluded", "id": "snapdelete0"}}
+# -> {"execute": "query-jobs"}
+# <- {"return": [{"current-progress": 1,
+#                 "status": "concluded",
+#                 "total-progress": 1,
+#                 "type": "snapshot-delete",
+#                 "id": "snapdelete0"}]}
+#
+# Since: 6.0
+##
+{ 'command': 'snapshot-delete',
+  'data': { 'job-id': 'str',
+            'tag': 'str',
+            'devices': ['str'] } }

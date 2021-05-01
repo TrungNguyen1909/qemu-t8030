@@ -19,11 +19,12 @@
 #include "hw/acpi/vmgenid.h"
 #include "hw/nvram/fw_cfg.h"
 #include "hw/qdev-properties.h"
+#include "hw/qdev-properties-system.h"
 #include "migration/vmstate.h"
 #include "sysemu/reset.h"
 
 void vmgenid_build_acpi(VmGenIdState *vms, GArray *table_data, GArray *guid,
-                        BIOSLinker *linker)
+                        BIOSLinker *linker, const char *oem_id)
 {
     Aml *ssdt, *dev, *scope, *method, *addr, *if_ctx;
     uint32_t vgia_offset;
@@ -117,7 +118,7 @@ void vmgenid_build_acpi(VmGenIdState *vms, GArray *table_data, GArray *guid,
 
     build_header(linker, table_data,
         (void *)(table_data->data + table_data->len - ssdt->buf->len),
-        "SSDT", ssdt->buf->len, 1, NULL, "VMGENID");
+        "SSDT", ssdt->buf->len, 1, oem_id, "VMGENID");
     free_aml_allocator();
 }
 

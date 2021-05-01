@@ -434,23 +434,16 @@ e1000e_intrmgr_pci_unint(E1000ECore *core)
 {
     int i;
 
-    timer_del(core->radv.timer);
     timer_free(core->radv.timer);
-    timer_del(core->rdtr.timer);
     timer_free(core->rdtr.timer);
-    timer_del(core->raid.timer);
     timer_free(core->raid.timer);
 
-    timer_del(core->tadv.timer);
     timer_free(core->tadv.timer);
-    timer_del(core->tidv.timer);
     timer_free(core->tidv.timer);
 
-    timer_del(core->itr.timer);
     timer_free(core->itr.timer);
 
     for (i = 0; i < E1000E_MSIX_VEC_NUM; i++) {
-        timer_del(core->eitr[i].timer);
         timer_free(core->eitr[i].timer);
     }
 }
@@ -3305,7 +3298,7 @@ e1000e_autoneg_resume(E1000ECore *core)
 }
 
 static void
-e1000e_vm_state_change(void *opaque, int running, RunState state)
+e1000e_vm_state_change(void *opaque, bool running, RunState state)
 {
     E1000ECore *core = opaque;
 
@@ -3355,7 +3348,6 @@ e1000e_core_pci_uninit(E1000ECore *core)
 {
     int i;
 
-    timer_del(core->autoneg_timer);
     timer_free(core->autoneg_timer);
 
     e1000e_intrmgr_pci_unint(core);

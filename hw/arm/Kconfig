@@ -17,6 +17,7 @@ config ARM_VIRT
     select PL011 # UART
     select PL031 # RTC
     select PL061 # GPIO
+    select GPIO_PWR
     select PLATFORM_BUS
     select SMBIOS
     select VIRTIO_MMIO
@@ -51,6 +52,7 @@ config EXYNOS4
     select PTIMER
     select SDHCI
     select USB_EHCI_SYSBUS
+    select OR_IRQ
 
 config HIGHBANK
     bool
@@ -156,7 +158,7 @@ config TOSA
 
 config SPITZ
     bool
-    select ADS7846 # display
+    select ADS7846 # touch-screen controller
     select MAX111X # A/D converter
     select WM8750  # audio codec
     select MAX7310 # GPIO expander
@@ -335,6 +337,7 @@ config STM32F205_SOC
 config STM32F405_SOC
     bool
     select ARM_V7M
+    select OR_IRQ
     select STM32F4XX_SYSCFG
     select STM32F4XX_EXTI
 
@@ -350,7 +353,9 @@ config XLNX_ZYNQMP_ARM
     select SSI_M25P80
     select XILINX_AXI
     select XILINX_SPIPS
+    select XLNX_CSU_DMA
     select XLNX_ZYNQMP
+    select XLNX_ZDMA
 
 config XLNX_VERSAL
     bool
@@ -359,11 +364,14 @@ config XLNX_VERSAL
     select CADENCE
     select VIRTIO_MMIO
     select UNIMP
+    select XLNX_ZDMA
+    select XLNX_ZYNQMP
 
 config NPCM7XX
     bool
     select A9MPCORE
     select ARM_GIC
+    select AT24C  # EEPROM
     select PL310  # cache controller
     select SERIAL
     select SSI
@@ -407,6 +415,7 @@ config ASPEED_SOC
     select SSI_M25P80
     select TMP105
     select TMP421
+    select EMC141X
     select UNIMP
     select LED
 
@@ -497,6 +506,7 @@ config ARM11MPCORE
 config ARMSSE
     bool
     select ARM_V7M
+    select ARMSSE_CPU_PWRCTRL
     select ARMSSE_CPUID
     select ARMSSE_MHU
     select CMSDK_APB_TIMER
@@ -512,9 +522,5 @@ config ARMSSE
     select TZ_MSC
     select TZ_PPC
     select UNIMP
-
-config ARMSSE_CPUID
-    bool
-
-config ARMSSE_MHU
-    bool
+    select SSE_COUNTER
+    select SSE_TIMER
