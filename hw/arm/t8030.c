@@ -46,6 +46,7 @@
 #include "hw/gpio/apple-gpio.h"
 #include "hw/i2c/apple_i2c.h"
 #include "hw/usb/apple-tristar.h"
+#include "hw/usb/apple-otg.h"
 
 #include "hw/arm/exynos4210.h"
 
@@ -54,6 +55,7 @@
 #define CPM_IMPL_REG_BASE (0x210e40000)
 #define T8030_MAX_DEVICETREE_SIZE (0x40000)
 #define T8030_NVRAM_SIZE (0x2000)
+#define T8030_USB_OTG_BASE (0x39000000)
 #define NOP_INST (0xd503201f)
 #define MOV_W0_01_INST (0x52800020)
 #define MOV_X13_0_INST (0xd280000d)
@@ -1151,6 +1153,81 @@ static void T8030_create_tristar(MachineState *machine)
     i2c_slave_realize_and_unref(I2C_SLAVE(tristar), i2c->bus, &error_fatal);
 }
 
+static void T8030_create_usb(MachineState *machine)
+{
+    T8030MachineState *tms = T8030_MACHINE(machine);
+    DTBNode *child = get_dtb_child_node_by_name(tms->device_tree, "arm-io");
+    DTBNode *drd = get_dtb_child_node_by_name(child, "usb-drd");
+    DTBNode *phy, *complex, *device;
+    assert(phy = add_dtb_node(child, "otgphyctrl"));
+    uint32_t value = 0x2;
+    add_dtb_prop(phy, "errata", sizeof(value), (uint8_t*)&value);
+    add_dtb_prop(phy, "compatible", 37, (uint8_t*)"otgphyctrl,s8000\0otgphyctrl,s5l8960x\0");
+    value = 1;
+    add_dtb_prop(phy, "clock-mask", sizeof(value), (uint8_t*)&value);
+    value = 0x37477bb3;
+    add_dtb_prop(phy, "cfg0-device", sizeof(value), (uint8_t*)&value);
+    add_dtb_prop(phy, "cfg0-host", 5, (uint8_t*)"##G7");
+    value = 0x00020e0c;
+    add_dtb_prop(phy, "cfg1-host", sizeof(value), (uint8_t*)&value);
+    add_dtb_prop(phy, "cfg1-device", sizeof(value), (uint8_t*)&value);
+    add_dtb_prop(phy, "device_type", 11, (uint8_t*)"otgphyctrl");
+    value = 0x8c;
+    add_dtb_prop(phy, "AAPL,phandle", sizeof(value), (uint8_t*)&value);
+    {
+        uint64_t reg[4] = {
+            T8030_USB_OTG_BASE + 0x30,
+            0x20,
+            T8030_USB_OTG_BASE + 0x600000,
+            0x1000
+        };
+        add_dtb_prop(phy, "reg", sizeof(reg), (uint8_t*)&reg);
+    }
+
+    assert(complex = add_dtb_node(child, "usb-complex"));
+    //TODO: clock-gates, usb_widget
+    add_dtb_prop(complex, "compatible", 39, (uint8_t*)"usb-complex,s8000\0usb-complex,s5l8960x");
+    add_dtb_prop(complex, "ranges", 8*3,  (uint8_t*)&(uint64_t[]){0x0, T8030_USB_OTG_BASE, 0x600000});
+    add_dtb_prop(complex, "reg", 16, (uint8_t*)&(uint64_t[]){ T8030_USB_OTG_BASE + 0x900000, 0xa0 });
+    add_dtb_prop(complex, "AAPL,phandle", 4, (uint8_t*)&(uint32_t[]){ 0x8d });
+    add_dtb_prop(complex, "#address-cells", 4, (uint8_t*)&(uint32_t[]){ 0x2 });
+    add_dtb_prop(complex, "#size-cells", 4, (uint8_t*)&(uint32_t[]){ 0x2 });
+    add_dtb_prop(complex, "clock-ids", 4, get_dtb_prop(drd, "clock-ids")->value);
+    add_dtb_prop(complex, "device_type", 12, (uint8_t*)"usb-complex");
+    value = 1;
+    add_dtb_prop(complex, "no-pmu", 4, (uint8_t*)&value);
+    assert(device = add_dtb_node(complex, "usb-device"));
+    add_dtb_prop(device, "phy-interface", 4, (uint8_t*)&(uint32_t[]){ 0x8 });
+    add_dtb_prop(device, "publish-criteria", 4, (uint8_t*)&(uint32_t[]){ 0x3 });
+    add_dtb_prop(device, "configuration-string", 19, (uint8_t*)"stdMuxPTPEthValIDA");
+    add_dtb_prop(device, "AAPL,phandle", 4, (uint8_t*)&(uint32_t[]){ 0x8e });
+    add_dtb_prop(device, "product-string", 7, (uint8_t*)"iPhone");
+    add_dtb_prop(device, "host-mac-address", 6, (uint8_t*)"\0\0\0\0\0\0");
+    add_dtb_prop(device, "device-mac-address", 6, (uint8_t*)"\0\0\0\0\0\0");
+    add_dtb_prop(device, "num-of-eps", 4, (uint8_t*)&(uint32_t[]){ 0x0e });
+    add_dtb_prop(device, "interrupt-parent", 4, (uint8_t*)&(uint32_t[]){ 0x1a });
+    add_dtb_prop(device, "vendor-id", 4, (uint8_t*)&(uint32_t[]){ 0x5ac });
+    add_dtb_prop(device, "vendor-string", 11, (uint8_t*)"Apple Inc.");
+    add_dtb_prop(device, "compatible", 54, (uint8_t*)"usb-device,s8000\0usb-device,t7000\0usb-device,s5l8900x");
+
+    add_dtb_prop(device, "interrupts", 4, (uint8_t*)&(uint32_t[]){ ((uint32_t*)get_dtb_prop(drd, "interrupts")->value)[0] });
+    add_dtb_prop(device, "product-id", 4, (uint8_t*)&(uint32_t[]){ 0x12a8 });
+    add_dtb_prop(device, "ahb-burst", 4, (uint8_t*)&(uint32_t[]){ 0xe });
+    add_dtb_prop(device, "product-version", 4, (uint8_t*)&(uint32_t[]){ 0x1201 });
+    add_dtb_prop(device, "clock-mask", 4, (uint8_t*)&(uint32_t[]){ 0x2 });
+    add_dtb_prop(device, "fifo-depth", 4, (uint8_t*)&(uint32_t[]){ 0x1000 });
+    add_dtb_prop(device, "eps-dir-bitmap", 4, (uint8_t*)&(uint32_t[]){ 0x264 });
+    add_dtb_prop(device, "device-type", 11, (uint8_t*)"usb-device");
+    add_dtb_prop(device, "reg", 16, (uint8_t*)&(uint64_t[]){
+        0x100000,
+        0x10000,
+    });
+    DeviceState *otg = apple_otg_create();
+    sysbus_mmio_map(SYS_BUS_DEVICE(otg), 0, tms->soc_base_pa + ((uint64_t*)get_dtb_prop(phy, "reg")->value)[0]);
+    sysbus_mmio_map(SYS_BUS_DEVICE(otg), 1, tms->soc_base_pa + ((uint64_t*)get_dtb_prop(phy, "reg")->value)[2]);
+    sysbus_realize_and_unref(SYS_BUS_DEVICE(otg), &error_fatal);
+}
+
 static void T8030_cpu_reset(void *opaque)
 {
     MachineState *machine = MACHINE(opaque);
@@ -1245,6 +1322,7 @@ static void T8030_machine_init(MachineState *machine)
     T8030_create_i2c(machine, "smc-i2c1");
 
     T8030_create_tristar(machine);
+    T8030_create_usb(machine);
 
     T8030_bootargs_setup(machine);
 

@@ -61,6 +61,22 @@
 #define get_bit(data, bitmask) \
     (!!((data) & (bitmask)))
 
+static inline size_t dwc2_tx_fifo_start(DWC2State *s, uint32_t _fifo)
+{
+	if(_fifo == 0)
+		return s->gnptxfsiz >> 16;
+	else
+		return s->dptxfsiz[_fifo-1] >> 16;
+}
+
+static inline size_t dwc2_tx_fifo_size(DWC2State *s, uint32_t _fifo)
+{
+	if(_fifo == 0)
+		return s->gnptxfsiz & 0xFFFF;
+	else
+		return s->dptxfsiz[_fifo-1] & 0xFFFF;
+}
+
 /* update irq line */
 static inline void dwc2_update_irq(DWC2State *s)
 {
@@ -835,6 +851,42 @@ static void dwc2_fszreg_write(void *ptr, hwaddr addr, int index, uint64_t val,
     *mmio = val;
 }
 
+static uint64_t dwc2_dfszreg_read(void *ptr, hwaddr addr, int index,
+                                  unsigned size) {
+    DWC2State *s = ptr;
+    uint32_t val;
+
+    if (addr != DPTXFSIZN(index) || index >= DWC2_NB_EP) {
+        qemu_log_mask(LOG_GUEST_ERROR, "%s: Bad offset 0x%"HWADDR_PRIx"\n",
+                      __func__, addr);
+        return 0;
+    }
+
+    val = s->dfszreg[index];
+
+    return val;
+}
+
+static void dwc2_dfszreg_write(void *ptr, hwaddr addr, int index, uint64_t val,
+                              unsigned size)
+{
+    DWC2State *s = ptr;
+    uint64_t orig = val;
+    uint32_t *mmio;
+    uint32_t old;
+
+    if (addr != DPTXFSIZN(index) || index >= DWC2_NB_EP) {
+        qemu_log_mask(LOG_GUEST_ERROR, "%s: Bad offset 0x%"HWADDR_PRIx"\n",
+                      __func__, addr);
+        return;
+    }
+
+    mmio = &s->dfszreg[index];
+    old = *mmio;
+
+    *mmio = val;
+}
+
 static const char *hreg0nm[] = {
     "HCFG     ", "HFIR     ", "HFNUM    ", "<rsvd>   ", "HPTXSTS  ",
     "HAINT    ", "HAINTMSK ", "HFLBADDR ", "<rsvd>   ", "<rsvd>   ",
@@ -1056,6 +1108,50 @@ static void dwc2_hreg1_write(void *ptr, hwaddr addr, int index, uint64_t val,
     }
 }
 
+static uint64_t dwc2_dreg_read(void *ptr, hwaddr addr, int index,
+                                unsigned size)
+{
+    DWC2State *s = ptr;
+    uint32_t val;
+
+    return val;
+}
+
+static void dwc2_dreg_write(void *ptr, hwaddr addr, int index, uint64_t val,
+                             unsigned size)
+{
+    DWC2State *s = ptr;
+}
+static uint64_t dwc2_dreg_in_read(void *ptr, hwaddr addr, int index,
+                                unsigned size)
+{
+    DWC2State *s = ptr;
+    uint32_t val;
+
+    return val;
+}
+
+static void dwc2_dreg_in_write(void *ptr, hwaddr addr, int index, uint64_t val,
+                             unsigned size)
+{
+    DWC2State *s = ptr;
+}
+
+static uint64_t dwc2_dreg_out_read(void *ptr, hwaddr addr, int index,
+                                unsigned size)
+{
+    DWC2State *s = ptr;
+    uint32_t val;
+
+    return val;
+}
+
+static void dwc2_dreg_out_write(void *ptr, hwaddr addr, int index, uint64_t val,
+                             unsigned size)
+{
+    DWC2State *s = ptr;
+}
+
 static const char *pcgregnm[] = {
         "PCGCTL   ", "PCGCCTL1 "
 };
@@ -1111,8 +1207,7 @@ static uint64_t dwc2_hsotg_read(void *ptr, hwaddr addr, unsigned size)
         val = dwc2_fszreg_read(ptr, addr, (addr - HSOTG_REG(0x100)) >> 2, size);
         break;
     case HSOTG_REG(0x104) ... HSOTG_REG(0x3fc):
-        /* Gadget-mode registers, just return 0 for now */
-        val = 0;
+        val = dwc2_dfszreg_read(ptr, addr, (addr - (HSOTG_REG(0x104)) >> 2) + 1, size);
         break;
     case HSOTG_REG(0x400) ... HSOTG_REG(0x4fc):
         val = dwc2_hreg0_read(ptr, addr, (addr - HSOTG_REG(0x400)) >> 2, size);
@@ -1120,9 +1215,14 @@ static uint64_t dwc2_hsotg_read(void *ptr, hwaddr addr, unsigned size)
     case HSOTG_REG(0x500) ... HSOTG_REG(0x7fc):
         val = dwc2_hreg1_read(ptr, addr, (addr - HSOTG_REG(0x500)) >> 2, size);
         break;
-    case HSOTG_REG(0x800) ... HSOTG_REG(0xdfc):
-        /* Gadget-mode registers, just return 0 for now */
-        val = 0;
+    case HSOTG_REG(0x800) ... HSOTG_REG(0x8fc):
+        val = dwc2_dreg_read(ptr, addr, (addr - HSOTG_REG(0x800)) >> 2, size);
+        break;
+    case HSOTG_REG(0x900) ... HSOTG_REG(0xafc):
+        val = dwc2_dreg_in_read(ptr, addr, (addr - HSOTG_REG(0x900)) >> 2, size);
+        break;
+    case HSOTG_REG(0xb00) ... HSOTG_REG(0xdfc):
+        val = dwc2_dreg_out_read(ptr, addr, (addr - HSOTG_REG(0xb00)) >> 2, size);
         break;
     case HSOTG_REG(0xe00) ... HSOTG_REG(0xffc):
         val = dwc2_pcgreg_read(ptr, addr, (addr - HSOTG_REG(0xe00)) >> 2, size);
@@ -1145,7 +1245,7 @@ static void dwc2_hsotg_write(void *ptr, hwaddr addr, uint64_t val,
         dwc2_fszreg_write(ptr, addr, (addr - HSOTG_REG(0x100)) >> 2, val, size);
         break;
     case HSOTG_REG(0x104) ... HSOTG_REG(0x3fc):
-        /* Gadget-mode registers, do nothing for now */
+        dwc2_dfszreg_write(ptr, addr, ((addr - HSOTG_REG(0x104)) >> 2) + 1, val, size);
         break;
     case HSOTG_REG(0x400) ... HSOTG_REG(0x4fc):
         dwc2_hreg0_write(ptr, addr, (addr - HSOTG_REG(0x400)) >> 2, val, size);
@@ -1153,8 +1253,14 @@ static void dwc2_hsotg_write(void *ptr, hwaddr addr, uint64_t val,
     case HSOTG_REG(0x500) ... HSOTG_REG(0x7fc):
         dwc2_hreg1_write(ptr, addr, (addr - HSOTG_REG(0x500)) >> 2, val, size);
         break;
-    case HSOTG_REG(0x800) ... HSOTG_REG(0xdfc):
-        /* Gadget-mode registers, do nothing for now */
+    case HSOTG_REG(0x800) ... HSOTG_REG(0x8fc):
+        dwc2_dreg_write(ptr, addr, (addr - HSOTG_REG(0x800)) >> 2, val, size);
+        break;
+    case HSOTG_REG(0x900) ... HSOTG_REG(0xafc):
+        dwc2_dreg_in_write(ptr, addr, (addr - HSOTG_REG(0x900)) >> 2, val, size);
+        break;
+    case HSOTG_REG(0xb00) ... HSOTG_REG(0xdfc):
+        dwc2_dreg_out_write(ptr, addr, (addr - HSOTG_REG(0xb00)) >> 2, val, size);
         break;
     case HSOTG_REG(0xe00) ... HSOTG_REG(0xffc):
         dwc2_pcgreg_write(ptr, addr, (addr - HSOTG_REG(0xe00)) >> 2, val, size);
@@ -1174,20 +1280,36 @@ static const MemoryRegionOps dwc2_mmio_hsotg_ops = {
 
 static uint64_t dwc2_hreg2_read(void *ptr, hwaddr addr, unsigned size)
 {
-    /* TODO - implement FIFOs to support slave mode */
-    trace_usb_dwc2_hreg2_read(addr, addr >> 12, 0);
-    qemu_log_mask(LOG_UNIMP, "%s: FIFO read not implemented\n", __func__);
-    return 0;
+    DWC2State *s = ptr;
+    int index = addr >> 12;
+    int offset = addr - dwc2_tx_fifo_start(s, index);
+    int val = 0;
+    if (index < 0 || index >= DWC2_NB_CHAN) {
+        qemu_log_mask(LOG_GUEST_ERROR, "%s: Bad offset 0x%"HWADDR_PRIx"\n",
+                      __func__, addr);
+        return 0;   
+    }
+    val = *(uint32_t*)&s->usb_buf[index][offset];
+    trace_usb_dwc2_hreg2_read(addr, addr >> 12, val);
+    return val;
 }
 
 static void dwc2_hreg2_write(void *ptr, hwaddr addr, uint64_t val,
                              unsigned size)
 {
+    DWC2State *s = ptr;
+    int index = addr >> 12;
+    int offset = addr - dwc2_tx_fifo_start(s, index);
     uint64_t orig = val;
-
-    /* TODO - implement FIFOs to support slave mode */
-    trace_usb_dwc2_hreg2_write(addr, addr >> 12, orig, 0, val);
-    qemu_log_mask(LOG_UNIMP, "%s: FIFO write not implemented\n", __func__);
+    uint32_t old = 0;
+    if (index < 0 || index >= DWC2_NB_CHAN) {
+        qemu_log_mask(LOG_GUEST_ERROR, "%s: Bad offset 0x%"HWADDR_PRIx"\n",
+                      __func__, addr);
+        return;
+    }
+    old = *(uint32_t*)&s->usb_buf[index][offset];
+    *(uint32_t*)&s->usb_buf[index][offset] = val;
+    trace_usb_dwc2_hreg2_write(addr, addr >> 12, orig, old, val);
 }
 
 static const MemoryRegionOps dwc2_mmio_hreg2_ops = {

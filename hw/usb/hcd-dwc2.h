@@ -28,8 +28,10 @@
 
 #define DWC2_MMIO_SIZE      0x11000
 
-#define DWC2_NB_CHAN        8       /* Number of host channels */
+#define DWC2_NB_CHAN        16      /* Number of host channels */
 #define DWC2_MAX_XFER_SIZE  65536   /* Max transfer size expected in HCTSIZ */
+#define DWC2_NB_EP          16      /* Number of device endpoints */
+
 
 typedef struct DWC2Packet DWC2Packet;
 typedef struct DWC2State DWC2State;
@@ -110,6 +112,13 @@ struct DWC2State {
         uint32_t fszreg[DWC2_FSZREG_SIZE / sizeof(uint32_t)];
         struct {
             uint32_t hptxfsiz;      /* 100 */
+        };
+    };
+    union {
+#define DWC2_DFSZREG_SIZE    0x3c
+        uint32_t dfszreg[DWC2_DFSZREG_SIZE / sizeof(uint32_t)];
+        struct {
+            uint32_t dptxfsiz[DWC2_NB_EP];      /* 104 */
         };
     };
 
