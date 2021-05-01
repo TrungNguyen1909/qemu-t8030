@@ -76,6 +76,7 @@
 #define CFG_FUNC2	    (INPUT_ENABLE | FUNC_ALT2 |                        INT_MASKED)
 
 static void apple_gpio_update_pincfg(AppleGPIOState *s, int pin, uint32_t value) {
+    s->gpio_cfg[pin] = value;
     if (value & FUNC_MASK) {
         // TODO: Is this how FUNC_ALT0 supposed to behave?
         switch (value & FUNC_MASK) {
@@ -93,7 +94,6 @@ static void apple_gpio_update_pincfg(AppleGPIOState *s, int pin, uint32_t value)
             qemu_set_irq(s->out[pin], 1);
         }
     }
-    s->gpio_cfg[pin] = value;
 }
 
 
