@@ -33,10 +33,10 @@
 #include "hw/display/xnu_ramfb.h"
 #include "include/hw/qdev-properties.h"
 
-void xnu_define_ramfb_device(AddressSpace* as, hwaddr ramfb_pa)
+void xnu_define_ramfb_device(AddressSpace *as, hwaddr ramfb_pa)
 {
-
     DeviceState *fb_dev;
+
     fb_dev = qdev_new(TYPE_XNU_RAMFB_DEVICE);
     qdev_prop_set_uint64(fb_dev, "as", (hwaddr)as);
     qdev_prop_set_uint64(fb_dev, "fb_pa", ramfb_pa);
@@ -47,15 +47,14 @@ void xnu_define_ramfb_device(AddressSpace* as, hwaddr ramfb_pa)
     sysbus_realize_and_unref(SYS_BUS_DEVICE(fb_dev), &error_fatal);
 }
 
-void  xnu_get_video_bootargs(void *opaque, hwaddr ramfb_pa)
+void xnu_get_video_bootargs(void *opaque, hwaddr ramfb_pa)
 {
+    video_boot_args *v_bootargs = (video_boot_args *)opaque;
 
-    video_boot_args* v_bootargs = (video_boot_args*)opaque;
     v_bootargs->v_baseAddr = ramfb_pa | 1;
     v_bootargs->v_depth = V_DEPTH;
     v_bootargs->v_display = V_DISPLAY;
     v_bootargs->v_height = V_HEIGHT;
     v_bootargs->v_width = V_WIDTH;
     v_bootargs->v_rowBytes = V_LINESIZE;
-
 }
