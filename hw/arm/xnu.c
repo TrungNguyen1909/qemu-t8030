@@ -194,7 +194,7 @@ static void extract_im4p_payload(const char* filename, char* payload_type /* mus
     int ret;
 
     if (!g_file_get_contents(filename, (char **)&file_data, &fsize, NULL)) {
-        error_report("Could not load %s data from file '%s'", payload_type, filename);
+        error_report("Could not load data from file '%s'", filename);
         exit(EXIT_FAILURE);
     }
 
