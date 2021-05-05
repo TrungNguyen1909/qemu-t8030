@@ -3,7 +3,7 @@ softmmu_ss.add(files(
   'cdrom.c',
   'hd-geometry.c'
 ))
-specific_ss.add(when: ['CONFIG_SOFTMMU', 'TARGET_AARCH64'], if_true: files('apple-ans.c'))
+specific_ss.add(when: ['CONFIG_SOFTMMU', 'TARGET_AARCH64'], if_true: files('apple_ans.c'))
 softmmu_ss.add(when: 'CONFIG_ECC', if_true: files('ecc.c'))
 softmmu_ss.add(when: 'CONFIG_FDC', if_true: files('fdc.c'))
 softmmu_ss.add(when: 'CONFIG_NAND', if_true: files('nand.c'))
