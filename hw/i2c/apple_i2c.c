@@ -85,6 +85,7 @@
 static void apple_i2c_gpio_set(void *opaque, int line, int level)
 {
     AppleI2CState *s = APPLE_I2C(opaque);
+
     level = bitbang_i2c_set(&s->bitbang, line, level);
     if (level != s->last_level) {
         s->last_level = level;
@@ -95,15 +96,19 @@ static void apple_i2c_gpio_set(void *opaque, int line, int level)
 static void i2c_reg_write(void *opaque,
                   hwaddr addr,
                   uint64_t data,
-                  unsigned size){
+                  unsigned size)
+{
     qemu_log_mask(LOG_UNIMP, "I2C: reg WRITE @ 0x" TARGET_FMT_plx " value: 0x" TARGET_FMT_plx "\n", addr, data);    
 }
+
 static uint64_t i2c_reg_read(void *opaque,
                      hwaddr addr,
-                     unsigned size){
+                     unsigned size)
+{
     qemu_log_mask(LOG_UNIMP, "I2C: reg READ @ 0x" TARGET_FMT_plx "\n", addr);
     return 0;
 }
+
 static const MemoryRegionOps i2c_reg_ops = {
     .write = i2c_reg_write,
     .read = i2c_reg_read,
@@ -119,13 +124,16 @@ DeviceState *apple_i2c_create(DTBNode *node)
     AppleI2CState *s = APPLE_I2C(dev);
     DTBProp *prop = get_dtb_prop(node, "reg");
     uint64_t mmio_size = ((hwaddr*)prop->value)[1];
+    char bus_name[32] = { 0 };
+    
     prop = get_dtb_prop(node, "name");
     dev->id = g_strdup((const char*)prop->value);
     memory_region_init_io(&s->iomem, OBJECT(dev), &i2c_reg_ops, s, (const char*)prop->value, mmio_size);
-    char bus_name[32] = { 0 };
+ 
     snprintf(bus_name, sizeof(bus_name), "%s.bus", (const char*)prop->value);
     s->bus = i2c_init_bus(dev, (const char*)bus_name);
     sysbus_init_mmio(sbd, &s->iomem);
+
     prop = get_dtb_prop(node, "compatible");
     g_free(prop->value);
     // Force soft I2C as we haven't support multi-master yet.
