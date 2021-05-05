@@ -43,7 +43,7 @@
 #include "hw/or-irq.h"
 #include "hw/intc/apple_aic.h"
 #include "hw/block/apple-ans.h"
-#include "hw/gpio/apple-gpio.h"
+#include "hw/gpio/apple_gpio.h"
 #include "hw/i2c/apple_i2c.h"
 
 #include "hw/arm/exynos4210.h"

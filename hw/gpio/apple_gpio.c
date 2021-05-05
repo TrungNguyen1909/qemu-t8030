@@ -1,5 +1,5 @@
 #include "qemu/osdep.h"
-#include "hw/gpio/apple-gpio.h"
+#include "hw/gpio/apple_gpio.h"
 #include "hw/irq.h"
 #include "migration/vmstate.h"
 #include "qemu/bitops.h"
