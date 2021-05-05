@@ -1,5 +1,5 @@
 #include "qemu/osdep.h"
-#include "hw/intc/apple-aic.h"
+#include "hw/intc/apple_aic.h"
 #include "trace.h"
 #include "hw/irq.h"
 #include "migration/vmstate.h"
