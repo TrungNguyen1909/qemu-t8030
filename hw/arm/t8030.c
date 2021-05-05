@@ -42,7 +42,7 @@
 #include "hw/irq.h"
 #include "hw/or-irq.h"
 #include "hw/intc/apple_aic.h"
-#include "hw/block/apple-ans.h"
+#include "hw/block/apple_ans.h"
 #include "hw/gpio/apple_gpio.h"
 #include "hw/i2c/apple_i2c.h"
 
