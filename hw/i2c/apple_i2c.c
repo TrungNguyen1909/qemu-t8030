@@ -36,6 +36,7 @@ static uint64_t i2c_reg_read(void *opaque,
                      unsigned size)
 {
     qemu_log_mask(LOG_UNIMP, "I2C: reg READ @ 0x" TARGET_FMT_plx "\n", addr);
+
     return 0;
 }
 
@@ -69,11 +70,14 @@ DeviceState *apple_i2c_create(DTBNode *node)
     g_free(prop->value);
     prop->value = (uint8_t *)g_strdup("iic,soft");
     prop->length = 9;
+
     qdev_init_gpio_in(dev, apple_i2c_gpio_set, 2);
     qdev_init_gpio_out(dev, &s->out, 1);
+
     sysbus_init_irq(sbd, &s->irq);
 
     bitbang_i2c_init(&s->bitbang, s->bus);
+
     return dev;
 }
 
