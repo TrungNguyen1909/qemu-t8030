@@ -12,17 +12,21 @@
 #include "hw/pci/msi.h"
 
 // Check state and interrupt cpus, call with mutex locked
-static void apple_aic_update(AppleAICState* s) {
+static void apple_aic_update(AppleAICState* s)
+{
+    uint32_t intr = 0;
+
     for (int i = 0; i < s->numCPU; i++) {
         s->cpus[i].pendingIPI |= s->cpus[i].deferredIPI;
         s->cpus[i].deferredIPI = 0;
     }
-    uint32_t intr = 0;
+
     for (int i = 0; i < s->numCPU; i++) {
         if (s->cpus[i].pendingIPI & (~s->cpus[i].ipi_mask)) {
             intr |= (1 << i);
         }
     }
+
     for (int i = 0; i < s->numEIR; i++) {
         if (unlikely(s->eir_state[i] & (~s->eir_mask[i]))) {
             for (int j = 0; j < 32; j++) {
@@ -34,15 +38,19 @@ static void apple_aic_update(AppleAICState* s) {
             }
         }
     }
+    
     for (int i = 0; i < s->numCPU; i++) {
         if (intr & (1 << i)) {
             qemu_irq_raise(s->cpus[i].irq);
         }
     }
 }
-static void apple_aic_set_irq(void *opaque, int irq, int level){
+
+static void apple_aic_set_irq(void *opaque, int irq, int level)
+{
     AppleAICState* s = APPLE_AIC(opaque);
-    WITH_QEMU_LOCK_GUARD(&s->mutex){
+
+    WITH_QEMU_LOCK_GUARD(&s->mutex) {
         trace_aic_set_irq(irq, level);
         if(level) {
             set_bit(irq, (unsigned long*)s->eir_state);
@@ -51,34 +59,42 @@ static void apple_aic_set_irq(void *opaque, int irq, int level){
         }
     }
 }
-static void apple_aic_tick(void *opaque) {
+
+static void apple_aic_tick(void *opaque)
+{
     AppleAICState* s = APPLE_AIC(opaque);
-    WITH_QEMU_LOCK_GUARD(&s->mutex){
+
+    WITH_QEMU_LOCK_GUARD(&s->mutex) {
         apple_aic_update(s);
     }
     timer_mod_ns(s->timer, qemu_clock_get_ns(QEMU_CLOCK_VIRTUAL) + kAICWT);
 }
-static void apple_aic_reset(DeviceState *dev){
+
+static void apple_aic_reset(DeviceState *dev)
+{
     AppleAICState *s = APPLE_AIC(dev);
     // mask all IRQs
     memset(s->eir_mask, 0xffff, sizeof(uint32_t)*s->numEIR);
     // dest default to 0
     memset(s->eir_dest, 0, sizeof(uint32_t)*s->numIRQ);
-    for(int i=0; i < s->numCPU; i++)
-    {
+
+    for(int i=0; i < s->numCPU; i++) {
         // mask all IPI
         s->cpus[i].ipi_mask = AIC_IPI_NORMAL | AIC_IPI_SELF;
         s->cpus[i].pendingIPI = 0;
         s->cpus[i].deferredIPI = 0;
     }
 }
+
 static void apple_aic_write(void *opaque,
                   hwaddr addr,
                   uint64_t data,
-                  unsigned size){
+                  unsigned size)
+{
     AppleAICOpaque* o = (AppleAICOpaque*)opaque;
     AppleAICState* s = APPLE_AIC(o->aic);
     uint32_t val = (uint32_t)data;
+
     WITH_QEMU_LOCK_GUARD(&s->mutex) {
         switch (addr) {
             case rAIC_RST:
@@ -210,9 +226,11 @@ static void apple_aic_write(void *opaque,
         qemu_log_mask(LOG_UNIMP, "AIC: Write to unspported reg 0x" TARGET_FMT_plx " cpu %u\n", addr, o->cpu_id);
     }
 }
+
 static uint64_t apple_aic_read(void *opaque,
                      hwaddr addr,
-                     unsigned size){
+                     unsigned size)
+{
     AppleAICOpaque* o = (AppleAICOpaque*)opaque;
     AppleAICState* s = APPLE_AIC(o->aic);
     WITH_QEMU_LOCK_GUARD(&s->mutex) {
@@ -322,6 +340,7 @@ static void apple_aic_init(Object *obj)
     SysBusDevice *sbd = SYS_BUS_DEVICE(obj);
     qemu_mutex_init(&s->mutex);
     s->cpus = g_new0(AppleAICOpaque, s->numCPU);
+
     for(int i=0; i < s->numCPU; i++){
         AppleAICOpaque *opaque = &s->cpus[i];
         opaque->aic = s;
@@ -338,15 +357,18 @@ static void apple_aic_init(Object *obj)
     s->eir_dest = g_malloc0(sizeof(uint32_t) * s->numIRQ);
     s->eir_state = g_malloc0(sizeof(bool) * s->numIRQ);
 }
-static void apple_aic_realize(DeviceState *dev, Error **errp){
+
+static void apple_aic_realize(DeviceState *dev, Error **errp)
+{
     AppleAICState *s = APPLE_AIC(dev);
-    s->timer = timer_new_ns(QEMU_CLOCK_VIRTUAL,
-                            apple_aic_tick, dev);
+    s->timer = timer_new_ns(QEMU_CLOCK_VIRTUAL, apple_aic_tick, dev);
     timer_mod_ns(s->timer, kAICWT);
     apple_aic_reset(dev);
     msi_nonbroken = true;
 }
-SysBusDevice* apple_aic_create(uint32_t numCPU, DTBNode* node){
+
+SysBusDevice* apple_aic_create(uint32_t numCPU, DTBNode* node)
+{
     DeviceState  *dev;
     AppleAICState *s;
 
@@ -371,6 +393,7 @@ SysBusDevice* apple_aic_create(uint32_t numCPU, DTBNode* node){
 
     return SYS_BUS_DEVICE(dev);
 }
+
 static void apple_aic_class_init(ObjectClass *klass, void *data)
 {
     DeviceClass *dc = DEVICE_CLASS(klass);
