@@ -84,6 +84,7 @@ static void apple_gpio_update_pincfg(AppleGPIOState *s, int pin, uint32_t value)
         case FUNC_ALT0:
             qemu_set_irq(s->out[pin], 1);
             break;
+
         default:
             qemu_log_mask(LOG_UNIMP, "%s: set pin %u to unknown func %u", __func__, pin, value & FUNC_MASK);
             break;
@@ -121,31 +122,37 @@ static void apple_gpio_set(void *opaque, int pin, int level)
         case CFG_GP_IN:
         case CFG_GP_OUT:
             break;
+
         case CFG_INT_LVL_HI:
             if (level) {
                 set_bit(pin, (unsigned long *)s->int_cfg[irqgrp]);
             }
             break;
+
         case CFG_INT_LVL_LO:
             if (!level) {
                 set_bit(pin, (unsigned long *)s->int_cfg[irqgrp]);
             }
             break;
+
         case CFG_INT_EDG_RIS:
             if (test_bit(pin, (unsigned long *)s->old_in) == 0 && level) {
                 set_bit(pin, (unsigned long *)s->int_cfg[irqgrp]);
             }
             break;
+
         case CFG_INT_EDG_FAL:
             if (test_bit(pin, (unsigned long *)s->old_in) && !level) {
                 set_bit(pin, (unsigned long *)s->int_cfg[irqgrp]);
             }
             break;
+
         case CFG_INT_EDG_ANY:
             if (test_bit(pin, (unsigned long *)s->old_in) != level) {
                 set_bit(pin, (unsigned long *)s->int_cfg[irqgrp]);
             }
             break;
+
         default:
             break;
         }
@@ -160,6 +167,7 @@ static void apple_gpio_realize(DeviceState *dev, Error **errp)
 {
     int i;
     AppleGPIOState *s = APPLE_GPIO(dev);
+
     s->gpio_cfg = g_new0(uint32_t, s->npins);
     s->int_cfg = g_new0(uint32_t *, s->nirqgrps);
 
@@ -196,12 +204,14 @@ static void apple_gpio_cfg_write(AppleGPIOState *s, unsigned int pin,
                       "%s: Bad offset 0x%" HWADDR_PRIx "\n", __func__, addr);
         return;
     }
+
     apple_gpio_update_pincfg(s, pin, value);
 }
 
 static uint32_t apple_gpio_cfg_read(AppleGPIOState *s, unsigned int pin, hwaddr addr)
 {
     uint32_t val;
+
     if (pin >= s->npins) {
         qemu_log_mask(LOG_GUEST_ERROR,
                       "%s: Bad offset 0x%" HWADDR_PRIx "\n", __func__, addr);
@@ -268,9 +278,11 @@ static void apple_gpio_reg_write(void *opaque,
         }
         return apple_gpio_cfg_write(s, (addr - rGPIOCFG(0)) >> 2, addr, data);
         break;
+
     case rGPIOINT(0, 0) ... rGPIOINT(GPIO_MAX_INT_GRP_NR, GPIO_MAX_PIN_NR - 1):
         return apple_gpio_int_write(s, (addr - rGPIOINT(0, 0)) >> 6, addr, data);
         break;
+
     default:
         qemu_log_mask(LOG_GUEST_ERROR,
                     "%s: Bad offset 0x%" HWADDR_PRIx
@@ -289,16 +301,20 @@ static uint64_t apple_gpio_reg_read(void *opaque,
     case rGPIOCFG(0) ... rGPIOCFG(GPIO_MAX_PIN_NR - 1):
         return apple_gpio_cfg_read(s, (addr - rGPIOCFG(0)) >> 2, addr);
         break;
+
     case rGPIOINT(0, 0) ... rGPIOINT(GPIO_MAX_INT_GRP_NR, GPIO_MAX_PIN_NR - 1):
         return apple_gpio_int_read(s, (addr - rGPIOINT(0, 0)) >> 6, addr);
         break;
+
     case rGPIO_NPL_IN_EN:
         return s->npl;
         break;
+
     default:
         qemu_log_mask(LOG_GUEST_ERROR,
                     "%s: Bad offset 0x%" HWADDR_PRIx "\n", __func__, addr);
     }
+
     return 0;
 }
 
@@ -335,6 +351,7 @@ DeviceState *apple_gpio_create(DTBNode *node)
     s->npins = *(uint32_t *)prop->value;
     assert(s->npins < GPIO_MAX_PIN_NR);
     qdev_init_gpio_in(dev, apple_gpio_set, s->npins);
+
     s->out = g_new(qemu_irq, s->npins);
     qdev_init_gpio_out(dev, s->out, s->npins);
 
@@ -348,6 +365,7 @@ DeviceState *apple_gpio_create(DTBNode *node)
 
     prop = get_dtb_prop(node, "AAPL,phandle");
     assert(prop);
+
     s->phandle = *(uint32_t *)prop->value;
 
     return dev;
