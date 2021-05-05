@@ -204,7 +204,7 @@ static void iop_akf_reg_write(void *opaque, hwaddr addr,
                 s->ep0_status = EP0_WAIT_HELLO;
 
                 config = pci_default_read_config(PCI_DEVICE(&s->nvme),
-                                                    PCI_COMMAND, 4);
+                                                 PCI_COMMAND, 4);
                 config |= 0x0002 | 0x0004; /* memory | bus */
                 pci_default_write_config(PCI_DEVICE(&s->nvme),
                                             PCI_COMMAND, config, 4);
@@ -270,12 +270,15 @@ static uint64_t iop_akf_reg_read(void *opaque, hwaddr addr, unsigned size)
         case REG_A7V4_I2A_MSG1:
             m = QTAILQ_FIRST(&s->outbox);
             assert(m);
+
             QTAILQ_REMOVE(&s->outbox, m, entry);
             m->flags = iop_outbox_flags(s);
             ret = m->data[1];
+
             if (iop_outbox_empty(s)) {
                 qemu_irq_lower(s->irqs[IRQ_IOP_OUTBOX]);
             }
+
             g_free(m);
             return ret;
 
@@ -291,6 +294,7 @@ static uint64_t iop_akf_reg_read(void *opaque, hwaddr addr, unsigned size)
             } else {
                 ret |= REG_A7V4_OUTBOX_CTRL_HAS_MSG;
             }
+
             if (s->outboxEnable) {
                 ret |= REG_A7V4_OUTBOX_CTRL_ENABLE;
             }
@@ -382,6 +386,17 @@ SysBusDevice *apple_ans_create(DTBNode *node)
     PCIExpressHost *pex;
     DTBNode *child;
     DTBProp *prop;
+    uint64_t *reg;
+    int i;
+    uint32_t data;
+    struct segment_range {
+        uint64_t phys;
+        uint64_t virt;
+        uint64_t remap;
+        uint32_t size;
+        uint32_t flag;
+    };
+    struct segment_range segrange[2] = { 0 };
 
     dev = qdev_new(TYPE_APPLE_ANS);
     s = APPLE_ANS(dev);
@@ -392,7 +407,9 @@ SysBusDevice *apple_ans_create(DTBNode *node)
     qemu_mutex_init(&s->mutex);
     prop = get_dtb_prop(node, "reg");
     assert(prop);
-    uint64_t *reg = (uint64_t *)prop->value;
+
+    reg = (uint64_t *)prop->value;
+
     /*
      * 0: AppleA7IOP akfRegMap
      * 1: AppleASCWrapV2 coreRegisterMap
@@ -402,39 +419,40 @@ SysBusDevice *apple_ans_create(DTBNode *node)
     memory_region_init_io(s->iomems[0], OBJECT(dev), &iop_akf_reg_ops, s,
                           TYPE_APPLE_ANS ".akf-reg", reg[1]);
     sysbus_init_mmio(sbd, s->iomems[0]);
+
     s->iomems[1] = g_new(MemoryRegion, 1);
     memory_region_init_io(s->iomems[1], OBJECT(dev), &ascv2_core_reg_ops, s,
                           TYPE_APPLE_ANS ".ascv2-core-reg", reg[3]);
     sysbus_init_mmio(sbd, s->iomems[1]);
+
     s->iomems[2] = g_new(MemoryRegion, 1);
     memory_region_init_io(s->iomems[2], OBJECT(dev), &iop_autoboot_reg_ops, s,
                           TYPE_APPLE_ANS ".iop-autoboot-reg", reg[5]);
     sysbus_init_mmio(sbd, s->iomems[2]);
-    for (int i = 0; i < 5; i++) {
+
+    for (i = 0; i < 5; i++) {
         sysbus_init_irq(sbd, &s->irqs[i]);
     }
+
     QTAILQ_INIT(&s->inbox);
     QTAILQ_INIT(&s->outbox);
     qemu_cond_init(&s->iop_halt);
 
     child = get_dtb_child_node_by_name(node, "iop-ans-nub");
     assert(child);
-    uint32_t data = 1;
+
+    data = 1;
     add_dtb_prop(child, "pre-loaded", 4, (uint8_t *)&data);
     add_dtb_prop(child, "running", 4, (uint8_t *)&data);
+
     prop = get_dtb_prop(child, "region-base");
     *(uint64_t *)prop->value = 0x8fc400000;
+
     prop = get_dtb_prop(child, "region-size");
     *(uint64_t *)prop->value = 0x3c00000;
+
     add_dtb_prop(child, "segment-names", 14, (uint8_t *)"__TEXT;__DATA");
-    struct segment_range {
-        uint64_t phys;
-        uint64_t virt;
-        uint64_t remap;
-        uint32_t size;
-        uint32_t flag;
-    };
-    struct segment_range segrange[2] = { 0 };
+
     segrange[0].phys = 0x800024000;
     segrange[0].virt = 0x0;
     segrange[0].remap = 0x800024000;
@@ -450,6 +468,7 @@ SysBusDevice *apple_ans_create(DTBNode *node)
 
     prop = get_dtb_prop(node, "nvme-interrupt-idx");
     assert(prop);
+
     s->nvme_interrupt_idx = *(uint32_t *)prop->value;
     object_initialize_child(OBJECT(dev), "nvme", &s->nvme, TYPE_NVME);
 
@@ -472,6 +491,7 @@ SysBusDevice *apple_ans_create(DTBNode *node)
     memory_region_init_alias(s->iomems[3], OBJECT(dev), TYPE_APPLE_ANS ".nvme",
                              &s->nvme.iomem, 0, reg[7]);
     sysbus_init_mmio(sbd, s->iomems[3]);
+
     return sbd;
 }
 
@@ -479,10 +499,13 @@ static void apple_ans_realize(DeviceState *dev, Error **errp)
 {
     AppleANSState *s = APPLE_ANS(dev);
     PCIHostState *pci = PCI_HOST_BRIDGE(dev);
+
     pci_realize_and_unref(PCI_DEVICE(&s->nvme), pci->bus, &error_fatal);
+
     if (iop_inbox_empty(s)) {
         qemu_irq_raise(s->irqs[IRQ_IOP_INBOX]);
     }
+
     qemu_thread_create(&s->iop_thread, "ans-iop", iop_thread_fn,
                        (void *)s, QEMU_THREAD_JOINABLE);
 }
@@ -490,6 +513,7 @@ static void apple_ans_realize(DeviceState *dev, Error **errp)
 static void apple_ans_unrealize(DeviceState *dev)
 {
     AppleANSState *s = APPLE_ANS(dev);
+
     WITH_QEMU_LOCK_GUARD(&s->mutex) {
         s->stopping = true;
     }
@@ -499,6 +523,7 @@ static void apple_ans_unrealize(DeviceState *dev)
 static void apple_ans_class_init(ObjectClass *klass, void *data)
 {
     DeviceClass *dc = DEVICE_CLASS(klass);
+
     dc->realize = apple_ans_realize;
     dc->unrealize = apple_ans_unrealize;
     /* dc->reset = apple_ans_reset; */
