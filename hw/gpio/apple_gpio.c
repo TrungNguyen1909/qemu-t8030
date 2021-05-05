@@ -261,7 +261,7 @@ static void apple_gpio_reg_write(void *opaque,
 
     switch (addr) {
     case rGPIOCFG(0) ... rGPIOCFG(GPIO_MAX_PIN_NR - 1):
-        if ((data & FUNC_MASK) > 1) {
+        if ((data & FUNC_MASK) > FUNC_ALT0) {
             qemu_log_mask(LOG_UNIMP,
                             "%s: alternate function " TARGET_FMT_plx " is not supported\n",
                             __func__, ((data & FUNC_MASK) >> FUNC_SHIFT) - 1);
