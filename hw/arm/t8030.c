@@ -1045,7 +1045,6 @@ static void T8030_pmgr_setup(MachineState* machine)
         snprintf(name, 32, "pmp-reg");
         memory_region_init_io(mem, OBJECT(machine), &pmgr_unk_reg_ops, (void*)0x3BC00000, name, 0x60000);
         memory_region_add_subregion(tms->sysmem, tms->soc_base_pa + 0x3BC00000, mem);
-        g_free(name);
     }
 
     add_dtb_prop(child, "voltage-states0", 24, (uint8_t*)"\x01\x00\x00\x00\x71\x02\x00\x00\x01\x00\x00\x00\xa9\x02\x00\x00\x01\x00\x00\x00\xe4\x02\x00\x00");
