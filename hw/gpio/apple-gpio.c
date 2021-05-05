@@ -75,7 +75,8 @@
 #define CFG_FUNC1	    (INPUT_ENABLE | FUNC_ALT1 |                        INT_MASKED)
 #define CFG_FUNC2	    (INPUT_ENABLE | FUNC_ALT2 |                        INT_MASKED)
 
-static void apple_gpio_update_pincfg(AppleGPIOState *s, int pin, uint32_t value) {
+static void apple_gpio_update_pincfg(AppleGPIOState *s, int pin, uint32_t value)
+{
     s->gpio_cfg[pin] = value;
     if (value & FUNC_MASK) {
         // TODO: Is this how FUNC_ALT0 supposed to behave?
@@ -100,16 +101,20 @@ static void apple_gpio_update_pincfg(AppleGPIOState *s, int pin, uint32_t value)
 static void apple_gpio_set(void *opaque, int pin, int level)
 {
     AppleGPIOState *s = APPLE_GPIO(opaque);
-    if(pin >= s->npins) {
+    int grp;
+
+    if (pin >= s->npins) {
         return;
     }
+
     level = level != 0;
     if (level) {
         set_bit(pin, (unsigned long*)s->in);
     } else {
         clear_bit(pin, (unsigned long*)s->in);
     }
-    int grp = pin >> 5;
+
+    grp = pin >> 5;
     if ((s->gpio_cfg[pin] & INT_MASKED) != INT_MASKED) {
         int irqgrp = (s->gpio_cfg[pin] & INT_MASKED) >> INTR_GRP_SHIFT;
         switch (s->gpio_cfg[pin] & CFG_MASK) {
@@ -143,84 +148,113 @@ static void apple_gpio_set(void *opaque, int pin, int level)
                 break;
             
         }
+
         s->old_in[grp] = s->in[grp];
         qemu_set_irq(s->irqs[irqgrp], find_first_bit((unsigned long*)s->int_cfg[irqgrp], s->npins) != s->npins);
     }
     
 }
+
 static void apple_gpio_realize(DeviceState *dev, Error **errp)
 {
+    int i;
     AppleGPIOState *s = APPLE_GPIO(dev);
     s->gpio_cfg = g_new0(uint32_t, s->npins);
     s->int_cfg = g_new0(uint32_t*, s->nirqgrps);
-    for(int i = 0; i < s->nirqgrps; i++){
+
+    for(i = 0; i < s->nirqgrps; i++){
         s->int_cfg[i] = g_new0(uint32_t, s->npins);
     }
+
     s->old_in = g_new0(uint32_t, (s->npins + 31) >> 5); //ceil(npins / 32);
     s->in = g_new0(uint32_t, (s->npins + 31) >> 5); //ceil(npins / 32);
 }
+
 static void apple_gpio_reset(DeviceState *dev)
 {
+    int i;
     AppleGPIOState *s = APPLE_GPIO(dev);
-    for(int i = 0; i < s->npins; i++) {
+
+    for(i = 0; i < s->npins; i++) {
         s->gpio_cfg[i] = CFG_DISABLED;
     }
-    for(int i = 0; i < s->nirqgrps; i++) {
+
+    for(i = 0; i < s->nirqgrps; i++) {
         memset(s->int_cfg[i], 0, 4 * s->npins);
     }
+
     memset(s->old_in, 0, 4 * ((s->npins + 31) >> 5));
     memset(s->in, 0, 4 * ((s->npins + 31) >> 5));
 }
-static void apple_gpio_cfg_write(AppleGPIOState *s, unsigned int pin, hwaddr addr, uint32_t value) {
-    if (pin >= s->npins){
+
+static void apple_gpio_cfg_write(AppleGPIOState *s, unsigned int pin, hwaddr addr, uint32_t value)
+{
+    if (pin >= s->npins) {
         qemu_log_mask(LOG_GUEST_ERROR,
                       "%s: Bad offset 0x%" HWADDR_PRIx "\n", __func__, addr);
         return;
     }
     apple_gpio_update_pincfg(s, pin, value);
 }
-static uint32_t apple_gpio_cfg_read(AppleGPIOState *s, unsigned int pin, hwaddr addr) {
+
+static uint32_t apple_gpio_cfg_read(AppleGPIOState *s, unsigned int pin, hwaddr addr)
+{
+    uint32_t val;
     if (pin >= s->npins){
         qemu_log_mask(LOG_GUEST_ERROR,
                       "%s: Bad offset 0x%" HWADDR_PRIx "\n", __func__, addr);
         return 0;
     }
-    uint32_t val = s->gpio_cfg[pin];
+
+    val = s->gpio_cfg[pin];
 
     if (((val & FUNC_MASK) == FUNC_GPIO) && ((val & CFG_MASK) == CFG_GP_IN)) {
         val &= ~DATA_1;
         val |= test_bit(pin, (unsigned long*)s->in);
     }
+
     return val;
 }
-static void apple_gpio_int_write(AppleGPIOState *s, unsigned int group, hwaddr addr, uint32_t value) {
+
+static void apple_gpio_int_write(AppleGPIOState *s, unsigned int group, hwaddr addr, uint32_t value)
+{
+    int offset;
+
     if (group >= s->nirqgrps){
         qemu_log_mask(LOG_GUEST_ERROR,
                       "%s: Bad offset 0x%" HWADDR_PRIx "\n", __func__, addr);
         return;
     }
     
-    int offset = addr - rGPIOINT(group, 0);
+    offset = addr - rGPIOINT(group, 0);
     s->int_cfg[group][offset >> 2] = value;
 
-    if(find_first_bit((unsigned long*)s->int_cfg[group], s->npins) == s->npins) {
+    if (find_first_bit((unsigned long*)s->int_cfg[group], s->npins) == s->npins) {
         qemu_irq_lower(s->irqs[group]);
     }
 }
-static uint32_t apple_gpio_int_read(AppleGPIOState *s, unsigned int group, hwaddr addr) {
+
+static uint32_t apple_gpio_int_read(AppleGPIOState *s, unsigned int group, hwaddr addr)
+{
+    int offset;
+
     if (group >= s->nirqgrps){
         qemu_log_mask(LOG_GUEST_ERROR,
                       "%s: Bad offset 0x%" HWADDR_PRIx "\n", __func__, addr);
         return 0;
     }
-    int offset = addr - rGPIOINT(group, 0);
+
+    offset = addr - rGPIOINT(group, 0);
     return s->int_cfg[group][offset >> 2];
 }
+
 static void apple_gpio_reg_write(void *opaque,
                   hwaddr addr,
                   uint64_t data,
-                  unsigned size){
+                  unsigned size)
+{
     AppleGPIOState *s = APPLE_GPIO(opaque);
+
     switch(addr) {
         case rGPIOCFG(0) ... rGPIOCFG(GPIO_MAX_PIN_NR - 1):
             if (data & FUNC_MASK) {
@@ -242,10 +276,13 @@ static void apple_gpio_reg_write(void *opaque,
             break;
     }
 }
+
 static uint64_t apple_gpio_reg_read(void *opaque,
                      hwaddr addr,
-                     unsigned size){
+                     unsigned size)
+{
     AppleGPIOState *s = APPLE_GPIO(opaque);
+
     switch(addr) {
         case rGPIOCFG(0) ... rGPIOCFG(GPIO_MAX_PIN_NR - 1):
             return apple_gpio_cfg_read(s, (addr - rGPIOCFG(0)) >> 2, addr);
@@ -262,6 +299,7 @@ static uint64_t apple_gpio_reg_read(void *opaque,
     }
     return 0;
 }
+
 static const MemoryRegionOps gpio_reg_ops = {
     .write = apple_gpio_reg_write,
     .read = apple_gpio_reg_read,
@@ -270,7 +308,10 @@ static const MemoryRegionOps gpio_reg_ops = {
     .valid.unaligned = false,
 };
 
-DeviceState *apple_gpio_create(DTBNode *node){
+DeviceState *apple_gpio_create(DTBNode *node)
+{
+    int i;
+    uint64_t mmio_size;
     DeviceState *dev;
     SysBusDevice *sbd;
     AppleGPIOState *s;
@@ -281,7 +322,7 @@ DeviceState *apple_gpio_create(DTBNode *node){
 
     s->iomem = g_new(MemoryRegion, 1);
     DTBProp *prop = get_dtb_prop(node, "reg");
-    uint64_t mmio_size = ((hwaddr*)prop->value)[1];
+    mmio_size = ((hwaddr*)prop->value)[1];
     prop = get_dtb_prop(node, "name");
     dev->id = g_strdup((const char*)prop->value);
     memory_region_init_io(s->iomem, OBJECT(dev), &gpio_reg_ops, s, (const char*)prop->value, mmio_size);
@@ -297,12 +338,15 @@ DeviceState *apple_gpio_create(DTBNode *node){
     prop = get_dtb_prop(node, "#gpio-int-groups");
     s->nirqgrps = *(uint32_t*)prop->value;
     s->irqs = g_new(qemu_irq, s->nirqgrps);
-    for(int i = 0; i < s->nirqgrps; i++){
+
+    for(i = 0; i < s->nirqgrps; i++){
         sysbus_init_irq(sbd, &s->irqs[i]);
     }
+
     prop = get_dtb_prop(node, "AAPL,phandle");
     assert(prop);
     s->phandle = *(uint32_t*)prop->value;
+
     return dev;
 }
 
