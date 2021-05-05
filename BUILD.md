@@ -14,8 +14,8 @@ brew install ninja pixman lzfse
 
 ### Linux
 ```sh
-sudo apt-get update
-sudo apt-get install -y git libglib2.0-dev libfdt-dev libpixman-1-dev zlib1g-dev libtasn1-dev ninja-build build-essential cmake
+sudo apt update
+sudo apt install -y git libglib2.0-dev libfdt-dev libpixman-1-dev zlib1g-dev libtasn1-dev ninja-build build-essential cmake
 
 #lzfse
 git clone https://github.com/lzfse/lzfse
