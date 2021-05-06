@@ -5125,7 +5125,8 @@ static uint16_t nvme_format(NvmeCtrl *n, NvmeRequest *req)
     return req->status;
 }
 
-static uint16_t nvme_tunnel(NvmeCtrl *n, NvmeRequest *req) {
+static uint16_t nvme_tunnel(NvmeCtrl *n, NvmeRequest *req)
+{
     return NVME_SUCCESS;
 }
 
@@ -5394,7 +5395,7 @@ static int nvme_start_ctrl(NvmeCtrl *n)
     n->page_size = page_size;
     n->max_prp_ents = n->page_size / sizeof(uint64_t);
     n->cqe_size = 1 << NVME_CC_IOCQES(n->bar.cc);
-    //TODO: entry_size
+    // TODO: entry_size
     nvme_init_cq(&n->admin_cq, n, n->bar.acq, 0, 0,
                  NVME_AQA_ACQS(n->bar.aqa) + 1, 1);
     nvme_init_sq(&n->admin_sq, n, n->bar.asq, 0, 0,
@@ -5678,7 +5679,7 @@ static uint64_t nvme_mmio_read(void *opaque, hwaddr addr, unsigned size)
         }
         memcpy(&val, ptr + addr, size);
     } else if (n->params.is_apple_ans) {
-        switch (addr){
+        switch (addr) {
             case NVME_APPLE_MAX_PEND_CMDS:
                 val = NVME_APPLE_MAX_PEND_CMDS_VAL;
                 break;
@@ -5835,7 +5836,7 @@ static void nvme_mmio_write(void *opaque, hwaddr addr, uint64_t data,
 
     if (addr < sizeof(n->bar)) {
         nvme_write_bar(n, addr, data, size);
-    } else if (addr < sizeof(n->bar) + 2 * (n->params.max_ioqpairs + 1) * NVME_DB_SIZE){
+    } else if (addr < sizeof(n->bar) + 2 * (n->params.max_ioqpairs + 1) * NVME_DB_SIZE) {
         nvme_process_db(n, addr, data);
     } else if (n->params.is_apple_ans) {
         fprintf(stderr, "ANS2: MMIO write to unknown vendor register,"
@@ -6124,7 +6125,7 @@ static void nvme_init_ctrl(NvmeCtrl *n, PCIDevice *pci_dev)
     id->wctemp = cpu_to_le16(NVME_TEMPERATURE_WARNING);
     id->cctemp = cpu_to_le16(NVME_TEMPERATURE_CRITICAL);
 
-    //TODO: ANS2: IOSQES = 7 on non-admin queues
+    // TODO: ANS2: IOSQES = 7 on non-admin queues
     id->sqes = (0x7 << 4) | 0x6;
     id->cqes = (0x4 << 4) | 0x4;
     id->nn = cpu_to_le32(n->num_namespaces);
@@ -6153,7 +6154,7 @@ static void nvme_init_ctrl(NvmeCtrl *n, PCIDevice *pci_dev)
 
     // id->capacity = 0;
     // for (int i = 0; i < n->num_namespaces; i++)
-    // if(n->namespaces[i]){
+    // if (n->namespaces[i]) {
     //     id->capacity += n->namespaces[i]->size;
     // }
     id->capacity = 128;

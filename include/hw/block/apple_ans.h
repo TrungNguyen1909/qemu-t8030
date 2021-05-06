@@ -21,12 +21,12 @@ OBJECT_DECLARE_SIMPLE_TYPE(AppleANSState, APPLE_ANS)
 
 #define REG_AKF_CONFIG                  0x2043
 
-/* 
-AP -> IOP: A2I; IOP -> AP: I2A
-Inbox: A2I
-Outbox: I2A
-*/
-#define REG_A7V4_CPU_CTRL		            0x0044
+/*
+ * AP -> IOP: A2I; IOP -> AP: I2A
+ * Inbox: A2I
+ * Outbox: I2A
+ */
+#define REG_A7V4_CPU_CTRL                   0x0044
 #define     REG_A7V4_CPU_CTRL_RUN           0x10
 #define REG_A7V4_NMI0                       0xc04
 #define REG_A7V4_NMI1                       0xc14
@@ -40,9 +40,9 @@ Outbox: I2A
 #define     REG_A7V4_OUTBOX_CTRL_EMPTY      (1 << 17)
 #define     REG_A7V4_OUTBOX_CTRL_HAS_MSG    (1 << 21)
 #define REG_A7V4_A2I_MSG0                   0x8800
-#define REG_A7V4_A2I_MSG1		            0x8808
-#define REG_A7V4_I2A_MSG0		            0x8830
-#define REG_A7V4_I2A_MSG1		            0x8838
+#define REG_A7V4_A2I_MSG1                   0x8808
+#define REG_A7V4_I2A_MSG0                   0x8830
+#define REG_A7V4_I2A_MSG1                   0x8838
 
 #define A7V4_MSG_FLAG_LAST                  (1 << 20)
 #define A7V4_MSG_FLAG_NOTLAST               REG_A7V4_OUTBOX_CTRL_HAS_MSG
@@ -57,12 +57,12 @@ Outbox: I2A
 #define MSG_TYPE_POWERACK                   11
 
 enum apple_iop_mailbox_ep0_state {
-	EP0_IDLE,
-	EP0_WAIT_HELLO,
+    EP0_IDLE,
+    EP0_WAIT_HELLO,
     EP0_WAIT_ROLLCALL,
     EP0_WAIT_EPSTART,
     EP0_WAIT_POWERACK,
-	EP0_DONE,
+    EP0_DONE,
 };
 
 struct iop_message {
@@ -90,18 +90,18 @@ struct iop_message {
                         } power;
                         struct QEMU_PACKED {
                             uint32_t epMask;
-                            //bit x set -> create endpoint ((epBlock * 32) + x)
-                            uint8_t epBlock : 6; 
-                            uint16_t unk38 : 13;
-                            uint8_t epEnded : 1;
+                            /* bit x -> endpoint ((epBlock * 32) + x) */
+                            uint8_t epBlock:6;
+                            uint16_t unk38:13;
+                            uint8_t epEnded:1;
                         } rollcall;
                     };
                 };
                 struct QEMU_PACKED {
                     uint32_t field_0;
                     uint16_t field_32;
-                    uint8_t field_48 : 4;
-                    uint8_t type : 4;
+                    uint8_t field_48:4;
+                    uint8_t type:4;
                 };
             };
             uint32_t endpoint;
@@ -111,10 +111,10 @@ struct iop_message {
     QTAILQ_ENTRY(iop_message) entry;
 };
 
-typedef struct iop_message* iop_message_t;
+typedef struct iop_message *iop_message_t;
 
-#define APPLE_BOOT_STATUS		0x1300
-#define   APPLE_BOOT_STATUS_OK		0xde71ce55
+#define APPLE_BOOT_STATUS       0x1300
+#define   APPLE_BOOT_STATUS_OK  0xde71ce55
 
 typedef struct QEMU_PACKED {
     uint32_t unk0;
@@ -123,7 +123,7 @@ typedef struct QEMU_PACKED {
 } NVMeCreateNamespacesEntryStruct;
 struct AppleANSState {
     PCIExpressHost parent_obj;
-    MemoryRegion* iomems[4];
+    MemoryRegion *iomems[4];
     MemoryRegion io_mmio;
     MemoryRegion io_ioport;
     MemoryRegion msix;
@@ -132,7 +132,6 @@ struct AppleANSState {
     QemuCond iop_halt;
     uint32_t ep0_status;
     bool stopping;
-    //bit 0: outbox enable?
     uint32_t config;
     uint32_t cpu_ctrl;
     qemu_irq irqs[5];
@@ -140,14 +139,15 @@ struct AppleANSState {
     uint64_t inboxBuffer[2];
     QTAILQ_HEAD(, iop_message) inbox;
     uint64_t inboxSize;
-    QemuMutex* inboxLock;
+    QemuMutex *inboxLock;
 
     bool outboxEnable;
     QTAILQ_HEAD(, iop_message) outbox;
-    QemuMutex* outboxLock;
+    QemuMutex *outboxLock;
     uint64_t outboxSize;
     NvmeCtrl nvme;
     uint32_t nvme_interrupt_idx;
 };
-SysBusDevice* apple_ans_create(DTBNode* node);
+SysBusDevice *apple_ans_create(DTBNode* node);
+
 #endif /* APPLE_ANS_H */

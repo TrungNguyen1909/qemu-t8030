@@ -2006,13 +2006,15 @@ static void pmintenclr_write(CPUARMState *env, const ARMCPRegInfo *ri,
     pmu_update_irq(env);
 }
 
-static uint64_t vbar_read(CPUARMState *env, const ARMCPRegInfo *ri) {
+static uint64_t vbar_read(CPUARMState *env, const ARMCPRegInfo *ri)
+{
     if (env->gxf.guarded) {
         return env->gxf.vbar_gl[1];
     } else {
         return raw_read(env, ri);
     }
 }
+
 static void vbar_write(CPUARMState *env, const ARMCPRegInfo *ri,
                        uint64_t value)
 {
@@ -2024,15 +2026,17 @@ static void vbar_write(CPUARMState *env, const ARMCPRegInfo *ri,
      */
     raw_write(env, ri, value & ~0x1FULL);
 }
+
 static void vbar_el1_write(CPUARMState *env, const ARMCPRegInfo *ri,
-                       uint64_t value)
+                           uint64_t value)
 {
     if (env->gxf.guarded) {
         env->gxf.vbar_gl[1] = value & ~0x1FULL;
     } else {
-        if (!env->gxf.guarded && env->cp15.vmsa_lock_el1 & VMSA_LOCK_VBAR_EL1){
+        if (!env->gxf.guarded && env->cp15.vmsa_lock_el1 & VMSA_LOCK_VBAR_EL1) {
             return;
         }
+
         raw_write(env, ri, value & ~0x1FULL);
     }
 }
@@ -2485,14 +2489,17 @@ static const ARMCPRegInfo t2ee_cp_reginfo[] = {
     REGINFO_SENTINEL
 };
 
-static uint64_t tpidr_el1_read(CPUARMState *env, const ARMCPRegInfo *ri){
+static uint64_t tpidr_el1_read(CPUARMState *env, const ARMCPRegInfo *ri)
+{
     if (env->gxf.guarded) {
         return env->gxf.tpidr_gl[1];
     } else {
         return env->cp15.tpidr_el[1];
     }
 }
-static void tpidr_el1_write(CPUARMState *env, const ARMCPRegInfo *ri, uint64_t value){
+
+static void tpidr_el1_write(CPUARMState *env, const ARMCPRegInfo *ri, uint64_t value)
+{
     if (env->gxf.guarded) {
         env->gxf.tpidr_gl[1] = value;
     } else {
@@ -4058,6 +4065,7 @@ static void vmsa_ttbr0_el1_write(CPUARMState *env, const ARMCPRegInfo *ri,
     if (!env->gxf.guarded && env->cp15.vmsa_lock_el1 & VMSA_LOCK_TTBR0_EL1) {
         return;
     }
+
     vmsa_ttbr_write(env, ri, value);
 }
 static void vmsa_ttbr1_el1_write(CPUARMState *env, const ARMCPRegInfo *ri,
@@ -4066,6 +4074,7 @@ static void vmsa_ttbr1_el1_write(CPUARMState *env, const ARMCPRegInfo *ri,
     if (!env->gxf.guarded && env->cp15.vmsa_lock_el1 & VMSA_LOCK_TTBR1_EL1) {
         return;
     }
+
     vmsa_ttbr_write(env, ri, value);
 }
 
@@ -4117,14 +4126,17 @@ static void vttbr_write(CPUARMState *env, const ARMCPRegInfo *ri,
     }
 }
 
-static uint64_t far_el1_read(CPUARMState *env, const ARMCPRegInfo *ri){
+static uint64_t far_el1_read(CPUARMState *env, const ARMCPRegInfo *ri)
+{
     if (env->gxf.guarded) {
         return env->gxf.far_gl[1];
     } else {
         return env->cp15.far_el[1];
     }
 }
-static void far_el1_write(CPUARMState *env, const ARMCPRegInfo *ri, uint64_t value){
+
+static void far_el1_write(CPUARMState *env, const ARMCPRegInfo *ri, uint64_t value)
+{
     if (env->gxf.guarded) {
         env->gxf.far_gl[1] = value;
     } else {
@@ -4153,14 +4165,17 @@ static const ARMCPRegInfo vmsa_pmsa_cp_reginfo[] = {
     REGINFO_SENTINEL
 };
 
-static uint64_t esr_el1_read(CPUARMState *env, const ARMCPRegInfo *ri){
+static uint64_t esr_el1_read(CPUARMState *env, const ARMCPRegInfo *ri)
+{
     if (env->gxf.guarded) {
         return env->gxf.esr_gl[1];
     } else {
         return env->cp15.esr_el[1];
     }
 }
-static void esr_el1_write(CPUARMState *env, const ARMCPRegInfo *ri, uint64_t value){
+
+static void esr_el1_write(CPUARMState *env, const ARMCPRegInfo *ri, uint64_t value)
+{
     if (env->gxf.guarded) {
         env->gxf.esr_gl[1] = value;
     } else {
@@ -5003,14 +5018,16 @@ static void sctlr_el1_write(CPUARMState *env, const ARMCPRegInfo *ri,
         return;
     }
 
-    if (!env->gxf.guarded && env->cp15.vmsa_lock_el1 & VMSA_LOCK_SCTLR_M_BIT){
+    if (!env->gxf.guarded && env->cp15.vmsa_lock_el1 & VMSA_LOCK_SCTLR_M_BIT) {
         value = (value & ~(SCTLR_M)) | (raw_read(env, ri) & SCTLR_M);
     }
+
     sctlr_write(env, ri, value);
 }
 
 static void vmsa_lock_el1_write(CPUARMState *env, const ARMCPRegInfo *ri,
-                        uint64_t value){
+                        uint64_t value)
+{
     //don't unlock any after locked
     raw_write(env, ri, raw_read(env, ri) | value);
 }
@@ -5033,42 +5050,53 @@ static void sdcr_write(CPUARMState *env, const ARMCPRegInfo *ri,
     env->cp15.mdcr_el3 = value & SDCR_VALID_MASK;
 }
 
-static uint64_t elr_el1_read(CPUARMState *env, const ARMCPRegInfo *ri){
+static uint64_t elr_el1_read(CPUARMState *env, const ARMCPRegInfo *ri)
+{
     if (env->gxf.guarded) {
         return env->gxf.elr_gl[1];
     } else {
         return env->elr_el[1];
     }
 }
-static void elr_el1_write(CPUARMState *env, const ARMCPRegInfo *ri, uint64_t value){
+
+static void elr_el1_write(CPUARMState *env, const ARMCPRegInfo *ri, uint64_t value)
+{
     if (env->gxf.guarded) {
         env->gxf.elr_gl[1] = value;
     } else {
         env->elr_el[1] = value;
     }
 }
-static uint64_t spsr_el1_read(CPUARMState *env, const ARMCPRegInfo *ri){
+
+static uint64_t spsr_el1_read(CPUARMState *env, const ARMCPRegInfo *ri)
+{
     if (env->gxf.guarded) {
         return env->gxf.spsr_gl[1];
     } else {
         return env->banked_spsr[BANK_SVC];
     }
 }
-static void spsr_el1_write(CPUARMState *env, const ARMCPRegInfo *ri, uint64_t value){
+
+static void spsr_el1_write(CPUARMState *env, const ARMCPRegInfo *ri, uint64_t value)
+{
     if (env->gxf.guarded) {
         env->gxf.spsr_gl[1] = value;
     } else {
         env->banked_spsr[BANK_SVC] = value;
     }
 }
-static uint64_t sp_el1_read(CPUARMState *env, const ARMCPRegInfo *ri){
+
+static uint64_t sp_el1_read(CPUARMState *env, const ARMCPRegInfo *ri)
+{
     if (env->gxf.guarded) {
         return env->gxf.sp_gl[1];
     } else {
         return env->sp_el[1];
     }
 }
-static void sp_el1_write(CPUARMState *env, const ARMCPRegInfo *ri, uint64_t value){
+
+static void sp_el1_write(CPUARMState *env, const ARMCPRegInfo *ri, uint64_t value)
+{
     if (env->gxf.guarded) {
         env->gxf.sp_gl[1] = value;
     } else {
@@ -10068,16 +10096,18 @@ static void arm_cpu_do_interrupt_aarch64(CPUState *cs)
     CPUARMState *env = &cpu->env;
     unsigned int new_el = env->exception.target_el;
     target_ulong addr = 0;
+    bool genter = false;
+    unsigned int new_mode, old_mode, cur_el;
+    int rt;
+
     if (env->gxf.guarded) {
         addr = env->gxf.vbar_gl[new_el];
     } else {
         addr = env->cp15.vbar_el[new_el];
     }
-    bool genter = false;
-    unsigned int new_mode = aarch64_pstate_mode(new_el, true);
-    unsigned int old_mode;
-    unsigned int cur_el = arm_current_el(env);
-    int rt;
+
+    new_mode = aarch64_pstate_mode(new_el, true);
+    cur_el = arm_current_el(env);
 
     /*
      * Note that new_el can never be 0.  If cur_el is 0, then
@@ -10176,6 +10206,7 @@ static void arm_cpu_do_interrupt_aarch64(CPUState *cs)
                                                 10, 5, rt);
             break;
         }
+
         if (env->gxf.guarded) {
             env->gxf.esr_gl[new_el] = env->exception.syndrome;
         } else {
@@ -10201,7 +10232,8 @@ static void arm_cpu_do_interrupt_aarch64(CPUState *cs)
     if (is_a64(env)) {
         old_mode = pstate_read(env);
         aarch64_save_sp(env, arm_current_el(env));
-        if(genter || env->gxf.guarded) {
+
+        if (genter || env->gxf.guarded) {
             env->gxf.elr_gl[new_el] = env->pc;
         } else {
             env->elr_el[new_el] = env->pc;
@@ -10214,7 +10246,8 @@ static void arm_cpu_do_interrupt_aarch64(CPUState *cs)
 
         env->condexec_bits = 0;
     }
-    if (genter || env->gxf.guarded){
+
+    if (genter || env->gxf.guarded) {
         env->gxf.spsr_gl[new_el] = old_mode;
     } else {
         env->banked_spsr[aarch64_banked_spsr_index(new_el)] = old_mode;
@@ -10227,6 +10260,7 @@ static void arm_cpu_do_interrupt_aarch64(CPUState *cs)
         qemu_log_mask(CPU_LOG_INT, "...with ELR 0x%" PRIx64 "\n",
                     env->elr_el[new_el]);
     }
+
     if (cpu_isar_feature(aa64_pan, cpu)) {
         /* The value of PSTATE.PAN is normally preserved, except when ... */
         new_mode |= old_mode & PSTATE_PAN;
@@ -10264,6 +10298,7 @@ static void arm_cpu_do_interrupt_aarch64(CPUState *cs)
     env->aarch64 = 1;
     aarch64_restore_sp(env, new_el);
     //TODO: MMU in GXF?
+
     helper_rebuild_hflags_a64(env, new_el);
 
     env->pc = addr;
@@ -13366,7 +13401,7 @@ static uint64_t rebuild_hflags_a64(CPUARMState *env, int el, int fp_el,
         }
     }
 
-    if(env->gxf.guarded) {
+    if (env->gxf.guarded) {
         flags = FIELD_DP64(flags, TBFLAG_A64, GUARDED, 1);
     }
 

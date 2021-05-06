@@ -2274,6 +2274,7 @@ static void disas_uncond_b_reg(DisasContext *s, uint32_t insn)
                 goto do_unallocated;
             }
             dst = tcg_temp_new_i64();
+
             if (s->guarded) {
                 tcg_gen_ld_i64(dst, cpu_env,
                             offsetof(CPUARMState, gxf.elr_gl[s->current_el]));
@@ -2299,6 +2300,7 @@ static void disas_uncond_b_reg(DisasContext *s, uint32_t insn)
                 tcg_gen_ld_i64(dst, cpu_env,
                             offsetof(CPUARMState, elr_el[s->current_el]));
             }
+
             if (s->pauth_active) {
                 modifier = cpu_X[31];
                 if (op3 == 2) {
@@ -14579,9 +14581,9 @@ static bool btype_destination_ok(uint32_t insn, bool bt, int btype)
     return false;
 }
 
-static void disas_gxf_insn(DisasContext *s, uint32_t insn){
-    
-    switch (insn){
+static void disas_gxf_insn(DisasContext *s, uint32_t insn)
+{
+    switch (insn) {
         case 0x00201420: /* GENTER */
             if (s->current_el == 0 || s->guarded) {
                 unallocated_encoding(s);
@@ -14591,6 +14593,7 @@ static void disas_gxf_insn(DisasContext *s, uint32_t insn){
             gen_ss_advance(s);
             gen_exception_insn(s, s->base.pc_next, EXCP_GENTER, syn_uncategorized(), s->current_el);
             break;
+
         case 0x00201400: /* GEXIT */
             if (s->current_el == 0 || !s->guarded) {
                 unallocated_encoding(s);
@@ -14599,6 +14602,7 @@ static void disas_gxf_insn(DisasContext *s, uint32_t insn){
             gen_helper_gexit(cpu_env);
             s->base.is_jmp = DISAS_EXIT;
             break;
+
         default:
             unallocated_encoding(s);
     }

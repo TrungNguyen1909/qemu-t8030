@@ -32,7 +32,7 @@
 #include "hw/arm/xnu_file_mmio_dev.h"
 
 static uint64_t xnu_file_mmio_dev_read(void *opaque,
-                                       hwaddr addr, unsigned size)
+        hwaddr addr, unsigned size)
 {
     FileMmioDev *file_dev = opaque;
     uint64_t ret = 0;
@@ -45,11 +45,11 @@ static uint64_t xnu_file_mmio_dev_read(void *opaque,
         abort();
     }
 
-    if (addr != lseek(file_dev->fd, addr, SEEK_SET)) {
+    if (lseek(file_dev->fd, addr, SEEK_SET) != addr) {
         abort();
     }
 
-    if (size != read(file_dev->fd, &ret, size)) {
+    if (read(file_dev->fd, &ret, size) != size) {
         abort();
     }
 
@@ -57,7 +57,7 @@ static uint64_t xnu_file_mmio_dev_read(void *opaque,
 }
 
 static void xnu_file_mmio_dev_write(void *opaque, hwaddr addr,
-                                    uint64_t val, unsigned size)
+        uint64_t val, unsigned size)
 {
     FileMmioDev *file_dev = opaque;
 
@@ -65,11 +65,11 @@ static void xnu_file_mmio_dev_write(void *opaque, hwaddr addr,
         abort();
     }
 
-    if (addr != lseek(file_dev->fd, addr, SEEK_SET)) {
+    if (lseek(file_dev->fd, addr, SEEK_SET) != addr) {
         abort();
     }
 
-    if (size != write(file_dev->fd, &val, size)) {
+    if (write(file_dev->fd, &val, size) != size) {
         abort();
     }
 
@@ -87,7 +87,7 @@ void xnu_file_mmio_dev_create(MemoryRegion *sysmem, FileMmioDev *file_dev,
     MemoryRegion *iomem = g_new(MemoryRegion, 1);
     struct stat st;
 
-    if (-1 == lstat(filename, &st)) {
+    if (lstat(filename, &st) == -1) {
         abort();
     }
 
@@ -97,10 +97,11 @@ void xnu_file_mmio_dev_create(MemoryRegion *sysmem, FileMmioDev *file_dev,
                           name, file_dev->size);
     memory_region_add_subregion(sysmem, file_dev->pa, iomem);
 
-    //TODO; think about using O_SYNC
-    //or maybe use fsync() from time to time
+    // TODO: think about using O_SYNC
+    // or maybe use fsync() from time to time
     file_dev->fd = open(filename, O_RDWR);
-    if (-1 == file_dev->fd) {
+
+    if (file_dev->fd == -1) {
         abort();
     }
 }
