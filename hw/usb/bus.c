@@ -154,6 +154,14 @@ void usb_device_handle_attach(USBDevice *dev)
     }
 }
 
+void usb_device_handle_detach(USBDevice *dev)
+{
+    USBDeviceClass *klass = USB_DEVICE_GET_CLASS(dev);
+    if (klass->handle_detach) {
+        klass->handle_detach(dev);
+    }
+}
+
 void usb_device_handle_reset(USBDevice *dev)
 {
     USBDeviceClass *klass = USB_DEVICE_GET_CLASS(dev);

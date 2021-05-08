@@ -294,6 +294,11 @@ struct USBDeviceClass {
     void (*handle_attach)(USBDevice *dev);
 
     /*
+     * Detach the device
+     */
+    void (*handle_detach)(USBDevice *dev);
+
+    /*
      * Reset the device
      */
     void (*handle_reset)(USBDevice *dev);
@@ -538,6 +543,8 @@ USBDevice *usb_device_find_device(USBDevice *dev, uint8_t addr);
 void usb_device_cancel_packet(USBDevice *dev, USBPacket *p);
 
 void usb_device_handle_attach(USBDevice *dev);
+
+void usb_device_handle_detach(USBDevice *dev);
 
 void usb_device_handle_reset(USBDevice *dev);
 
