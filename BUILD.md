@@ -13,10 +13,10 @@ git clone https://github.com/TrungNguyen1909/xnu-qemu-arm64-tools
 pip3 install pyasn1
 ```
 
-### MacOS Homebrew
+### macOS Homebrew
 
 ```sh
-brew install libtasn1 meson ninja pixman lzfse
+brew install libtasn1 meson ninja pixman lzfse jtool2
 ```
 
 ### Linux
@@ -34,6 +34,10 @@ make
 make install
 cd ..
 ```
+
+Get jtool2 from the [jtool2's official website](http://newosxbook.com/tools/jtool.html).
+
+There is a `jtool2.ELF64` inside the package.
 
 # Building QEMU
 
@@ -141,7 +145,7 @@ python3 xnu-qemu-arm64-tools/bootstrap_scripts/dump_trustcache.py Firmware/038-4
 
 ### binpack trustcache
 ```sh
-for filename in $(find binpack64/  -type f); do jtool --sig --ent $filename 2>/dev/null; done | grep CDHash | cut -d' ' -f6 | cut -c 1-40 >> ./tchashes
+for filename in $(find binpack64/  -type f); do jtool2 --sig $filename 2>/dev/null; done | grep CDHash | cut -d' ' -f6 | cut -c 1-40 >> ./tchashes
 ```
 
 
