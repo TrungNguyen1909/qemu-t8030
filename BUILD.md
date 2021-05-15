@@ -66,15 +66,19 @@ python3 xnu-qemu-arm64-tools/bootstrap_scripts/asn1rdskdecode.py 038-44087-125.d
 This step is needed until issue #1 is fixed.
 
 ```sh
-#resize
+# resize
 hdiutil resize -size 512M -imagekey diskimage-class=CRawDiskImage 038-44087-125.dmg.out
-#mount
+
+# mount
 hdiutil attach -imagekey diskimage-class=CRawDiskImage 038-44087-125.dmg.out
-#enable ownership
+
+# enable ownership
 sudo diskutil enableownership /Volumes/AzulSeed18A5351d.arm64eUpdateRamDisk
-#decompress: you will need a macOS system for this step
+
+# decompress: you will need a macOS system for this step
 sudo afscexpand /Volumes/AzulSeed18A5351d.arm64eUpdateRamDisk
-#unmount
+
+# unmount
 hdiutil detach /Volumes/AzulSeed18A5351d.arm64eUpdateRamDisk
 ```
 
@@ -100,8 +104,12 @@ hdiutil resize -size 12G -imagekey diskimage-class=CRawDiskImage disk.1
 ## Mount the disk image
 ```sh
 hdiutil attach -imagekey diskimage-class=CRawDiskImage disk.1
-#enable ownership
+
+# enable ownership
 sudo diskutil enableownership /Volumes/AzulSeed18A5351d.N104N841DeveloperOS
+
+# mount with RW
+mount -urw /Volumes/AzulSeed18A5351d.N104N841DeveloperOS
 ```
 
 
