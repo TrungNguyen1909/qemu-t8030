@@ -147,6 +147,7 @@ sudo cp -R binpack64 /Volumes/AzulSeed18A5351d.N104N841DeveloperOS
 
 ### Bundled trustcache
 ```sh
+python3 xnu-qemu-arm64-tools/bootstrap_scripts/asn1trustcachedecode.py Firmware/038-44337-083.dmg.trustcache Firmware/038-44337-083.dmg.trustcache.out
 python3 xnu-qemu-arm64-tools/bootstrap_scripts/dump_trustcache.py Firmware/038-44337-083.dmg.trustcache.out | grep cdhash | cut -d' ' -f2 > tchashes
 ```
 
