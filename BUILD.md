@@ -6,10 +6,17 @@ You will need a macOS system for some of the preparation steps.
 
 # Getting dependencies
 
+### Getting support tools
+
+```sh
+git clone https://github.com/TrungNguyen1909/xnu-qemu-arm64-tools
+pip3 install pyasn1
+```
+
 ### MacOS Homebrew
 
 ```sh
-brew install ninja pixman lzfse
+brew install libtasn1 meson ninja pixman lzfse
 ```
 
 ### Linux
@@ -36,13 +43,6 @@ cd qemu-tt8030
 mkdir build; cd build
 ../configure --target-list=aarch64-softmmu --disable-capstone --disable-slirp
 make -j$(nproc)
-```
-
-# Getting support tools
-
-```sh
-git clone https://github.com/TrungNguyen1909/xnu-qemu-arm64-tools
-pip3 install pyasn1
 ```
 
 # Getting iOS
