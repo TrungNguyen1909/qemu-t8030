@@ -291,39 +291,71 @@ enum {
 	    FIFO_FILL_STATUS_FIFO_RD_LVL_mask	= (127 << FIFO_FILL_STATUS_FIFO_RD_LVL_shift),
 };
 
+static void apple_tristar_update_irq(AppleTristarState *t)
+{
+	if (t->event0 & ~(t->mask)) {
+		if (!t->last_level) {
+			t->last_level = 1;
+			qemu_irq_raise(t->irq);
+		}
+	} else {
+		if (t->last_level) {
+			t->last_level = 0;
+			qemu_irq_lower(t->irq);
+		}
+	}
+}
+
 static uint8_t apple_tristar_reg_read(AppleTristarState *t, hwaddr addr)
 {
-    qemu_log_mask(LOG_UNIMP, "%s: addr: 0x" TARGET_FMT_plx "\n", __func__, addr);
+	uint8_t val;
+    
+	qemu_log_mask(LOG_UNIMP, "%s: addr: 0x" TARGET_FMT_plx "\n", __func__, addr);
+	
+	if (addr > sizeof(t->reg)) {
+        qemu_log_mask(LOG_GUEST_ERROR, "%s: Bad offset 0x%"HWADDR_PRIx"\n",
+                      __func__, addr);
+        return 0;
+	}
+
+	val = t->reg[addr];
     switch (addr) {
-        case MASK:
-            return t->mask;
-        case REV:
-            return 0x8a;
-        case FIFO_KEY_ESN_BYTE0 ... FIFO_KEY_ESN_BYTE7:
-            return t->key_esn[addr - FIFO_KEY_ESN_BYTE0];
-        case FIFO_ENONCE_M_BYTE0 ... FIFO_ENONCE_M_BYTE7:
-            return t->enonce_m[addr - FIFO_ENONCE_M_BYTE0];
-        case FIFO_ESN_BYTE0 ... FIFO_ESN_BYTE7:
-            return t->esn[addr - FIFO_ESN_BYTE0];
-        case 0x5f:
-            return 0x74;
+	case EVENT0:
+		t->event0 = 0;
+		break;
+	case EVENT1:
+		t->event1 = 0;
+		break;
+	default:
+		break;
     }
-    return 0;
+    return val;
 }
-static void apple_tristar_reg_write(AppleTristarState *t, hwaddr addr, uint8_t data)
+static void apple_tristar_reg_write(AppleTristarState *t, hwaddr addr, uint8_t val)
 {
-    qemu_log_mask(LOG_UNIMP, "%s: addr: 0x" TARGET_FMT_plx " data: 0x%x\n", __func__, addr, data);
+	uint8_t *mmio;
+	bool iflg = 0;
+    qemu_log_mask(LOG_UNIMP, "%s: addr: 0x" TARGET_FMT_plx " val: 0x%x\n", __func__, addr, val);
+
+	if (addr > sizeof(t->reg)) {
+        qemu_log_mask(LOG_GUEST_ERROR, "%s: Bad offset 0x%"HWADDR_PRIx"\n",
+                      __func__, addr);
+        return;
+	}
+	mmio = &t->reg[addr];
+
     switch (addr) {
-        case MASK:
-            t->mask = data;
-            return;
-        case FIFO_KEY_ESN_BYTE0 ... FIFO_KEY_ESN_BYTE7:
-            t->key_esn[addr - FIFO_KEY_ESN_BYTE0] = data;
-            return;
-        case FIFO_ENONCE_M_BYTE0 ... FIFO_ENONCE_M_BYTE7:
-            t->enonce_m[addr - FIFO_ENONCE_M_BYTE0] = data;
-            return;
+	case MASK:
+		iflg = 1;
+		break;
+	default:
+		break;
     }
+	*mmio = val;
+	
+	if (iflg) {
+		apple_tristar_update_irq(t);
+	}
     return;
 }
 
@@ -382,6 +414,11 @@ static int tristar_reg_i2c_send(I2CSlave *s, uint8_t data)
 static void tristar_reg_reset(AppleTristarState *t) {
     t->address = -1;
     t->mask = 0xff;
+	t->fifo[63] = 0x74;
+	t->fifo[0] = 0x75;
+	t->rev = 0x8a;
+
+	t->status0 = STATUS0_IDBUS_CONNECTED | STATUS0_P_IN_STAT_insdet;
 }
 
 DeviceState *apple_tristar_create(DTBNode *node)
@@ -390,7 +427,7 @@ DeviceState *apple_tristar_create(DTBNode *node)
     I2CSlave *s = I2C_SLAVE(dev);
     AppleTristarState *t = APPLE_TRISTAR(dev);
 
-    qdev_init_gpio_out(dev, t->irq, 1);
+    qdev_init_gpio_out(dev, &t->irq, 1);
 
     DTBProp *prop = get_dtb_prop(node, "compatible");
     g_free(prop->value);
