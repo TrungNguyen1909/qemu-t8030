@@ -158,6 +158,13 @@
 #define USB_DT_CS_ENDPOINT              0x25
 #define USB_DT_ENDPOINT_COMPANION       0x30
 
+#define USB_DT_DEVICE_SIZE		18
+#define USB_DT_CONFIGURATION_SIZE      	9
+#define USB_DT_INTERFACE_SIZE   	9
+#define USB_DT_ENDPOINT_SIZE    	7
+#define USB_DT_DEVICE_QUALIFIER_SIZE    10
+#define USB_DT_STRING_SIZE		6
+
 #define USB_DEV_CAP_WIRELESS            0x01
 #define USB_DEV_CAP_USB2_EXT            0x02
 #define USB_DEV_CAP_SUPERSPEED          0x03
@@ -174,6 +181,15 @@
 #define USB_ENDPOINT_XFER_INVALID     255
 
 #define USB_INTERFACE_INVALID         255
+
+/* binary representation */
+struct usb_control_packet {
+	uint8_t  bmRequestType;
+	uint8_t  bRequest;
+	uint16_t wValue;
+	uint16_t wIndex;
+	uint16_t wLength;
+} QEMU_PACKED;
 
 typedef struct USBBusOps USBBusOps;
 typedef struct USBPort USBPort;
