@@ -13,31 +13,33 @@ git clone https://github.com/TrungNguyen1909/xnu-qemu-arm64-tools
 pip3 install pyasn1
 ```
 
+
 ### macOS Homebrew
 
 ```sh
 brew install libtasn1 meson ninja pixman lzfse jtool2
 ```
 
+
 ### Linux
 ```sh
 sudo apt update
 sudo apt install -y git libglib2.0-dev libfdt-dev libpixman-1-dev zlib1g-dev libtasn1-dev ninja-build build-essential cmake
 
-#lzfse
+# install lzfse
 git clone https://github.com/lzfse/lzfse
 cd lzfse
-mkdir build
-cd build
+mkdir build; cd build
 cmake ..
 make
-make install
+sudo make install
 cd ..
 ```
 
 Get jtool2 from the [jtool2's official website](http://newosxbook.com/tools/jtool.html).
 
 There is a `jtool2.ELF64` inside the package.
+
 
 # Building QEMU
 
@@ -49,9 +51,16 @@ mkdir build; cd build
 make -j$(nproc)
 ```
 
-# Getting iOS
+
+# Getting iOS firmware
 
 Download and unzip [iPhone11,8,iPhone12,1_14.0_18A5351d_Restore.ipsw](https://updates.cdn-apple.com/2020SummerSeed/fullrestores/001-35886/5FE9BE2E-17F8-41C8-96BB-B76E2B225888/iPhone11,8,iPhone12,1_14.0_18A5351d_Restore.ipsw)
+
+```sh
+wget https://updates.cdn-apple.com/2020SummerSeed/fullrestores/001-35886/5FE9BE2E-17F8-41C8-96BB-B76E2B225888/iPhone11,8,iPhone12,1_14.0_18A5351d_Restore.ipsw
+mkdir iphone; cd iphone
+unzip ../iPhone11,8,iPhone12,1_14.0_18A5351d_Restore.ipsw
+```
 
 
 # Unpacking the ramdisk
@@ -60,10 +69,11 @@ Download and unzip [iPhone11,8,iPhone12,1_14.0_18A5351d_Restore.ipsw](https://up
 python3 xnu-qemu-arm64-tools/bootstrap_scripts/asn1rdskdecode.py 038-44087-125.dmg 038-44087-125.dmg.out
 ```
 
+Note that for all the below steps need to run on macOS.
 
 # Preparing the ramdisk
 
-This step is needed until issue #1 is fixed. Note that you need a macOS for this.
+This step is needed until issue #1 is fixed.
 
 ```sh
 # resize
@@ -113,7 +123,7 @@ mount -urw /Volumes/AzulSeed18A5351d.N104N841DeveloperOS
 ```
 
 
-## Decompress the disk image (might take a while)
+## Decompress the disk image - this step would take minutes to complete
 ```sh
 sudo afscexpand /Volumes/AzulSeed18A5351d.N104N841DeveloperOS
 ```
@@ -133,7 +143,7 @@ sudo mkdir -p /Volumes/AzulSeed18A5351d.N104N841DeveloperOS/private/var/hardware
 ```
 
 
-## Add binpack
+## Add precompiled system binaries - binpack64
 ```sh
 curl -LO https://github.com/pwn20wndstuff/Undecimus/raw/master/Undecimus/resources/binpack64-256.tar.lzma
 mkdir binpack64
@@ -144,7 +154,6 @@ sudo cp -R binpack64 /Volumes/AzulSeed18A5351d.N104N841DeveloperOS
 
 ## Create trustcache
 
-
 ### Bundled trustcache
 ```sh
 python3 xnu-qemu-arm64-tools/bootstrap_scripts/asn1trustcachedecode.py Firmware/038-44337-083.dmg.trustcache Firmware/038-44337-083.dmg.trustcache.out
@@ -152,19 +161,21 @@ python3 xnu-qemu-arm64-tools/bootstrap_scripts/dump_trustcache.py Firmware/038-4
 ```
 
 
-### binpack trustcache
+### Create trustcache for binpack64
 ```sh
 for filename in $(find binpack64/  -type f); do jtool2 --sig $filename 2>/dev/null; done | grep CDHash | cut -d' ' -f6 | cut -c 1-40 >> ./tchashes
 ```
 
 
-### Serialize
+### Serialize trustcache
 ```sh
 python3 xnu-qemu-arm64-tools/bootstrap_scripts/create_trustcache.py tchashes static_tc
 ```
 
 
 ## Configure LaunchDaemons
+
+Either use `setup-ios/launchd.plist`, or customize it from iOS firmware as follows.
 
 - Copy `/Volumes/AzulSeed18A5351d.N104N841DeveloperOS/System/Library/xpc/launchd.plist` to somewhere else to work with.
 - Convert to xml1 format: `plutil -convert xml1 /path/to/launchd.plist`
@@ -212,6 +223,8 @@ hdiutil detach /Volumes/AzulSeed18A5351d.N104N841DeveloperOS
 
 
 # Preparing NVRAM
+
+Either use `setup-ios\nvram`, or create it yourself as follows.
 
 ```sh
 echo "XQAAAAT//////////wAtIHxAA8l2M4RwLYP/nVI8/XJz1smfQHsB1bYBDcXGde9gDROioaQd5idJPDeyKi/XrDIVFDVxwhaUAvSvYtKbu9Hs/pS2MN3p09D/mcqXOKs2di3TWiuNQUYbsWMOACSAbmhlikZkXD2LfUNIuxvxJ4g7VtdQl+gefhX8xA+LOoNwO88uhrlSnNHTA85R9Lwj4PgM79i6f+mrzEgAuXZ2VyVkHig/Di57BeIpn0WrBqW9L/JR4/P6WlOnN32PgJvq/arUT/MM3ikXaOPamiXxFCPk/8deoBBt6VPU//+2HcAA" | base64 -d | unlzma -c > nvram
