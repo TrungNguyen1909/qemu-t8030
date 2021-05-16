@@ -63,7 +63,7 @@ python3 xnu-qemu-arm64-tools/bootstrap_scripts/asn1rdskdecode.py 038-44087-125.d
 
 # Preparing the ramdisk
 
-This step is needed until issue #1 is fixed.
+This step is needed until issue #1 is fixed. Note that you need a macOS for this.
 
 ```sh
 # resize
@@ -75,7 +75,7 @@ hdiutil attach -imagekey diskimage-class=CRawDiskImage 038-44087-125.dmg.out
 # enable ownership
 sudo diskutil enableownership /Volumes/AzulSeed18A5351d.arm64eUpdateRamDisk
 
-# decompress: you will need a macOS system for this step
+# decompress
 sudo afscexpand /Volumes/AzulSeed18A5351d.arm64eUpdateRamDisk
 
 # unmount
