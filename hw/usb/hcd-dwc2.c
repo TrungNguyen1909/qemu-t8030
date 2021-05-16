@@ -135,6 +135,40 @@ static inline void dwc2_lower_host_irq(DWC2State *s, uint32_t host_intr)
     }
 }
 
+static inline void dwc2_raise_device_irq(DWC2State *s, uint32_t ep, bool out)
+{
+    uint32_t device_intr = (1 << ep) << (out ? 16 : 0);
+    if (!(s->daint & device_intr)) {
+        s->daint |= device_intr;
+        trace_usb_dwc2_raise_device_irq(ep, out);
+        if (s->daint & s->daintmsk) {
+            if (s->daint & 0xffff) {
+                dwc2_raise_global_irq(s, GINTSTS_IEPINT);
+            }
+            if ((s->daint >> 16) & 0xffff) {
+                dwc2_raise_global_irq(s, GINTSTS_OEPINT);
+            }
+        }
+    }
+}
+
+static inline void dwc2_lower_device_irq(DWC2State *s, uint32_t ep, bool out)
+{
+    uint32_t device_intr = (1 << ep) << (out ? 16 : 0);
+    if (s->daint & device_intr) {
+        s->daint &= ~device_intr;
+        trace_usb_dwc2_lower_device_irq(ep, out);
+        if (!(s->daint & s->daintmsk)) {
+            if (!(s->daint & 0xffff)) {
+                dwc2_lower_global_irq(s, GINTSTS_IEPINT);
+            }
+            if (!((s->daint >> 16) & 0xffff)) {
+                dwc2_lower_global_irq(s, GINTSTS_OEPINT);
+            }
+        }
+    }
+}
+
 static inline void dwc2_update_hc_irq(DWC2State *s, int index)
 {
     uint32_t host_intr = 1 << (index >> 3);
@@ -143,6 +177,19 @@ static inline void dwc2_update_hc_irq(DWC2State *s, int index)
         dwc2_raise_host_irq(s, host_intr);
     } else {
         dwc2_lower_host_irq(s, host_intr);
+    }
+}
+static inline void dwc2_update_ep_irq(DWC2State *s, int ep)
+{
+    if (s->diepint(ep) & s->diepmsk) {
+        dwc2_raise_device_irq(s, ep, false);
+    } else {
+        dwc2_lower_device_irq(s, ep, false);
+    }
+    if (s->doepint(ep) & s->doepmsk) {
+        dwc2_raise_device_irq(s, ep, true);
+    } else {
+        dwc2_lower_device_irq(s, ep, true);
     }
 }
 
@@ -431,6 +478,8 @@ static void dwc2_attach(USBPort *port)
     int hispd = 0;
 
     trace_usb_dwc2_attach(port);
+    /* Not in Device mode */
+    assert(!s->device.dev.attached);
     assert(port->index == 0);
 
     if (!port->dev || !port->dev->attached) {
@@ -472,9 +521,9 @@ static void dwc2_attach(USBPort *port)
 
     s->fi = USB_FRMINTVL - 1;
     s->hprt0 |= HPRT0_CONNDET | HPRT0_CONNSTS;
-
+    s->gotgctl |= GOTGCTL_ASESVLD;
     dwc2_bus_start(s);
-    dwc2_raise_global_irq(s, GINTSTS_PRTINT);
+    dwc2_raise_global_irq(s, GINTSTS_PRTINT | GINTSTS_CURMODE_HOST);
 }
 
 static void dwc2_detach(USBPort *port)
@@ -488,8 +537,8 @@ static void dwc2_detach(USBPort *port)
 
     s->hprt0 &= ~(HPRT0_SPD_MASK | HPRT0_SUSP | HPRT0_ENA | HPRT0_CONNSTS);
     s->hprt0 |= HPRT0_CONNDET | HPRT0_ENACHG;
-
-    dwc2_raise_global_irq(s, GINTSTS_PRTINT);
+    s->gotgctl &= ~GOTGCTL_ASESVLD;
+    dwc2_raise_global_irq(s, GINTSTS_PRTINT | GINTSTS_DISCONNINT);
 }
 
 static void dwc2_child_detach(USBPort *port, USBDevice *child)
@@ -1108,11 +1157,50 @@ static void dwc2_hreg1_write(void *ptr, hwaddr addr, int index, uint64_t val,
     }
 }
 
+static void dwc2_update_in_ep(DWC2State *s, int ep)
+{
+    if (s->diepctl(ep) & DXEPCTL_SNAK) {
+        s->diepctl(ep) |= DXEPCTL_NAKSTS;
+        s->diepint(ep) |= DXEPINT_INEPNAKEFF;
+        s->diepctl(ep) &= ~ DXEPCTL_SNAK;
+    }
+    if (s->diepctl(ep) & DXEPCTL_EPDIS) {
+        s->diepint(ep) |= DXEPINT_EPDISBLD;
+        s->diepctl(ep) &= ~(DXEPCTL_EPDIS | DXEPCTL_EPENA);
+    }
+}
+
+static void dwc2_update_out_ep(DWC2State *s, int ep)
+{
+    if (s->doepctl(ep) & DXEPCTL_SNAK) {
+        s->doepctl(ep) |= DXEPCTL_NAKSTS;
+        s->doepint(ep) |= DXEPINT_INEPNAKEFF;
+        s->doepctl(ep) &= ~ DXEPCTL_SNAK;
+    }
+    if (s->doepctl(ep) & DXEPCTL_EPDIS) {
+        s->doepint(ep) |= DXEPINT_EPDISBLD;
+        s->doepctl(ep) &= ~(DXEPCTL_EPDIS | DXEPCTL_EPENA);
+    }
+}
+
 static uint64_t dwc2_dreg_read(void *ptr, hwaddr addr, int index,
                                 unsigned size)
 {
     DWC2State *s = ptr;
-    uint32_t val;
+    uint32_t val = 0;
+    
+    if (addr < DCFG || addr > DTKNQR4) {
+        qemu_log_mask(LOG_GUEST_ERROR, "%s: Bad offset 0x%"HWADDR_PRIx"\n",
+                      __func__, addr);
+        return 0;
+    }
+
+    val = s->dreg[index];
+
+    switch (addr) {
+    default:
+        break;    
+    }
 
     return val;
 }
@@ -1121,35 +1209,182 @@ static void dwc2_dreg_write(void *ptr, hwaddr addr, int index, uint64_t val,
                              unsigned size)
 {
     DWC2State *s = ptr;
+    uint64_t orig = val;
+    uint32_t *mmio;
+    uint32_t old;
+    int prst = 0;
+    int iflg = 0;
+
+    if (addr < DCFG || addr > DTKNQR4) {
+        qemu_log_mask(LOG_GUEST_ERROR, "%s: Bad offset 0x%"HWADDR_PRIx"\n",
+                      __func__, addr);
+        return;
+    }
+
+    mmio = &s->dreg[index];
+    old = *mmio;
+
+    switch (addr) {
+    case DIEPMSK:
+        iflg = 1;
+        break;
+    case DOEPMSK:
+        iflg = 1;
+        break;
+    case DAINT:
+        iflg = 1;
+        break;
+    case DAINTMSK:
+        iflg = 1;
+        break;
+    case DCTL:
+        if ((val & DCTL_SGNPINNAK) != (s->dctl & DCTL_SGNPINNAK) && (val & DCTL_SGNPINNAK)) {
+            dwc2_raise_global_irq(s, GINTSTS_GINNAKEFF);
+            val &= ~DCTL_SGNPINNAK;
+        }
+        if ((val & DCTL_SGOUTNAK) != (s->dctl & DCTL_SGOUTNAK) && (val & DCTL_SGOUTNAK)) {
+            dwc2_raise_global_irq(s, GINTSTS_GOUTNAKEFF);
+            val &= ~DCTL_SGOUTNAK;
+        }
+        iflg = 1;
+        break;
+    default:
+        break;
+    }
+
+    *mmio = val;
+
+    if (iflg) {
+        for (int i = 0; i < DWC2_NB_EP; i++) {
+            dwc2_update_ep_irq(s, i);
+        }
+        dwc2_update_irq(s);
+    }
 }
-static uint64_t dwc2_dreg_in_read(void *ptr, hwaddr addr, int index,
+static uint64_t dwc2_diepreg_read(void *ptr, hwaddr addr, int index,
                                 unsigned size)
 {
     DWC2State *s = ptr;
-    uint32_t val;
+    uint32_t val = 0;
 
+    if (addr < DIEPCTL(0) || addr > DTXFSTS(DWC2_NB_EP - 1)) {
+        qemu_log_mask(LOG_GUEST_ERROR, "%s: Bad offset 0x%"HWADDR_PRIx"\n",
+                      __func__, addr);
+        return 0;
+    }
+
+    val = s->diepreg[index];
+
+    switch (DIEPCTL0 + (addr & 0x1c)) {
+    default:
+        break;
+    }
     return val;
 }
 
-static void dwc2_dreg_in_write(void *ptr, hwaddr addr, int index, uint64_t val,
+static void dwc2_diepreg_write(void *ptr, hwaddr addr, int index, uint64_t val,
                              unsigned size)
 {
     DWC2State *s = ptr;
+    uint64_t orig = val;
+    uint32_t *mmio;
+    uint32_t old;
+    int uflg = 0; 
+    int iflg  = 0;
+
+    if (addr < DIEPCTL(0) || addr > DTXFSTS(DWC2_NB_EP - 1)) {
+        qemu_log_mask(LOG_GUEST_ERROR, "%s: Bad offset 0x%"HWADDR_PRIx"\n",
+                      __func__, addr);
+        return;
+    }
+
+    mmio = &s->diepreg[index];
+    old = *mmio;
+
+    switch (DIEPCTL0 + (addr & 0x1c)) {
+    case DIEPCTL(0):
+        uflg = 1;
+        break;
+    case DIEPINT(0):
+        val = old & ~val;
+        iflg = 1;
+        break;
+    default:
+        break;
+    }
+
+    *mmio = val;
+
+    if (uflg) {
+        dwc2_update_in_ep(s, index >> 3);
+    }
+
+    if (iflg) {
+        dwc2_update_ep_irq(s, index >> 3);
+    }
 }
 
-static uint64_t dwc2_dreg_out_read(void *ptr, hwaddr addr, int index,
+static uint64_t dwc2_doepreg_read(void *ptr, hwaddr addr, int index,
                                 unsigned size)
 {
     DWC2State *s = ptr;
-    uint32_t val;
+    uint32_t val = 0;
 
+    if (addr < DOEPCTL(0) || addr > DOEPDMA(DWC2_NB_EP - 1)) {
+        qemu_log_mask(LOG_GUEST_ERROR, "%s: Bad offset 0x%"HWADDR_PRIx"\n",
+                      __func__, addr);
+        return 0;
+    }
+
+    val = s->doepreg[index];
+
+    switch (DOEPCTL0 + (addr & 0x1c)) {
+    default:
+        break;
+    }
     return val;
 }
 
-static void dwc2_dreg_out_write(void *ptr, hwaddr addr, int index, uint64_t val,
+static void dwc2_doepreg_write(void *ptr, hwaddr addr, int index, uint64_t val,
                              unsigned size)
 {
     DWC2State *s = ptr;
+    uint64_t orig = val;
+    uint32_t *mmio;
+    uint32_t old;
+    int uflg = 0; 
+    int iflg  = 0;
+
+    if (addr < DOEPCTL(0) || addr > DOEPDMA(DWC2_NB_EP - 1)) {
+        qemu_log_mask(LOG_GUEST_ERROR, "%s: Bad offset 0x%"HWADDR_PRIx"\n",
+                      __func__, addr);
+        return;
+    }
+
+    mmio = &s->diepreg[index];
+    old = *mmio;
+
+    switch (DOEPCTL0 + (addr & 0x1c)) {
+    case DOEPCTL(0):
+        uflg = 1;
+        break;
+    case DOEPINT(0):
+        val = old & ~val;
+        iflg = 1;
+        break;
+    default:
+        break;
+    }
+
+    *mmio = val;
+
+    if (uflg) {
+        dwc2_update_out_ep(s, index >> 3);
+    }
+
+    if (iflg) {
+        dwc2_update_ep_irq(s, index >> 3);
+    }
 }
 
 static const char *pcgregnm[] = {
@@ -1207,7 +1442,7 @@ static uint64_t dwc2_hsotg_read(void *ptr, hwaddr addr, unsigned size)
         val = dwc2_fszreg_read(ptr, addr, (addr - HSOTG_REG(0x100)) >> 2, size);
         break;
     case HSOTG_REG(0x104) ... HSOTG_REG(0x3fc):
-        val = dwc2_dfszreg_read(ptr, addr, (addr - (HSOTG_REG(0x104)) >> 2) + 1, size);
+        val = dwc2_dfszreg_read(ptr, addr, ((addr - HSOTG_REG(0x104)) >> 2) + 1, size);
         break;
     case HSOTG_REG(0x400) ... HSOTG_REG(0x4fc):
         val = dwc2_hreg0_read(ptr, addr, (addr - HSOTG_REG(0x400)) >> 2, size);
@@ -1219,10 +1454,10 @@ static uint64_t dwc2_hsotg_read(void *ptr, hwaddr addr, unsigned size)
         val = dwc2_dreg_read(ptr, addr, (addr - HSOTG_REG(0x800)) >> 2, size);
         break;
     case HSOTG_REG(0x900) ... HSOTG_REG(0xafc):
-        val = dwc2_dreg_in_read(ptr, addr, (addr - HSOTG_REG(0x900)) >> 2, size);
+        val = dwc2_diepreg_read(ptr, addr, (addr - HSOTG_REG(0x900)) >> 2, size);
         break;
     case HSOTG_REG(0xb00) ... HSOTG_REG(0xdfc):
-        val = dwc2_dreg_out_read(ptr, addr, (addr - HSOTG_REG(0xb00)) >> 2, size);
+        val = dwc2_doepreg_read(ptr, addr, (addr - HSOTG_REG(0xb00)) >> 2, size);
         break;
     case HSOTG_REG(0xe00) ... HSOTG_REG(0xffc):
         val = dwc2_pcgreg_read(ptr, addr, (addr - HSOTG_REG(0xe00)) >> 2, size);
@@ -1257,10 +1492,10 @@ static void dwc2_hsotg_write(void *ptr, hwaddr addr, uint64_t val,
         dwc2_dreg_write(ptr, addr, (addr - HSOTG_REG(0x800)) >> 2, val, size);
         break;
     case HSOTG_REG(0x900) ... HSOTG_REG(0xafc):
-        dwc2_dreg_in_write(ptr, addr, (addr - HSOTG_REG(0x900)) >> 2, val, size);
+        dwc2_diepreg_write(ptr, addr, (addr - HSOTG_REG(0x900)) >> 2, val, size);
         break;
     case HSOTG_REG(0xb00) ... HSOTG_REG(0xdfc):
-        dwc2_dreg_out_write(ptr, addr, (addr - HSOTG_REG(0xb00)) >> 2, val, size);
+        dwc2_doepreg_write(ptr, addr, (addr - HSOTG_REG(0xb00)) >> 2, val, size);
         break;
     case HSOTG_REG(0xe00) ... HSOTG_REG(0xffc):
         dwc2_pcgreg_write(ptr, addr, (addr - HSOTG_REG(0xe00)) >> 2, val, size);
@@ -1278,7 +1513,7 @@ static const MemoryRegionOps dwc2_mmio_hsotg_ops = {
     .endianness = DEVICE_LITTLE_ENDIAN,
 };
 
-static uint64_t dwc2_hreg2_read(void *ptr, hwaddr addr, unsigned size)
+static uint64_t dwc2_fifo_read(void *ptr, hwaddr addr, unsigned size)
 {
     DWC2State *s = ptr;
     int index = addr >> 12;
@@ -1290,11 +1525,11 @@ static uint64_t dwc2_hreg2_read(void *ptr, hwaddr addr, unsigned size)
         return 0;   
     }
     val = *(uint32_t*)&s->usb_buf[index][offset];
-    trace_usb_dwc2_hreg2_read(addr, addr >> 12, val);
+    trace_usb_dwc2_fifo_read(addr, addr >> 12, val);
     return val;
 }
 
-static void dwc2_hreg2_write(void *ptr, hwaddr addr, uint64_t val,
+static void dwc2_fifo_write(void *ptr, hwaddr addr, uint64_t val,
                              unsigned size)
 {
     DWC2State *s = ptr;
@@ -1309,12 +1544,12 @@ static void dwc2_hreg2_write(void *ptr, hwaddr addr, uint64_t val,
     }
     old = *(uint32_t*)&s->usb_buf[index][offset];
     *(uint32_t*)&s->usb_buf[index][offset] = val;
-    trace_usb_dwc2_hreg2_write(addr, addr >> 12, orig, old, val);
+    trace_usb_dwc2_fifo_write(addr, addr >> 12, orig, old, val);
 }
 
-static const MemoryRegionOps dwc2_mmio_hreg2_ops = {
-    .read = dwc2_hreg2_read,
-    .write = dwc2_hreg2_write,
+static const MemoryRegionOps dwc2_mmio_fifo_ops = {
+    .read = dwc2_fifo_read,
+    .write = dwc2_fifo_write,
     .impl.min_access_size = 4,
     .impl.max_access_size = 4,
     .endianness = DEVICE_LITTLE_ENDIAN,
@@ -1364,13 +1599,12 @@ static void dwc2_reset_enter(Object *obj, ResetType type)
 
     dwc2_bus_stop(s);
 
-    s->gotgctl = GOTGCTL_BSESVLD | GOTGCTL_ASESVLD | GOTGCTL_CONID_B;
+    s->gotgctl = 0;
     s->gotgint = 0;
     s->gahbcfg = 0;
     s->gusbcfg = 5 << GUSBCFG_USBTRDTIM_SHIFT;
     s->grstctl = GRSTCTL_AHBIDLE;
-    s->gintsts = GINTSTS_CONIDSTSCHNG | GINTSTS_PTXFEMP | GINTSTS_NPTXFEMP |
-                 GINTSTS_CURMODE_HOST;
+    s->gintsts = GINTSTS_PTXFEMP | GINTSTS_NPTXFEMP;
     s->gintmsk = 0;
     s->grxstsr = 0;
     s->grxstsp = 0;
@@ -1413,8 +1647,24 @@ static void dwc2_reset_enter(Object *obj, ResetType type)
     s->haintmsk = 0;
     s->hprt0 = 0;
 
+    s->dctl = 0;
+	s->dcfg = 0;
+	s->dsts = 0;
+
+    s->daint = 0;
+	s->daintmsk = 0;
+
+	s->diepmsk = 0;
+	s->doepmsk = 0;
+
     memset(s->hreg1, 0, sizeof(s->hreg1));
+    memset(s->diepreg, 0, sizeof(s->diepreg));
+    memset(s->doepreg, 0, sizeof(s->doepreg));
     memset(s->pcgreg, 0, sizeof(s->pcgreg));
+	for(int i = 0; i < DWC2_NB_EP; i++)
+	{
+		s->dptxfsiz[i] = (0x100 << FIFOSIZE_DEPTH_SHIFT) | 0x100;
+	}
 
     s->sof_time = 0;
     s->frame_number = 0;
@@ -1503,9 +1753,170 @@ static void dwc2_init(Object *obj)
                           "dwc2-io", 4 * KiB);
     memory_region_add_subregion(&s->container, 0x0000, &s->hsotg);
 
-    memory_region_init_io(&s->fifos, obj, &dwc2_mmio_hreg2_ops, s,
+    memory_region_init_io(&s->fifos, obj, &dwc2_mmio_fifo_ops, s,
                           "dwc2-fifo", 64 * KiB);
     memory_region_add_subregion(&s->container, 0x1000, &s->fifos);
+}
+
+static void dwc2_usb_device_realize(USBDevice *dev, Error **errp)
+{
+    DWC2DeviceState *udev = DWC2_USB_DEVICE(dev);
+    
+    if (!udev->dwc2) {
+        udev->dwc2 = container_of(udev, DWC2State, device);
+    }
+    dev->speed = USB_SPEED_FULL;
+    dev->speedmask = USB_SPEED_MASK_FULL;
+}
+
+static void dwc2_usb_device_handle_attach(USBDevice *dev)
+{
+    DWC2DeviceState *udev = DWC2_USB_DEVICE(dev);
+    DWC2State *s = udev->dwc2;
+    
+    /* not in host mode */
+    assert(!s->uport.dev);
+
+    s->gotgctl |= GOTGCTL_BSESVLD | GOTGCTL_CONID_B;
+    dwc2_lower_global_irq(s, GINTSTS_CURMODE_HOST);
+    dwc2_raise_global_irq(s, GINTSTS_CONIDSTSCHNG);
+}
+
+static void dwc2_usb_device_handle_detach(USBDevice *dev)
+{
+    DWC2DeviceState *udev = DWC2_USB_DEVICE(dev);
+    DWC2State *s = udev->dwc2;
+
+    s->gotgctl &= ~(GOTGCTL_BSESVLD | GOTGCTL_CONID_B);
+    dwc2_raise_global_irq(s, GINTSTS_CURMODE_HOST | GINTSTS_CONIDSTSCHNG);
+}
+
+static void dwc2_usb_device_handle_reset(USBDevice *dev)
+{
+    DWC2DeviceState *udev = DWC2_USB_DEVICE(dev);
+    DWC2State *s = udev->dwc2;
+    // TODO: Implement reset
+    dwc2_raise_global_irq(s, GINTSTS_USBRST);
+}
+
+static void dwc2_usb_device_handle_packet(USBDevice *dev, USBPacket *p)
+{
+    DWC2DeviceState *udev = DWC2_USB_DEVICE(dev);
+    DWC2State *s = udev->dwc2;
+    uint8_t ep = p->ep->nr;
+    
+    switch (p->pid) {
+    case USB_TOKEN_IN:
+        if (s->diepctl(ep) & DXEPCTL_STALL) {
+            s->diepctl(ep) &= ~DXEPCTL_STALL;
+            p->status = USB_RET_STALL;
+        } else if (s->diepctl(ep) & DXEPCTL_EPENA) {
+            // IN transfer
+            s->diepctl(ep) &= ~DXEPCTL_EPENA;
+
+            size_t sz = (s->dieptsiz(ep) & TSIZ_XFERSIZE_MASK) >> TSIZ_XFERSIZE_SHIFT;
+            size_t amtDone = sz;
+            size_t txfz = dwc2_tx_fifo_size(s, 0);
+            if (amtDone > p->iov.size - p->actual_length) {
+                amtDone = p->iov.size - p->actual_length;
+            }
+            if (amtDone > txfz) {
+                amtDone = txfz;
+            }
+            size_t txfs = dwc2_tx_fifo_start(s, ep);
+            assert(txfs + txfz <= DWC2_MAX_XFER_SIZE);
+
+            fprintf(stderr, "%s: starting IN transfer on EP %d (%zu)...\n", __func__, ep, amtDone);
+
+            if (amtDone > 0) {
+                if (s->diepdma(ep)) {
+                    // TODO: is copying from this fifo correct?
+                    dma_memory_read(&s->dma_as, s->diepdma(ep), &s->usb_buf[ep][txfs], amtDone);
+                    s->diepdma(ep) += amtDone;
+                }
+
+                usb_packet_copy(p, &s->usb_buf[ep][txfs], amtDone);
+            }
+            s->dieptsiz(ep) = (s->dieptsiz(ep) &~ TSIZ_XFERSIZE_MASK)
+                               | (((sz - amtDone) << TSIZ_XFERSIZE_SHIFT)& TSIZ_XFERSIZE_MASK);
+            s->diepint(ep) |= DXEPINT_XFERCOMPL;
+            p->status = USB_RET_SUCCESS;
+        } else {
+            p->status = USB_RET_NAK;
+        }
+        break;
+    case USB_TOKEN_OUT:
+    case USB_TOKEN_SETUP:
+        if (s->doepctl(ep) & DXEPCTL_STALL) {
+            s->doepctl(ep) &= ~DXEPCTL_STALL;
+            p->status = USB_RET_STALL;
+        } else if (s->doepctl(ep) & DXEPCTL_EPENA) {
+            s->doepctl(ep) &= ~DXEPCTL_EPENA;
+
+            size_t sz = (s->doeptsiz(ep) & TSIZ_XFERSIZE_MASK) >> TSIZ_XFERSIZE_SHIFT;
+            size_t amtDone = sz;
+            if (amtDone > p->iov.size - p->actual_length) {
+                amtDone = p->iov.size - p->actual_length;
+            }
+            size_t rxfz = s->grxfsiz;
+            if (amtDone > rxfz) {
+                amtDone = rxfz;
+            }
+            assert(rxfz <= DWC2_MAX_XFER_SIZE);
+            
+            fprintf(stderr, "%s: starting OUT transfer on EP %d (%zu)...\n", __func__, ep, amtDone);
+
+            if (amtDone > 0) {
+                // TODO: is this copy correct?
+                usb_packet_copy(p, s->usb_buf[ep], amtDone);
+
+                if (s->doepdma(ep)) {
+                    dma_memory_write(&s->dma_as, s->doepdma(ep), s->usb_buf[ep], amtDone);
+                    s->doepdma(ep) += amtDone;
+                }
+            }
+            
+            if (p->pid == USB_TOKEN_SETUP) {
+                struct usb_control_packet setup;
+                memcpy(&setup, s->usb_buf[ep], sizeof(setup));
+                fprintf(stderr, "%s: SETUP {%02x,%02x,%04x,%04x,%04x}\n",
+                        __func__, setup.bmRequestType, setup.bRequest,
+                        setup.wValue, setup.wIndex, setup.wLength);
+                s->doepint(ep) |= DXEPINT_SETUP;
+            } else {
+                s->doepint(ep) |= DXEPINT_XFERCOMPL;
+            }
+
+            s->doeptsiz(ep) = (s->doeptsiz(ep) &~ TSIZ_XFERSIZE_MASK)
+                               | (((sz - amtDone) << TSIZ_XFERSIZE_SHIFT) & TSIZ_XFERSIZE_MASK);
+            p->status = USB_RET_SUCCESS;
+        } else {
+            p->status = USB_RET_NAK;
+        }
+        break;
+    default:
+        break;
+    }
+    dwc2_update_ep_irq(s, ep);
+}
+
+static void dwc2_usb_device_handle_control(USBDevice *dev, USBPacket *p, int request, int value,
+                                           int index, int length, uint8_t *data)
+{
+    DWC2DeviceState *udev = DWC2_USB_DEVICE(dev);
+    DWC2State *s = udev->dwc2;
+    struct usb_control_packet ctrl;
+    uint8_t ep = p->ep->nr;
+    
+    ctrl.bRequest     = request & 0xFF;
+    ctrl.bmRequestType = request >> 8;
+    ctrl.wValue       = value;
+    ctrl.wIndex       = index;
+    ctrl.wLength      = length;
+
+    // TODO: shall we write ctrl?
+    dwc2_usb_device_handle_packet(dev, p);
+    
 }
 
 static const VMStateDescription vmstate_dwc2_state_packet = {
@@ -1541,6 +1952,8 @@ const VMStateDescription vmstate_dwc2_state = {
                              DWC2_HREG0_SIZE / sizeof(uint32_t)),
         VMSTATE_UINT32_ARRAY(hreg1, DWC2State,
                              DWC2_HREG1_SIZE / sizeof(uint32_t)),
+        VMSTATE_UINT32_ARRAY(dreg, DWC2State,
+                             DWC2_DREG_SIZE / sizeof(uint32_t)),
         VMSTATE_UINT32_ARRAY(pcgreg, DWC2State,
                              DWC2_PCGREG_SIZE / sizeof(uint32_t)),
 
@@ -1569,6 +1982,28 @@ static Property dwc2_usb_properties[] = {
     DEFINE_PROP_END_OF_LIST(),
 };
 
+static void dwc2_usb_device_class_initfn_common(ObjectClass *klass, void *data)
+{
+    DeviceClass *dc = DEVICE_CLASS(klass);
+    USBDeviceClass *uc = USB_DEVICE_CLASS(klass);
+    
+    uc->realize        = dwc2_usb_device_realize;
+    uc->product_desc   = "DWC2 USB Device";
+    uc->unrealize      = NULL;
+    uc->cancel_packet  = NULL;
+    uc->handle_attach  = dwc2_usb_device_handle_attach;
+    uc->handle_detach  = dwc2_usb_device_handle_detach;
+    uc->handle_reset   = dwc2_usb_device_handle_reset;
+    uc->handle_data    = NULL;
+    uc->handle_control = dwc2_usb_device_handle_control;
+    uc->flush_ep_queue = NULL;
+    uc->ep_stopped     = NULL;
+    uc->alloc_streams  = NULL;
+    uc->free_streams   = NULL;
+    uc->usb_desc       = NULL;
+    set_bit(DEVICE_CATEGORY_USB, dc->categories);
+}
+
 static void dwc2_class_init(ObjectClass *klass, void *data)
 {
     DeviceClass *dc = DEVICE_CLASS(klass);
@@ -1583,6 +2018,12 @@ static void dwc2_class_init(ObjectClass *klass, void *data)
                                        dwc2_reset_exit, &c->parent_phases);
 }
 
+static const TypeInfo dwc2_usb_device_type_info = {
+    .name = TYPE_DWC2_USB_DEVICE,
+    .parent = TYPE_USB_DEVICE,
+    .instance_size = sizeof(DWC2DeviceState),
+    .class_init = dwc2_usb_device_class_initfn_common,
+};
 static const TypeInfo dwc2_usb_type_info = {
     .name          = TYPE_DWC2_USB,
     .parent        = TYPE_SYS_BUS_DEVICE,
@@ -1594,6 +2035,7 @@ static const TypeInfo dwc2_usb_type_info = {
 
 static void dwc2_usb_register_types(void)
 {
+    type_register_static(&dwc2_usb_device_type_info);
     type_register_static(&dwc2_usb_type_info);
 }
 

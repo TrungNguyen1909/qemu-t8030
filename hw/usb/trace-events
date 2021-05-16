@@ -184,6 +184,8 @@ usb_dwc2_raise_global_irq(uint32_t intr) "0x%08x"
 usb_dwc2_lower_global_irq(uint32_t intr) "0x%08x"
 usb_dwc2_raise_host_irq(uint32_t intr) "0x%04x"
 usb_dwc2_lower_host_irq(uint32_t intr) "0x%04x"
+usb_dwc2_raise_device_irq(uint32_t ep, bool out) "ep=0x%04x out=%d"
+usb_dwc2_lower_device_irq(uint32_t ep, bool out) "ep=0x%04x out=%d"
 usb_dwc2_sof(int64_t next) "next SOF %" PRId64
 usb_dwc2_bus_start(void) "start SOFs"
 usb_dwc2_bus_stop(void) "stop SOFs"
@@ -219,8 +221,8 @@ usb_dwc2_hreg1_read(uint64_t addr, const char *reg, uint64_t chan, uint32_t val)
 usb_dwc2_hreg1_write(uint64_t addr, const char *reg, uint64_t chan, uint64_t val, uint32_t old, uint64_t result) " 0x%04" PRIx64 " %s%" PRId64 " val 0x%08" PRIx64 " old 0x%08x result 0x%08" PRIx64
 usb_dwc2_pcgreg_read(uint64_t addr, const char *reg, uint32_t val) " 0x%04" PRIx64 " %s val 0x%08x"
 usb_dwc2_pcgreg_write(uint64_t addr, const char *reg, uint64_t val, uint32_t old, uint64_t result) "0x%04" PRIx64 " %s val 0x%08" PRIx64 " old 0x%08x result 0x%08" PRIx64
-usb_dwc2_hreg2_read(uint64_t addr, uint64_t fifo, uint32_t val) "  0x%04" PRIx64 " FIFO%" PRId64 "     val 0x%08x"
-usb_dwc2_hreg2_write(uint64_t addr, uint64_t fifo, uint64_t val, uint32_t old, uint64_t result) " 0x%04" PRIx64 " FIFO%" PRId64 "     val 0x%08" PRIx64 " old 0x%08x result 0x%08" PRIx64
+usb_dwc2_fifo_read(uint64_t addr, uint64_t fifo, uint32_t val) "  0x%04" PRIx64 " FIFO%" PRId64 "     val 0x%08x"
+usb_dwc2_fifo_write(uint64_t addr, uint64_t fifo, uint64_t val, uint32_t old, uint64_t result) " 0x%04" PRIx64 " FIFO%" PRId64 "     val 0x%08" PRIx64 " old 0x%08x result 0x%08" PRIx64
 usb_dwc2_hreg0_action(const char *s) "%s"
 usb_dwc2_wakeup_endpoint(void *ep, uint32_t stream) "endp %p stream %d"
 usb_dwc2_work_timer(void) ""
