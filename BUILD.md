@@ -311,16 +311,17 @@ cp hello binpack64/bin
 ### Re-generate trustcache
 
 ```sh
+# dump trustcache from firmware
 python3 xnu-qemu-arm64-tools/bootstrap_scripts/dump_trustcache.py Firmware/038-44337-083.dmg.trustcache.out | grep cdhash | cut -d' ' -f2 > tchashes
 
-# re-generate trustcache for binpack64
+# update trustcache with new binaries from binpack64
 for filename in $(find binpack64/  -type f); do jtool2 --sig $filename 2>/dev/null; done | grep CDHash | cut -d' ' -f6 | cut -c 1-40 >> ./tchashes
 
-# re-serialize trustcache
+# re-serialize updated trustcache
 python3 xnu-qemu-arm64-tools/bootstrap_scripts/create_trustcache.py tchashes static_tc
 ```
 
-Finally, unmount the firmware image
+Finally, unmount the firmware image - now with new binary inserted
 
 ```sh
 hdiutil detach /Volumes/AzulSeed18A5351d.N104N841DeveloperOS
