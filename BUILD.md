@@ -224,7 +224,7 @@ hdiutil detach /Volumes/AzulSeed18A5351d.N104N841DeveloperOS
 
 # Preparing NVRAM
 
-Either use `setup-ios\nvram`, or create it yourself as follows.
+Either use `setup-ios/nvram`, or create it yourself as follows.
 
 ```sh
 echo "XQAAAAT//////////wAtIHxAA8l2M4RwLYP/nVI8/XJz1smfQHsB1bYBDcXGde9gDROioaQd5idJPDeyKi/XrDIVFDVxwhaUAvSvYtKbu9Hs/pS2MN3p09D/mcqXOKs2di3TWiuNQUYbsWMOACSAbmhlikZkXD2LfUNIuxvxJ4g7VtdQl+gefhX8xA+LOoNwO88uhrlSnNHTA85R9Lwj4PgM79i6f+mrzEgAuXZ2VyVkHig/Di57BeIpn0WrBqW9L/JR4/P6WlOnN32PgJvq/arUT/MM3ikXaOPamiXxFCPk/8deoBBt6VPU//+2HcAA" | base64 -d | unlzma -c > nvram
@@ -264,4 +264,64 @@ Run on iOS shell:
 
 ```sh
 export PATH=$PATH:/binpack64/usr/bin:/binpack64/bin:/binpack64/usr/sbin:/binpack64/sbin
+```
+
+----
+
+## Add a new binary to binpack64/bin in firmware
+
+### Build binary - require Xcode on macOS
+
+```sh
+xcrun -sdk iphoneos clang -arch arm64 -mcpu=apple-a13 -o hello hello.c
+```
+
+Then sign the binary
+
+```
+codesign -f -s - hello
+```
+
+
+### Copy binary to firmware
+
+```sh
+# attach image
+hdiutil attach -imagekey diskimage-class=CRawDiskImage disk.1
+
+# enable ownership
+sudo diskutil enableownership /Volumes/AzulSeed18A5351d.N104N841DeveloperOS
+
+# mount with RW
+mount -urw /Volumes/AzulSeed18A5351d.N104N841DeveloperOS
+```
+
+Then copy the signed binary to image
+
+```sh
+sudo cp hello /Volumes/AzulSeed18A5351d.N104N841DeveloperOS/binpack64/bin
+```
+
+Also copy the binary to the local `binpack64` directory
+
+```sh
+cp hello binpack64/bin
+```
+
+### Re-generate trustcache
+
+```sh
+python3 xnu-qemu-arm64-tools/bootstrap_scripts/dump_trustcache.py Firmware/038-44337-083.dmg.trustcache.out | grep cdhash | cut -d' ' -f2 > tchashes
+
+# re-generate trustcache for binpack64
+for filename in $(find binpack64/  -type f); do jtool2 --sig $filename 2>/dev/null; done | grep CDHash | cut -d' ' -f6 | cut -c 1-40 >> ./tchashes
+
+# re-serialize trustcache
+python3 xnu-qemu-arm64-tools/bootstrap_scripts/create_trustcache.py tchashes static_tc
+```
+
+Finally, unmount the firmware image
+
+```sh
+hdiutil detach /Volumes/AzulSeed18A5351d.N104N841DeveloperOS
 ```
