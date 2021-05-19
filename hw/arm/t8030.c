@@ -116,7 +116,7 @@ T8030_CPREG_FUNCS(S3_6_c15_c1_2)
 T8030_CPREG_FUNCS(S3_6_c15_c1_5)
 T8030_CPREG_FUNCS(S3_6_c15_c1_6)
 T8030_CPREG_FUNCS(S3_6_c15_c1_7)
-T8030_CPREG_FUNCS(APRR_EL1)
+T8030_CPREG_FUNCS(S3_6_c15_c3_0)
 T8030_CPREG_FUNCS(S3_6_c15_c3_1)
 T8030_CPREG_FUNCS(S3_6_c15_c8_0)
 T8030_CPREG_FUNCS(S3_6_c15_c8_2)
@@ -388,7 +388,7 @@ static const ARMCPRegInfo T8030_cp_reginfo_tcg[] = {
     T8030_CPREG_DEF(S3_6_c15_c1_5, 3, 6, 15, 1, 5, PL1_RW),
     T8030_CPREG_DEF(S3_6_c15_c1_6, 3, 6, 15, 1, 6, PL1_RW),
     T8030_CPREG_DEF(S3_6_c15_c1_7, 3, 6, 15, 1, 7, PL1_RW),
-    T8030_CPREG_DEF(APRR_EL1, 3, 6, 15, 3, 0, PL1_RW),
+    T8030_CPREG_DEF(S3_6_c15_c3_0, 3, 6, 15, 3, 0, PL1_RW),
     T8030_CPREG_DEF(S3_6_c15_c3_1, 3, 6, 15, 3, 1, PL1_RW),
     T8030_CPREG_DEF(S3_6_c15_c8_0, 3, 6, 15, 8, 0, PL1_RW),
     T8030_CPREG_DEF(S3_6_c15_c8_2, 3, 6, 15, 8, 2, PL1_RW),
@@ -441,11 +441,11 @@ static const ARMCPRegInfo T8030_cp_reginfo_tcg[] = {
     //GXF
     {                                                                        
         .cp = CP_REG_ARM64_SYSREG_CP,                                        
-        .name = "GXF_ENTRY_EL1",
+        .name = "GXF_ENTER_EL1",
         .opc0 = 3, .opc1 = 6, .crn = 15, .crm = 8, .opc2 = 1,
         .access = PL1_RW, .resetvalue = 0,
         .state = ARM_CP_STATE_AA64,
-        .fieldoffset = offsetof(CPUARMState, gxf.gxf_entry_el[1])
+        .fieldoffset = offsetof(CPUARMState, gxf.gxf_enter_el[1])
     },  
     {                                                                        
         .cp = CP_REG_ARM64_SYSREG_CP,                                        

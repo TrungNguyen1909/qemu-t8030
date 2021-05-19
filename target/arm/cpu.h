@@ -520,16 +520,16 @@ typedef struct CPUARMState {
     } cp15;
 
     struct {
-        uint64_t gxf_entry_el[3];
+        uint64_t gxf_enter_el[3];
         uint64_t gxf_config_el[3];
-        uint64_t gxf_pabentry_el[3];
         uint64_t sp_gl[3];
         uint64_t tpidr_gl[3];
         uint64_t vbar_gl[3];
-        uint64_t elr_gl[3];
-        uint64_t esr_gl[3];
-        uint64_t far_gl[3];
         uint64_t spsr_gl[3];
+        uint64_t aspsr_gl[3];
+        uint64_t esr_gl[3];
+        uint64_t elr_gl[3];
+        uint64_t far_gl[3];
         bool guarded;
     } gxf;
 
