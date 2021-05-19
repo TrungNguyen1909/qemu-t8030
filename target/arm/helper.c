@@ -10222,7 +10222,7 @@ static void arm_cpu_do_interrupt_aarch64(CPUState *cs)
         addr += 0x100;
         break;
     case EXCP_GENTER:
-        addr = env->gxf.gxf_entry_el[new_el];
+        addr = env->gxf.gxf_enter_el[new_el];
         genter = true;
         break;
     default:
