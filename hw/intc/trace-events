@@ -208,6 +208,7 @@ bcm2835_ic_set_cpu_irq(int irq, int level) "CPU irq #%d level %d"
 aic_enable_irq(int irq) "AIC: Enabling IRQ %d"
 aic_disable_irq(int irq) "AIC: Disabling IRQ %d"
 aic_set_irq(int irq, int level) "AIC: External IRQ %d level set to %d"
+aic_new_irq(int irq) "AIC: First time unmasking IRQ %d"
 
 # spapr_xive.c
 spapr_xive_claim_irq(uint32_t lisn, bool lsi) "lisn=0x%x lsi=%d"

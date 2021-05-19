@@ -8,6 +8,8 @@
 #define TYPE_APPLE_AIC "apple.aic"
 OBJECT_DECLARE_SIMPLE_TYPE(AppleAICState, APPLE_AIC)
 
+#define AIC_DEBUG_NEW_IRQ
+
 /*
  * AIC splits IRQs into domains (ipid)
  * In T8030 device tree, we have aic->ipid_length = 72
@@ -122,6 +124,9 @@ struct AppleAICState {
     AppleAICOpaque *cpus;
     uint32_t *eir_state;
     uint32_t global_cfg;
+#ifdef AIC_DEBUG_NEW_IRQ
+    uint32_t *eir_mask_once;
+#endif
 };
 
 
