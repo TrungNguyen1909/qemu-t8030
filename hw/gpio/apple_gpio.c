@@ -77,6 +77,26 @@
 
 static void apple_gpio_update_pincfg(AppleGPIOState *s, int pin, uint32_t value)
 {
+    if (((value & INT_MASKED) != INT_MASKED) && ((value & INT_MASKED) != (s->gpio_cfg[pin] & INT_MASKED))) {
+        int irqgrp = (value & INT_MASKED) >> INTR_GRP_SHIFT;
+        clear_bit(pin, (unsigned long *)s->int_cfg[irqgrp]);
+        switch (value & CFG_MASK) {
+        case CFG_INT_LVL_HI:
+            if (test_bit(pin, (unsigned long *)s->in)) {
+                set_bit(pin, (unsigned long *)s->int_cfg[irqgrp]);
+            }
+            break;
+
+        case CFG_INT_LVL_LO:
+            if (!test_bit(pin, (unsigned long *)s->in)) {
+                set_bit(pin, (unsigned long *)s->int_cfg[irqgrp]);
+            }
+            break;
+        default:
+            break;
+        }
+        qemu_set_irq(s->irqs[irqgrp], find_first_bit((unsigned long *)s->int_cfg[irqgrp], s->npins) != s->npins);
+    }
     s->gpio_cfg[pin] = value;
     if (value & FUNC_MASK) {
         // TODO: Is this how FUNC_ALT0 supposed to behave?
@@ -103,6 +123,7 @@ static void apple_gpio_set(void *opaque, int pin, int level)
 {
     AppleGPIOState *s = APPLE_GPIO(opaque);
     int grp;
+    int irqgrp = -1;
 
     if (pin >= s->npins) {
         return;
@@ -117,7 +138,7 @@ static void apple_gpio_set(void *opaque, int pin, int level)
 
     grp = pin >> 5;
     if ((s->gpio_cfg[pin] & INT_MASKED) != INT_MASKED) {
-        int irqgrp = (s->gpio_cfg[pin] & INT_MASKED) >> INTR_GRP_SHIFT;
+        irqgrp = (s->gpio_cfg[pin] & INT_MASKED) >> INTR_GRP_SHIFT;
         switch (s->gpio_cfg[pin] & CFG_MASK) {
         case CFG_GP_IN:
         case CFG_GP_OUT:
@@ -156,11 +177,11 @@ static void apple_gpio_set(void *opaque, int pin, int level)
         default:
             break;
         }
-
-        s->old_in[grp] = s->in[grp];
+    }
+    s->old_in[grp] = s->in[grp];
+    if (irqgrp != -1) {
         qemu_set_irq(s->irqs[irqgrp], find_first_bit((unsigned long *)s->int_cfg[irqgrp], s->npins) != s->npins);
     }
-
 }
 
 static void apple_gpio_realize(DeviceState *dev, Error **errp)
@@ -231,7 +252,7 @@ static uint32_t apple_gpio_cfg_read(AppleGPIOState *s, unsigned int pin, hwaddr 
 static void apple_gpio_int_write(AppleGPIOState *s, unsigned int group,
                                  hwaddr addr, uint32_t value)
 {
-    int offset;
+    unsigned int offset;
 
     if (group >= s->nirqgrps) {
         qemu_log_mask(LOG_GUEST_ERROR,
@@ -240,7 +261,7 @@ static void apple_gpio_int_write(AppleGPIOState *s, unsigned int group,
     }
 
     offset = addr - rGPIOINT(group, 0);
-    s->int_cfg[group][offset >> 2] = value;
+    s->int_cfg[group][offset >> 2] &= ~value;
 
     if (find_first_bit((unsigned long *)s->int_cfg[group], s->npins) == s->npins) {
         qemu_irq_lower(s->irqs[group]);
@@ -250,7 +271,7 @@ static void apple_gpio_int_write(AppleGPIOState *s, unsigned int group,
 static uint32_t apple_gpio_int_read(AppleGPIOState *s,
                                     unsigned int group, hwaddr addr)
 {
-    int offset;
+    unsigned int offset;
 
     if (group >= s->nirqgrps) {
         qemu_log_mask(LOG_GUEST_ERROR,
@@ -259,6 +280,7 @@ static uint32_t apple_gpio_int_read(AppleGPIOState *s,
     }
 
     offset = addr - rGPIOINT(group, 0);
+    fprintf(stderr, "%s: group: %u, addr: " TARGET_FMT_plx " offset: %u value: 0x%x\n", __func__, group, addr, offset, s->int_cfg[group][offset >> 2]);
     return s->int_cfg[group][offset >> 2];
 }
 
