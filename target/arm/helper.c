@@ -4829,11 +4829,9 @@ static void tlbi_aa64_rvae1is_write(CPUARMState *env, const ARMCPRegInfo *ri,
     uint64_t scale = extract64(value, 44, 2);
     uint64_t num = extract64(value, 39, 5);
     uint64_t baseaddr = extract64(value, 0, 37) << shift;
-    uint64_t baseaddr_end = baseaddr+((num+1)*(1ULL<<(5*scale+1)) * tg);
-    for(uint64_t pageaddr = baseaddr; pageaddr < baseaddr_end; pageaddr += tg) {
-        int bits = vae1_tlbbits(env, pageaddr);
-        tlb_flush_page_bits_by_mmuidx_all_cpus_synced(cs, pageaddr, mask, bits);
-    }
+    uint64_t npages = (num + 1) * (1ULL << (5 * scale + 1));
+    int bits = vae1_tlbbits(env, baseaddr);
+    tlb_ranged_flush_page_bits_by_mmuidx_all_cpus_synced(cs, baseaddr, mask, bits, npages, tg);
 }
 
 static void tlbi_aa64_vae1_write(CPUARMState *env, const ARMCPRegInfo *ri,
@@ -4870,15 +4868,13 @@ static void tlbi_aa64_rvae1_write(CPUARMState *env, const ARMCPRegInfo *ri,
     uint64_t scale = extract64(value, 44, 2);
     uint64_t num = extract64(value, 39, 5);
     uint64_t baseaddr = extract64(value, 0, 37) << shift;
-    uint64_t baseaddr_end = baseaddr+((num+1)*(1ULL<<(5*scale+1)) * tg);
-    for(uint64_t pageaddr = baseaddr; pageaddr < baseaddr_end; pageaddr += tg) {
-        int bits = vae1_tlbbits(env, pageaddr);
+    uint64_t npages = (num + 1) * (1ULL << (5 * scale + 1));
+    int bits = vae1_tlbbits(env, baseaddr);
 
-        if (tlb_force_broadcast(env)) {
-            tlb_flush_page_bits_by_mmuidx_all_cpus_synced(cs, pageaddr, mask, bits);
-        } else {
-            tlb_flush_page_bits_by_mmuidx(cs, pageaddr, mask, bits);
-        }
+    if (tlb_force_broadcast(env)) {
+        tlb_ranged_flush_page_bits_by_mmuidx_all_cpus_synced(cs, baseaddr, mask, bits, npages, tg);
+    } else {
+        tlb_ranged_flush_page_bits_by_mmuidx(cs, baseaddr, mask, bits, npages, tg);
     }
 }
 
