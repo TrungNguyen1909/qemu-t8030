@@ -1661,7 +1661,10 @@ static void arm_cpu_realizefn(DeviceState *dev, Error **errp)
            !cpu_isar_feature(aa32_vfp_simd, cpu) ||
            !arm_feature(env, ARM_FEATURE_XSCALE));
 
-    if (arm_feature(env, ARM_FEATURE_V7) &&
+    if (arm_feature(env, ARM_FEATURE_V8)) {
+        // TODO: better condition for 16k pages
+        pagebits = 14;
+    } else if (arm_feature(env, ARM_FEATURE_V7) &&
         !arm_feature(env, ARM_FEATURE_M) &&
         !arm_feature(env, ARM_FEATURE_PMSA)) {
         /* v7VMSA drops support for the old ARMv5 tiny pages, so we

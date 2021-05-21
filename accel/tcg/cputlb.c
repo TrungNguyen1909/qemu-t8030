@@ -751,6 +751,8 @@ typedef struct {
     target_ulong addr;
     uint16_t idxmap;
     uint16_t bits;
+    uint16_t npages;
+    uint16_t granule;
 } TLBFlushPageBitsByMMUIdxData;
 
 static void
@@ -759,6 +761,7 @@ tlb_flush_page_bits_by_mmuidx_async_0(CPUState *cpu,
 {
     CPUArchState *env = cpu->env_ptr;
     int mmu_idx;
+    int p;
 
     assert_cpu_is_self(cpu);
 
@@ -766,9 +769,11 @@ tlb_flush_page_bits_by_mmuidx_async_0(CPUState *cpu,
               d.addr, d.bits, d.idxmap);
 
     qemu_spin_lock(&env_tlb(env)->c.lock);
-    for (mmu_idx = 0; mmu_idx < NB_MMU_MODES; mmu_idx++) {
-        if ((d.idxmap >> mmu_idx) & 1) {
-            tlb_flush_page_bits_locked(env, mmu_idx, d.addr, d.bits);
+    for (p = 0; p < d.npages; p++) {
+        for (mmu_idx = 0; mmu_idx < NB_MMU_MODES; mmu_idx++) {
+            if ((d.idxmap >> mmu_idx) & 1) {
+                tlb_flush_page_bits_locked(env, mmu_idx, d.addr + p * d.granule, d.bits);
+            }
         }
     }
     qemu_spin_unlock(&env_tlb(env)->c.lock);
@@ -779,6 +784,9 @@ tlb_flush_page_bits_by_mmuidx_async_0(CPUState *cpu,
 static bool encode_pbm_to_runon(run_on_cpu_data *out,
                                 TLBFlushPageBitsByMMUIdxData d)
 {
+    if (d.npages > 1) {
+        return false;
+    }
     /* We need 6 bits to hold to hold @bits up to 63. */
     if (d.idxmap <= MAKE_64BIT_MASK(0, TARGET_PAGE_BITS - 6)) {
         *out = RUN_ON_CPU_TARGET_PTR(d.addr | (d.idxmap << 6) | d.bits);
@@ -794,7 +802,8 @@ decode_runon_to_pbm(run_on_cpu_data data)
     return (TLBFlushPageBitsByMMUIdxData){
         .addr = addr_map_bits & TARGET_PAGE_MASK,
         .idxmap = (addr_map_bits & ~TARGET_PAGE_MASK) >> 6,
-        .bits = addr_map_bits & 0x3f
+        .bits = addr_map_bits & 0x3f,
+        .npages = 1,
     };
 }
 
@@ -812,8 +821,8 @@ static void tlb_flush_page_bits_by_mmuidx_async_2(CPUState *cpu,
     g_free(d);
 }
 
-void tlb_flush_page_bits_by_mmuidx(CPUState *cpu, target_ulong addr,
-                                   uint16_t idxmap, unsigned bits)
+void tlb_ranged_flush_page_bits_by_mmuidx(CPUState *cpu, target_ulong addr,
+                                   uint16_t idxmap, unsigned bits, uint16_t npages, uint16_t granule)
 {
     TLBFlushPageBitsByMMUIdxData d;
     run_on_cpu_data runon;
@@ -833,6 +842,8 @@ void tlb_flush_page_bits_by_mmuidx(CPUState *cpu, target_ulong addr,
     d.addr = addr & TARGET_PAGE_MASK;
     d.idxmap = idxmap;
     d.bits = bits;
+    d.npages = npages;
+    d.granule = granule;
 
     if (qemu_cpu_is_self(cpu)) {
         tlb_flush_page_bits_by_mmuidx_async_0(cpu, d);
@@ -849,10 +860,18 @@ void tlb_flush_page_bits_by_mmuidx(CPUState *cpu, target_ulong addr,
     }
 }
 
-void tlb_flush_page_bits_by_mmuidx_all_cpus(CPUState *src_cpu,
-                                            target_ulong addr,
-                                            uint16_t idxmap,
-                                            unsigned bits)
+void tlb_flush_page_bits_by_mmuidx(CPUState *cpu, target_ulong addr,
+                                   uint16_t idxmap, unsigned bits)
+{
+    tlb_ranged_flush_page_bits_by_mmuidx(cpu, addr, idxmap, bits, 1, 0);
+}
+
+void tlb_ranged_flush_page_bits_by_mmuidx_all_cpus(CPUState *src_cpu,
+                                                   target_ulong addr,
+                                                   uint16_t idxmap,
+                                                   unsigned bits,
+                                                   uint16_t npages,
+                                                   uint16_t granule)
 {
     TLBFlushPageBitsByMMUIdxData d;
     run_on_cpu_data runon;
@@ -872,6 +891,8 @@ void tlb_flush_page_bits_by_mmuidx_all_cpus(CPUState *src_cpu,
     d.addr = addr & TARGET_PAGE_MASK;
     d.idxmap = idxmap;
     d.bits = bits;
+    d.npages = npages;
+    d.granule = granule;
 
     if (encode_pbm_to_runon(&runon, d)) {
         flush_all_helper(src_cpu, tlb_flush_page_bits_by_mmuidx_async_1, runon);
@@ -894,10 +915,12 @@ void tlb_flush_page_bits_by_mmuidx_all_cpus(CPUState *src_cpu,
     tlb_flush_page_bits_by_mmuidx_async_0(src_cpu, d);
 }
 
-void tlb_flush_page_bits_by_mmuidx_all_cpus_synced(CPUState *src_cpu,
-                                                   target_ulong addr,
-                                                   uint16_t idxmap,
-                                                   unsigned bits)
+void tlb_ranged_flush_page_bits_by_mmuidx_all_cpus_synced(CPUState *src_cpu,
+                                                          target_ulong addr,
+                                                          uint16_t idxmap,
+                                                          unsigned bits,
+                                                          uint16_t npages,
+                                                          uint16_t granule)
 {
     TLBFlushPageBitsByMMUIdxData d;
     run_on_cpu_data runon;
@@ -917,6 +940,8 @@ void tlb_flush_page_bits_by_mmuidx_all_cpus_synced(CPUState *src_cpu,
     d.addr = addr & TARGET_PAGE_MASK;
     d.idxmap = idxmap;
     d.bits = bits;
+    d.npages = npages;
+    d.granule = granule;
 
     if (encode_pbm_to_runon(&runon, d)) {
         flush_all_helper(src_cpu, tlb_flush_page_bits_by_mmuidx_async_1, runon);
@@ -941,6 +966,21 @@ void tlb_flush_page_bits_by_mmuidx_all_cpus_synced(CPUState *src_cpu,
         async_safe_run_on_cpu(src_cpu, tlb_flush_page_bits_by_mmuidx_async_2,
                               RUN_ON_CPU_HOST_PTR(p));
     }
+}
+void tlb_flush_page_bits_by_mmuidx_all_cpus(CPUState *src_cpu,
+                                            target_ulong addr,
+                                            uint16_t idxmap,
+                                            unsigned bits)
+{
+    tlb_ranged_flush_page_bits_by_mmuidx_all_cpus(src_cpu, addr, idxmap, bits, 1, 0);
+}
+
+void tlb_flush_page_bits_by_mmuidx_all_cpus_synced(CPUState *src_cpu,
+                                                   target_ulong addr,
+                                                   uint16_t idxmap,
+                                                   unsigned bits)
+{
+    tlb_ranged_flush_page_bits_by_mmuidx_all_cpus_synced(src_cpu, addr, idxmap, bits, 1, 0);
 }
 
 /* update the TLBs so that writes to code in the virtual page 'addr'

@@ -263,6 +263,29 @@ void tlb_flush_page_bits_by_mmuidx_all_cpus_synced
     (CPUState *cpu, target_ulong addr, uint16_t idxmap, unsigned bits);
 
 /**
+ * tlb_ranged_flush_page_bits_by_mmuidx
+ * @cpu: CPU whose TLB should be flushed
+ * @addr: virtual address of page to be flushed
+ * @idxmap: bitmap of mmu indexes to flush
+ * @bits: number of significant bits in address
+ * @npages: number of pages to be flushed
+ * @granule: translation granule
+ *
+ * Similar to tlb_flush_page_bits_by_mmuidx, but with range support.
+ */
+void tlb_ranged_flush_page_bits_by_mmuidx(CPUState *cpu, target_ulong addr,
+                                          uint16_t idxmap, unsigned bits,
+                                          uint16_t npages, uint16_t granule);
+
+/* Similarly, with broadcast, syncing. */
+void tlb_ranged_flush_page_bits_by_mmuidx_all_cpus
+    (CPUState *cpu, target_ulong addr, uint16_t idxmap, unsigned bits,
+     uint16_t npages, uint16_t granule);
+void tlb_ranged_flush_page_bits_by_mmuidx_all_cpus_synced
+    (CPUState *cpu, target_ulong addr, uint16_t idxmap, unsigned bits,
+     uint16_t npages, uint16_t granule);
+
+/**
  * tlb_set_page_with_attrs:
  * @cpu: CPU to add this TLB entry for
  * @vaddr: virtual address of page to add entry for
@@ -363,6 +386,27 @@ static inline void tlb_flush_page_bits_by_mmuidx_all_cpus(CPUState *cpu,
 static inline void
 tlb_flush_page_bits_by_mmuidx_all_cpus_synced(CPUState *cpu, target_ulong addr,
                                               uint16_t idxmap, unsigned bits)
+{
+}
+
+static inline void tlb_ranged_flush_page_bits_by_mmuidx(CPUState *cpu,
+                                                        target_ulong addr,
+                                                        uint16_t idxmap,
+                                                        unsigned bits,
+                                                        uint16_t npages,
+                                                        uint16_t granule)
+{
+}
+static inline void
+tlb_ranged_flush_page_bits_by_mmuidx_all_cpus(CPUState *cpu, target_ulong addr,
+                                              uint16_t idxmap, unsigned bits,
+                                              uint16_t npages, uint16_t granule)
+{
+}
+static inline void
+tlb_ranged_flush_page_bits_by_mmuidx_all_cpus_synced(CPUState *cpu, target_ulong addr,
+                                                     uint16_t idxmap, unsigned bits,
+                                                     uint16_t npages, uint16_t granule)
 {
 }
 #endif
