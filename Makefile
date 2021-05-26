@@ -206,7 +206,7 @@ clean: recurse-clean
 
 VERSION = $(shell cat $(SRC_PATH)/VERSION.QEMU)
 
-dist: qemu-$(VERSION.QEMU).tar.bz2
+dist: qemu-$(VERSION).tar.bz2
 
 qemu-%.tar.bz2:
 	$(SRC_PATH)/scripts/make-release "$(SRC_PATH)" "$(patsubst qemu-%.tar.bz2,%,$@)"
