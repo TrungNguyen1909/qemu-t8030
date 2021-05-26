@@ -38,6 +38,7 @@
 #include "arm-powerctl.h"
 
 #include "hw/arm/t8030.h"
+#include "t8030_gxf.h"
 
 #include "hw/irq.h"
 #include "hw/or-irq.h"
@@ -354,10 +355,7 @@ static void T8030_ipi_write_cr(CPUARMState *env, const ARMCPRegInfo *ri,
     }
 }
 
-// This is the same as the array for kvm, but without
-// the L2ACTLR_EL1, which is already defined in TCG.
-// Duplicating this list isn't a perfect solution,
-// but it's quick and reliable.
+
 static const ARMCPRegInfo T8030_cp_reginfo_tcg[] = {
     // Apple-specific registers
     T8030_CPREG_DEF(ARM64_REG_HID11, 3, 0, 15, 13, 0, PL1_RW),
@@ -438,39 +436,6 @@ static const ARMCPRegInfo T8030_cp_reginfo_tcg[] = {
         .readfn = T8030_ipi_read_cr,
         .writefn = T8030_ipi_write_cr
     },
-    //GXF
-    {                                                                        
-        .cp = CP_REG_ARM64_SYSREG_CP,                                        
-        .name = "GXF_ENTER_EL1",
-        .opc0 = 3, .opc1 = 6, .crn = 15, .crm = 8, .opc2 = 1,
-        .access = PL1_RW, .resetvalue = 0,
-        .state = ARM_CP_STATE_AA64,
-        .fieldoffset = offsetof(CPUARMState, gxf.gxf_enter_el[1])
-    },  
-    {                                                                        
-        .cp = CP_REG_ARM64_SYSREG_CP,                                        
-        .name = "TPIDR_GL11",
-        .opc0 = 3, .opc1 = 6, .crn = 15, .crm = 9, .opc2 = 1,
-        .access = PL1_RW, .resetvalue = 0,
-        .state = ARM_CP_STATE_AA64,
-        .fieldoffset = offsetof(CPUARMState, cp15.tpidr_el[1])
-    },
-    {                                                                        
-        .cp = CP_REG_ARM64_SYSREG_CP,                                        
-        .name = "ESR_GL11",
-        .opc0 = 3, .opc1 = 6, .crn = 15, .crm = 9, .opc2 = 5,
-        .access = PL1_RW, .resetvalue = 0,
-        .state = ARM_CP_STATE_AA64,
-        .fieldoffset = offsetof(CPUARMState, cp15.esr_el[1])
-    },
-    {                                                                        
-        .cp = CP_REG_ARM64_SYSREG_CP,                                        
-        .name = "FAR_GL11",
-        .opc0 = 3, .opc1 = 6, .crn = 15, .crm = 9, .opc2 = 7,
-        .access = PL1_RW, .resetvalue = 0,
-        .state = ARM_CP_STATE_AA64,
-        .fieldoffset = offsetof(CPUARMState, cp15.far_el[1])
-    },
     REGINFO_SENTINEL,
 };
 
@@ -501,6 +466,7 @@ static void T8030_add_cpregs(T8030CPUState* tcpu)
      */
     T8030_set_cs(CPU(cpu), tcpu);
     define_arm_cp_regs(cpu, T8030_cp_reginfo_tcg);
+    t8030cpu_init_gxf(cpu);
 }
 
 static void T8030_create_s3c_uart(const T8030MachineState *tms, Chardev *chr)

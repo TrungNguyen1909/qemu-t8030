@@ -627,8 +627,8 @@ static CPAccessResult access_tpm(CPUARMState *env, const ARMCPRegInfo *ri,
 }
 
 /* Check for traps from EL1 due to HCR_EL2.TVM and HCR_EL2.TRVM.  */
-static CPAccessResult access_tvm_trvm(CPUARMState *env, const ARMCPRegInfo *ri,
-                                      bool isread)
+CPAccessResult access_tvm_trvm(CPUARMState *env, const ARMCPRegInfo *ri,
+                               bool isread)
 {
     if (arm_current_el(env) == 1) {
         uint64_t trap = isread ? HCR_TRVM : HCR_TVM;
@@ -2006,15 +2006,6 @@ static void pmintenclr_write(CPUARMState *env, const ARMCPRegInfo *ri,
     pmu_update_irq(env);
 }
 
-static uint64_t vbar_read(CPUARMState *env, const ARMCPRegInfo *ri)
-{
-    if (env->gxf.guarded) {
-        return env->gxf.vbar_gl[1];
-    } else {
-        return raw_read(env, ri);
-    }
-}
-
 static void vbar_write(CPUARMState *env, const ARMCPRegInfo *ri,
                        uint64_t value)
 {
@@ -2025,20 +2016,6 @@ static void vbar_write(CPUARMState *env, const ARMCPRegInfo *ri,
      * requires the bottom five bits to be RAZ/WI because they're UNK/SBZP.)
      */
     raw_write(env, ri, value & ~0x1FULL);
-}
-
-static void vbar_el1_write(CPUARMState *env, const ARMCPRegInfo *ri,
-                           uint64_t value)
-{
-    if (env->gxf.guarded) {
-        env->gxf.vbar_gl[1] = value & ~0x1FULL;
-    } else {
-        if (!env->gxf.guarded && env->cp15.vmsa_lock_el1 & VMSA_LOCK_VBAR_EL1) {
-            return;
-        }
-
-        raw_write(env, ri, value & ~0x1FULL);
-    }
 }
 
 static void scr_write(CPUARMState *env, const ARMCPRegInfo *ri, uint64_t value)
@@ -2489,24 +2466,6 @@ static const ARMCPRegInfo t2ee_cp_reginfo[] = {
     REGINFO_SENTINEL
 };
 
-static uint64_t tpidr_el1_read(CPUARMState *env, const ARMCPRegInfo *ri)
-{
-    if (env->gxf.guarded) {
-        return env->gxf.tpidr_gl[1];
-    } else {
-        return env->cp15.tpidr_el[1];
-    }
-}
-
-static void tpidr_el1_write(CPUARMState *env, const ARMCPRegInfo *ri, uint64_t value)
-{
-    if (env->gxf.guarded) {
-        env->gxf.tpidr_gl[1] = value;
-    } else {
-        env->cp15.tpidr_el[1] = value;
-    }
-}
-
 static const ARMCPRegInfo v6k_cp_reginfo[] = {
     { .name = "TPIDR_EL0", .state = ARM_CP_STATE_AA64,
       .opc0 = 3, .opc1 = 3, .opc2 = 2, .crn = 13, .crm = 0,
@@ -2530,8 +2489,7 @@ static const ARMCPRegInfo v6k_cp_reginfo[] = {
     { .name = "TPIDR_EL1", .state = ARM_CP_STATE_AA64,
       .opc0 = 3, .opc1 = 0, .opc2 = 4, .crn = 13, .crm = 0,
       .access = PL1_RW,
-      .readfn = tpidr_el1_read, .writefn = tpidr_el1_write,
-      .resetvalue = 0 },
+      .fieldoffset = offsetof(CPUARMState, cp15.tpidr_el[1]), .resetvalue = 0 },
     { .name = "TPIDRPRW", .opc1 = 0, .cp = 15, .crn = 13, .crm = 0, .opc2 = 4,
       .access = PL1_RW,
       .bank_fieldoffsets = { offsetoflow32(CPUARMState, cp15.tpidrprw_s),
@@ -4126,24 +4084,6 @@ static void vttbr_write(CPUARMState *env, const ARMCPRegInfo *ri,
     }
 }
 
-static uint64_t far_el1_read(CPUARMState *env, const ARMCPRegInfo *ri)
-{
-    if (env->gxf.guarded) {
-        return env->gxf.far_gl[1];
-    } else {
-        return env->cp15.far_el[1];
-    }
-}
-
-static void far_el1_write(CPUARMState *env, const ARMCPRegInfo *ri, uint64_t value)
-{
-    if (env->gxf.guarded) {
-        env->gxf.far_gl[1] = value;
-    } else {
-        env->cp15.far_el[1] = value;
-    }
-}
-
 static const ARMCPRegInfo vmsa_pmsa_cp_reginfo[] = {
     { .name = "DFSR", .cp = 15, .crn = 5, .crm = 0, .opc1 = 0, .opc2 = 0,
       .access = PL1_RW, .accessfn = access_tvm_trvm, .type = ARM_CP_ALIAS,
@@ -4160,35 +4100,16 @@ static const ARMCPRegInfo vmsa_pmsa_cp_reginfo[] = {
     { .name = "FAR_EL1", .state = ARM_CP_STATE_AA64,
       .opc0 = 3, .crn = 6, .crm = 0, .opc1 = 0, .opc2 = 0,
       .access = PL1_RW, .accessfn = access_tvm_trvm,
-      .readfn = far_el1_read, .writefn = far_el1_write,
+      .fieldoffset = offsetof(CPUARMState, cp15.far_el[1]),
       .resetvalue = 0, },
     REGINFO_SENTINEL
 };
-
-static uint64_t esr_el1_read(CPUARMState *env, const ARMCPRegInfo *ri)
-{
-    if (env->gxf.guarded) {
-        return env->gxf.esr_gl[1];
-    } else {
-        return env->cp15.esr_el[1];
-    }
-}
-
-static void esr_el1_write(CPUARMState *env, const ARMCPRegInfo *ri, uint64_t value)
-{
-    if (env->gxf.guarded) {
-        env->gxf.esr_gl[1] = value;
-    } else {
-        env->cp15.esr_el[1] = value;
-    }
-}
 
 static const ARMCPRegInfo vmsa_cp_reginfo[] = {
     { .name = "ESR_EL1", .state = ARM_CP_STATE_AA64,
       .opc0 = 3, .crn = 5, .crm = 2, .opc1 = 0, .opc2 = 0,
       .access = PL1_RW, .accessfn = access_tvm_trvm,
-      .readfn = esr_el1_read, .writefn = esr_el1_write,
-      .resetvalue = 0, },
+      .fieldoffset = offsetof(CPUARMState, cp15.esr_el[1]), .resetvalue = 0, },
     { .name = "TTBR0_EL1", .state = ARM_CP_STATE_BOTH,
       .opc0 = 3, .opc1 = 0, .crn = 2, .crm = 0, .opc2 = 0,
       .access = PL1_RW, .accessfn = access_tvm_trvm,
@@ -5046,60 +4967,6 @@ static void sdcr_write(CPUARMState *env, const ARMCPRegInfo *ri,
     env->cp15.mdcr_el3 = value & SDCR_VALID_MASK;
 }
 
-static uint64_t elr_el1_read(CPUARMState *env, const ARMCPRegInfo *ri)
-{
-    if (env->gxf.guarded) {
-        return env->gxf.elr_gl[1];
-    } else {
-        return env->elr_el[1];
-    }
-}
-
-static void elr_el1_write(CPUARMState *env, const ARMCPRegInfo *ri, uint64_t value)
-{
-    if (env->gxf.guarded) {
-        env->gxf.elr_gl[1] = value;
-    } else {
-        env->elr_el[1] = value;
-    }
-}
-
-static uint64_t spsr_el1_read(CPUARMState *env, const ARMCPRegInfo *ri)
-{
-    if (env->gxf.guarded) {
-        return env->gxf.spsr_gl[1];
-    } else {
-        return env->banked_spsr[BANK_SVC];
-    }
-}
-
-static void spsr_el1_write(CPUARMState *env, const ARMCPRegInfo *ri, uint64_t value)
-{
-    if (env->gxf.guarded) {
-        env->gxf.spsr_gl[1] = value;
-    } else {
-        env->banked_spsr[BANK_SVC] = value;
-    }
-}
-
-static uint64_t sp_el1_read(CPUARMState *env, const ARMCPRegInfo *ri)
-{
-    if (env->gxf.guarded) {
-        return env->gxf.sp_gl[1];
-    } else {
-        return env->sp_el[1];
-    }
-}
-
-static void sp_el1_write(CPUARMState *env, const ARMCPRegInfo *ri, uint64_t value)
-{
-    if (env->gxf.guarded) {
-        env->gxf.sp_gl[1] = value;
-    } else {
-        env->sp_el[1] = value;
-    }
-}
-
 static const ARMCPRegInfo v8_cp_reginfo[] = {
     /* Minimal set of EL0-visible registers. This will need to be expanded
      * significantly for system emulation of AArch64 CPUs.
@@ -5382,12 +5249,12 @@ static const ARMCPRegInfo v8_cp_reginfo[] = {
       .type = ARM_CP_ALIAS,
       .opc0 = 3, .opc1 = 0, .crn = 4, .crm = 0, .opc2 = 1,
       .access = PL1_RW,
-      .readfn = elr_el1_read, .writefn = elr_el1_write },
+      .fieldoffset = offsetof(CPUARMState, elr_el[1]) },
     { .name = "SPSR_EL1", .state = ARM_CP_STATE_AA64,
       .type = ARM_CP_ALIAS,
       .opc0 = 3, .opc1 = 0, .crn = 4, .crm = 0, .opc2 = 0,
       .access = PL1_RW,
-      .readfn = spsr_el1_read, .writefn = spsr_el1_write },
+      .fieldoffset = offsetof(CPUARMState, banked_spsr[BANK_SVC]) },
     /* We rely on the access checks not allowing the guest to write to the
      * state field when SPSel indicates that it's being used as the stack
      * pointer.
@@ -5400,7 +5267,7 @@ static const ARMCPRegInfo v8_cp_reginfo[] = {
     { .name = "SP_EL1", .state = ARM_CP_STATE_AA64,
       .opc0 = 3, .opc1 = 4, .crn = 4, .crm = 1, .opc2 = 0,
       .access = PL2_RW, .type = ARM_CP_ALIAS,
-      .readfn = sp_el1_read, .writefn = sp_el1_write },
+      .fieldoffset = offsetof(CPUARMState, sp_el[1]) },
     { .name = "SPSel", .state = ARM_CP_STATE_AA64,
       .opc0 = 3, .opc1 = 0, .crn = 4, .crm = 2, .opc2 = 0,
       .type = ARM_CP_NO_RAW,
@@ -8440,8 +8307,7 @@ void register_cp_regs_for_features(ARMCPU *cpu)
         ARMCPRegInfo vbar_cp_reginfo[] = {
             { .name = "VBAR", .state = ARM_CP_STATE_BOTH,
               .opc0 = 3, .crn = 12, .crm = 0, .opc1 = 0, .opc2 = 0,
-              .access = PL1_RW,
-              .readfn = vbar_read, .writefn = vbar_el1_write,
+              .access = PL1_RW, .writefn = vbar_write,
               .bank_fieldoffsets = { offsetof(CPUARMState, cp15.vbar_s),
                                      offsetof(CPUARMState, cp15.vbar_ns) },
               .resetvalue = 0 },
