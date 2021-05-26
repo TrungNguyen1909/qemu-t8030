@@ -4,6 +4,7 @@
 #include "qemu-common.h"
 #include "target/arm/cpu.h"
 #include "target/arm/internals.h"
+#include "t8030_gxf.h"
 
 CPAccessResult access_tvm_trvm(CPUARMState *env, const ARMCPRegInfo *ri,
                                bool isread);
@@ -36,24 +37,6 @@ static CPAccessResult access_gxf(CPUARMState *env, const ARMCPRegInfo *ri,
         return CP_ACCESS_OK;
     }
     return CP_ACCESS_TRAP;
-}
-
-static uint64_t sp_el1_read(CPUARMState *env, const ARMCPRegInfo *ri)
-{
-    if (env->gxf.guarded) {
-        return env->gxf.sp_gl[1];
-    } else {
-        return env->sp_el[1];
-    }
-}
-
-static void sp_el1_write(CPUARMState *env, const ARMCPRegInfo *ri, uint64_t value)
-{
-    if (env->gxf.guarded) {
-        env->gxf.sp_gl[1] = value;
-    } else {
-        env->sp_el[1] = value;
-    }
 }
 
 static uint64_t tpidr_el1_read(CPUARMState *env, const ARMCPRegInfo *ri)
