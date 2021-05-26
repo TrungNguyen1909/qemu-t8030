@@ -1489,7 +1489,7 @@ static void T8030_machine_class_init(ObjectClass *klass, void *data)
     mc->no_floppy = 1;
     mc->no_cdrom = 1;
     mc->no_parallel = 1;
-    mc->default_cpu_type = ARM_CPU_TYPE_NAME("cortex-a72");
+    mc->default_cpu_type = ARM_CPU_TYPE_NAME("max");
     mc->minimum_page_bits = 14;
 }
 
