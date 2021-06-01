@@ -36,7 +36,8 @@
 static const char *KEEP_COMP[] = {
     "uart-1,samsung\0$",
     "N104AP\0iPhone12,1\0AppleARM\0$", "arm-io,t8030\0$",
-    "apple,thunder\0ARM,v8\0$", "aic,1\0$", "pmgr1,t8030\0$",
+    "apple,thunder\0ARM,v8\0$", "apple,lightning\0ARMv8\0$",
+    "aic,1\0$", "pmgr1,t8030\0$",
     "sart,t8030\0$", "iop,ascwrap-v2\0$", "iop-nub,rtbuddy-v2\0$",
     "aes,s8000\0$",
     "gpio,t8030\0gpio,s5l8960x\0$",
