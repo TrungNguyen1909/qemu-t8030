@@ -694,15 +694,15 @@ static const MemoryRegionOps cpm_impl_reg_ops = {
 
 static void pmgr_unk_reg_write(void *opaque, hwaddr addr, uint64_t data, unsigned size)
 {
-    //hwaddr* base = (hwaddr*) opaque;
-    //fprintf(stderr, "PMGR reg WRITE unk @ 0x" TARGET_FMT_lx " base: 0x" TARGET_FMT_lx " value: 0x" TARGET_FMT_lx "\n", base + addr, base, data);
+    // hwaddr base = (hwaddr) opaque;
+    // fprintf(stderr, "PMGR reg WRITE unk @ 0x" TARGET_FMT_lx " base: 0x" TARGET_FMT_lx " value: 0x" TARGET_FMT_lx "\n", base + addr, base, data);
 }
 
 static uint64_t pmgr_unk_reg_read(void *opaque, hwaddr addr, unsigned size)
 {
-    hwaddr* base = (hwaddr*) opaque;
+    hwaddr base = (hwaddr) opaque;
 
-    //fprintf(stderr, "PMGR reg READ unk @ 0x" TARGET_FMT_lx " base: 0x" TARGET_FMT_lx "\n", base + addr, base);
+    // fprintf(stderr, "PMGR reg READ unk @ 0x" TARGET_FMT_lx " base: 0x" TARGET_FMT_lx "\n", base + addr, base);
     if (((uint64_t)(base + addr) & 0x10e70000) == 0x10e70000) {
         return (108<<4) | 0x200000;
     }
@@ -733,13 +733,7 @@ static uint64_t pmgr_reg_read(void *opaque, hwaddr addr, unsigned size)
     switch(addr) {
         case 0xf0010: /* AppleT8030PMGR::commonSramCheck */
             return 0x5000;
-        case 0x802d8:
-        case 0x80308:
-        case 0x80310:
-        case 0x80318:
-        case 0x80320:
-        case 0x80328:
-        case 0x80330:
+        case 0x80100 ... 0x803b8:
             return 0xf0;
     }
     return 0;
