@@ -36,9 +36,11 @@
 static const char *KEEP_COMP[] = {
     "uart-1,samsung\0$",
     "N104AP\0iPhone12,1\0AppleARM\0$", "arm-io,t8030\0$",
+    "N104DEV\0iPhone12,1\0AppleARM\0$",
     "apple,thunder\0ARM,v8\0$", "apple,lightning\0ARMv8\0$",
     "aic,1\0$", "pmgr1,t8030\0$",
-    "sart,t8030\0$", "iop,ascwrap-v2\0$", "iop-nub,rtbuddy-v2\0$",
+    "sart,t8030\0$", "sart,coastguard\0$",
+    "iop,ascwrap-v2\0$", "iop-nub,rtbuddy-v2\0$",
     "aes,s8000\0$",
     "gpio,t8030\0gpio,s5l8960x\0$",
     "gpio,t8015\0gpio,s5l8960x\0$",
@@ -62,7 +64,7 @@ static const char *REM_DEV_TYPES[] = { "backlight\0$", "pmp\0$" };
 static const char *REM_PROPS[] = {
     "function-error_handler", "nvme-coastguard", "nand-debug",
     "function-spi0_sclk_config", "function-spi0_mosi_config",
-    "function-pmp_control"
+    "function-pmp_control", "function-mcc_ctrl", "pmp"
 };
 
 /* TODO: error_handler probably needs arm-io to initialize properly */
