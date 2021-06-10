@@ -506,15 +506,25 @@ static void T8030_patch_kernel(AddressSpace *nsas)
 {
     // uint32_t value = 0;
     // //disable_kprintf_output = 0
-    // address_space_rw(nsas, vtop_static(0xFFFFFFF0077142C8),
+    // address_space_rw(nsas, vtop_static(0xfffffff00783b370),
     //                  MEMTXATTRS_UNSPECIFIED, (uint8_t *)&value,
     //                  sizeof(value), 1);
-    //TODO: PMGR
-    // value = RET_INST;
-    // //AppleT8030PMGR::panicHW
-    // address_space_rw(nsas, vtop_static(0xFFFFFFF008B2DBE4),
+
+    // TODO: patchfinder
+    // handle_eval_rootauth:
+    // 086040f9       ldr x8, [x0, 0xc0]
+    // 08e14039       ldrb w8, [x8, 0x38]
+    // 68002837       tbnz w8, 5, 0xfffffff0095ade9c
+    // 000a8052       mov w0, 0x50
+    // 0035fd6        ret
+    // d5ccfd17       b  _authapfs_seal_is_broken_full
+    // find in radare2: /x 68002837000A8052C0035FD6
+    // value = 0x52800000; // mov w0, 0
+    // address for kernelcache.release.iphone12b of 15.0 (19A5261w)
+    // address_space_rw(nsas, vtop_static(0xfffffff0095ade94),
     //                  MEMTXATTRS_UNSPECIFIED, (uint8_t *)&value,
     //                  sizeof(value), 1);
+    
     // //AppleImage4 _xnu_log 
     // value = NOP_INST;
     // address_space_rw(nsas, vtop_static(0xFFFFFFF008387A28),
@@ -1175,7 +1185,7 @@ static void T8030_create_i2c(MachineState *machine, const char *name)
     DTBNode *child = get_dtb_child_node_by_name(tms->device_tree, "arm-io");
 
     child = get_dtb_child_node_by_name(child, name);
-    assert(child);
+    if (!child) return;
 
     i2c = apple_i2c_create(child);
     assert(i2c);

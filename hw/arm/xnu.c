@@ -219,7 +219,7 @@ static void extract_im4p_payload(const char *filename,
     unsigned long fsize;
 
     char errorDescription[ASN1_MAX_ERROR_DESCRIPTION_SIZE];
-    asn1_node img4_definitions = ASN1_TYPE_EMPTY;
+    asn1_node img4_definitions = NULL;
     asn1_node img4;
     int ret;
 
@@ -383,7 +383,9 @@ void macho_load_dtb(DTBNode *root, AddressSpace *as, MemoryRegion *mem,
     remove_dtb_prop(child, prop);
     add_dtb_prop(child, "firmware-version", 11, (uint8_t *)"qemu-t8030");
     prop = get_dtb_prop(child, "nvram-total-size");
-    remove_dtb_prop(child, prop);
+    if (prop) {
+        remove_dtb_prop(child, prop);
+    }
     if (nvram_size > 0xFFFF * 0x10) {
         nvram_size = 0xFFFF * 0x10;
     }
@@ -391,7 +393,9 @@ void macho_load_dtb(DTBNode *root, AddressSpace *as, MemoryRegion *mem,
     nvram_total_size = nvram_size;
     add_dtb_prop(child, "nvram-total-size", 4, (uint8_t *)&nvram_total_size);
     prop = get_dtb_prop(child, "nvram-proxy-data");
-    remove_dtb_prop(child, prop);
+    if (prop) {
+        remove_dtb_prop(child, prop);
+    }
     add_dtb_prop(child, "nvram-proxy-data", nvram_size, (uint8_t *)nvram_data);
 
     data = 1;
@@ -450,7 +454,11 @@ void macho_load_dtb(DTBNode *root, AddressSpace *as, MemoryRegion *mem,
     child = get_dtb_child_node_by_name(root, "chosen");
     assert(child);
     child = get_dtb_child_node_by_name(child, "lock-regs");
-    assert(child);
+    if (!child) {
+        child = get_dtb_child_node_by_name(root, "chosen");
+        child = add_dtb_node(child, "lock-regs");
+        add_dtb_node(child, "amcc");
+    }
     child = get_dtb_child_node_by_name(child, "amcc");
     assert(child);
     data = 0;

@@ -198,6 +198,9 @@ static void iop_akf_reg_write(void *opaque, hwaddr addr,
                 s->cpu_ctrl = data;
                 msg = g_new0(struct iop_message, 1);
                 msg->type = MSG_SEND_HELLO;
+                // TODO: compatiblity between iOS version
+                // iOS 15 only accepts 12, 12
+                // iOS 14 only accepts 11, 11
                 msg->hello.major = 11;
                 msg->hello.minor = 11;
                 msg->endpoint = 0;
