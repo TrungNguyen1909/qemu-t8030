@@ -358,6 +358,11 @@ void macho_load_dtb(DTBNode *root, AddressSpace *as, MemoryRegion *mem,
     }
     remove_dtb_prop(root, prop);
 
+    child = get_dtb_child_node_by_name(root, "arm-io");
+    prop = get_dtb_prop(child, "chip-revision");
+    assert(prop);
+    *(uint32_t *)prop->value = 0x10;
+
     // need to set the random seed insread of iboot
     uint64_t seed[8] = {0xdead000d, 0xdead000d, 0xdead000d, 0xdead000d,
                         0xdead000d, 0xdead000d, 0xdead000d, 0xdead000d};

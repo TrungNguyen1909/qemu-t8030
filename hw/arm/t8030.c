@@ -808,12 +808,14 @@ static void T8030_cpu_setup(MachineState *machine)
         char cpu_name[8];
         unsigned int cpu_id, phys_id, cluster_id, mpidr;
         uint64_t freq;
+        uint64_t t;
         uint64_t *reg;
         DeviceState *fiq_or;
         DTBNode *node;
         DTBProp* prop = NULL;
         Object *cpuobj;
         CPUState *cs;
+        ARMCPU *cpu;
 
         snprintf(cpu_name, 8, "cpu%u", i);
         node = get_dtb_child_node_by_name(root, cpu_name);
@@ -829,6 +831,7 @@ static void T8030_cpu_setup(MachineState *machine)
         tms->cpus[i]->cpu = ARM_CPU(cpuobj);
         tms->cpus[i]->machine = machine;
         cs = CPU(tms->cpus[i]->cpu);
+        cpu = ARM_CPU(cs);
 
         //MPIDR_EL1
         prop = get_dtb_prop(node, "cpu-id");
@@ -851,6 +854,10 @@ static void T8030_cpu_setup(MachineState *machine)
         tms->cpus[i]->phys_id = phys_id;
         tms->cpus[i]->cluster_id = cluster_id;
         tms->clusters[cluster_id]->cpus[cpu_id] = tms->cpus[i];
+        t = cpu->midr;
+        t = FIELD_DP64(t, MIDR_EL1, PARTNUM, 0x12 + cluster_id);
+        t = FIELD_DP64(t, MIDR_EL1, VARIANT, 0x1);
+        cpu->midr = t;
 
         //remove debug regs from device tree
         prop = get_dtb_prop(node, "reg-private");
