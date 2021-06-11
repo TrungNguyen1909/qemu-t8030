@@ -112,21 +112,6 @@ static void macho_dtb_node_process(DTBNode *node, DTBNode *parent)
     uint64_t i = 0;
     int cnt;
 
-    // prop = get_dtb_prop(node, "interrupt-parent");
-    // if (prop != NULL) {
-    //     if (*(uint32_t*)prop->value == 0x1a) { /* aic */
-    //         prop = get_dtb_prop(node, "name");
-    //         fprintf(stderr, "Found device: %s with AIC as interrupt-parent\n", prop->value);
-    //         fprintf(stderr, "\tinterrupts: ");
-    //         prop = get_dtb_prop(node, "interrupts");
-    //         uint32_t* interrupts = prop->value;
-    //         for(int i=0;i<prop->length / sizeof(uint32_t);i++) {
-    //             fprintf(stderr, "0x%x ", interrupts[i]);
-    //         }
-    //         fprintf(stderr, "\n");
-    //     }
-    // }
-
     //remove by compatible property
     prop = get_dtb_prop(node, "compatible");
 
@@ -691,8 +676,8 @@ void macho_setup_bootargs(const char *name, AddressSpace *as,
                       &boot_args);
 }
 
-static void macho_highest_lowest(struct mach_header_64 *mh, uint64_t *lowaddr,
-                                 uint64_t *highaddr)
+void macho_highest_lowest(struct mach_header_64 *mh, uint64_t *lowaddr,
+                          uint64_t *highaddr)
 {
     struct load_command *cmd = (struct load_command*)((uint8_t *)mh +
             sizeof(struct mach_header_64));
@@ -722,17 +707,42 @@ static void macho_highest_lowest(struct mach_header_64 *mh, uint64_t *lowaddr,
         cmd = (struct load_command *)((char *)cmd + cmd->cmdsize);
     }
 
-    *lowaddr = low_addr_temp;
-    *highaddr = high_addr_temp;
+    *lowaddr = align_64k_low(low_addr_temp);
+    *highaddr = align_64k_high(high_addr_temp);
 }
 
-void macho_file_highest_lowest(const char *filename, hwaddr *lowest,
-                                      hwaddr *highest)
+void macho_text_base(struct mach_header_64 *mh, uint64_t *base)
+{
+    struct load_command *cmd = (struct load_command*)((uint8_t *)mh +
+            sizeof(struct mach_header_64));
+    unsigned int index;
+    *base = 0;
+    for (index = 0; index < mh->ncmds; index++) {
+        switch (cmd->cmd) {
+        case LC_SEGMENT_64: {
+            struct segment_command_64 *segCmd =
+                (struct segment_command_64 *)cmd;
+
+            if (segCmd->vmaddr && segCmd->fileoff == 0) {
+                *base = segCmd->vmaddr;
+            }
+            break;
+        }
+
+        default:
+            break;
+        }
+        cmd = (struct load_command *)((char *)cmd + cmd->cmdsize);
+    }
+    return;
+}
+
+struct mach_header_64 *macho_load_file(const char *filename)
 {
     uint32_t len;
     uint8_t *data = NULL;
     char payload_type[4];
-    struct mach_header_64 *mh;
+    struct mach_header_64 *mh = NULL;
 
     extract_im4p_payload(filename, payload_type, &data, &len);
 
@@ -742,43 +752,136 @@ void macho_file_highest_lowest(const char *filename, hwaddr *lowest,
         exit(EXIT_FAILURE);
     }
 
-    mh = (struct mach_header_64 *)data;
-    if (mh->magic != MACH_MAGIC_64) {
-        error_report("The file '%s' is not a valid MACH object.", filename);
-        exit(EXIT_FAILURE);
-    }
-
-    macho_highest_lowest(mh, lowest, highest);
+    mh = macho_parse(data, len);
     g_free(data);
+    return mh;
 }
 
-void arm_load_macho(char *filename, AddressSpace *as, MemoryRegion *mem,
-                    const char *name, hwaddr phys_base, hwaddr virt_base, hwaddr *pc)
+struct mach_header_64 *macho_parse(uint8_t *data, uint32_t len)
 {
-    uint8_t *data = NULL;
-    uint32_t len;
-    uint8_t *rom_buf = NULL;
-    char payload_type[4];
-    unsigned int index;
+    uint8_t *phys_base = NULL;
     struct mach_header_64 *mh;
     struct load_command *cmd;
-
-    extract_im4p_payload(filename, payload_type, &data, &len);
-
-    if (strncmp(payload_type, "krnl", 4) != 0
-        && strncmp(payload_type, "raw", 4) != 0) {
-        error_report("Couldn't parse ASN.1 data in file '%s' because it is not a 'krnl' object, found '%.4s' object.", filename, payload_type);
-        exit(EXIT_FAILURE);
-    }
+    uint64_t lowaddr = 0, highaddr = 0;
+    uint64_t virt_base = 0;
+    uint64_t text_base = 0;
 
     mh = (struct mach_header_64 *)data;
     if (mh->magic != MACH_MAGIC_64) {
-        error_report("The file '%s' is not a valid MACH object.", filename);
+        error_report("%s: Invalid Mach-O object: mh->magic != MACH_MAGIC_64", __func__);
         exit(EXIT_FAILURE);
     }
 
+    macho_highest_lowest(mh, &lowaddr, &highaddr);
+    assert(lowaddr < highaddr);
+
+    phys_base = g_malloc0(highaddr - lowaddr);
+    virt_base = lowaddr;
     cmd = (struct load_command *)(data + sizeof(struct mach_header_64));
 
+    for (int index = 0; index < mh->ncmds; index++) {
+        switch (cmd->cmd) {
+        case LC_SEGMENT_64: {
+            struct segment_command_64 *segCmd =
+                (struct segment_command_64 *)cmd;
+            if (segCmd->vmsize == 0) {
+                break;
+            }
+            if (segCmd->fileoff >= len) {
+                error_report("%s: Invalid Mach-O: segCmd->fileoff >= len", __func__);
+                exit(EXIT_FAILURE);
+            }
+            if (segCmd->fileoff == 0) {
+                text_base = segCmd->vmaddr;
+            }
+            memcpy(phys_base + segCmd->vmaddr - virt_base, data + segCmd->fileoff, segCmd->filesize);
+            break;
+        }
+
+        default:
+            break;
+        }
+
+        cmd = (struct load_command *)((char *)cmd + cmd->cmdsize);
+    }
+    return (struct mach_header_64 *)(phys_base + text_base - virt_base);
+}
+
+uint32_t macho_build_version(struct mach_header_64 *mh)
+{
+    struct load_command *cmd;
+
+    cmd = (struct load_command *)((char *)mh + sizeof(struct mach_header_64));
+
+    for (int index = 0; index < mh->ncmds; index++) {
+        switch (cmd->cmd) {
+        case LC_BUILD_VERSION: {
+            struct build_version_command *buildVerCmd = (struct build_version_command *)cmd;
+            return buildVerCmd->sdk;
+            break;
+        }
+
+        default:
+            break;
+        }
+
+        cmd = (struct load_command *)((char *)cmd + cmd->cmdsize);
+    }
+    return 0;
+}
+
+uint32_t macho_platform(struct mach_header_64 *mh)
+{
+    struct load_command *cmd;
+
+    cmd = (struct load_command *)((char *)mh + sizeof(struct mach_header_64));
+
+    for (int index = 0; index < mh->ncmds; index++) {
+        switch (cmd->cmd) {
+        case LC_BUILD_VERSION: {
+            struct build_version_command *buildVerCmd = (struct build_version_command *)cmd;
+            return buildVerCmd->platform;
+            break;
+        }
+
+        default:
+            break;
+        }
+
+        cmd = (struct load_command *)((char *)cmd + cmd->cmdsize);
+    }
+    return 0;
+}
+
+char *macho_platform_string(struct mach_header_64 *mh)
+{
+    uint32_t platform = macho_platform(mh);
+    switch (platform) {
+        case PLATFORM_MACOS:
+            return (char *)("macOS");
+        case PLATFORM_IOS:
+            return (char *)("iOS");
+        case PLATFORM_TVOS:
+            return (char *)("tvOS");
+        case PLATFORM_WATCHOS:
+            return (char *)("watchOS");
+        case PLATFORM_BRIDGEOS:
+            return (char *)("bridgeOS");
+        default:
+            return (char *)("Unknown");
+    }
+}
+
+hwaddr arm_load_macho(struct mach_header_64 *mh, AddressSpace *as, MemoryRegion *mem,
+                    const char *name, hwaddr phys_base, hwaddr virt_base)
+{
+    uint8_t *data = NULL;
+    unsigned int index;
+    struct load_command *cmd;
+    hwaddr pc = 0;
+    data = macho_get_buffer(mh);
+
+    cmd = (struct load_command *)((char *)mh + sizeof(struct mach_header_64));
     for (index = 0; index < mh->ncmds; index++) {
         switch (cmd->cmd) {
         case LC_SEGMENT_64: {
@@ -790,12 +893,9 @@ void arm_load_macho(char *filename, AddressSpace *as, MemoryRegion *mem,
             if (segCmd->vmsize == 0) {
                 break;
             }
-
-            rom_buf = g_malloc0(segCmd->vmsize);
-            memcpy(rom_buf, data + segCmd->fileoff, segCmd->filesize);
-            allocate_and_copy(mem, as, region_name, phys_base + segCmd->vmaddr - virt_base, segCmd->vmsize, rom_buf);
-            g_free(rom_buf);
-            rom_buf = NULL;
+            allocate_and_copy(mem, as, region_name,
+                              phys_base + segCmd->vmaddr - virt_base, segCmd->vmsize,
+                              data + segCmd->vmaddr - virt_base);
 
             break;
         }
@@ -805,7 +905,7 @@ void arm_load_macho(char *filename, AddressSpace *as, MemoryRegion *mem,
             uint64_t *ptrPc = (uint64_t *)((char *)cmd + 0x110);
 
             // 0x110 for arm64 only.
-            *pc = vtop_bases(*ptrPc, phys_base, virt_base);
+            pc = vtop_bases(*ptrPc, phys_base, virt_base);
 
             break;
         }
@@ -817,5 +917,18 @@ void arm_load_macho(char *filename, AddressSpace *as, MemoryRegion *mem,
         cmd = (struct load_command *)((char *)cmd + cmd->cmdsize);
     }
 
-    g_free(data);
+    return pc;
+}
+
+uint8_t *macho_get_buffer(struct mach_header_64 *hdr)
+{
+    uint64_t lowaddr = 0, highaddr = 0, text_base = 0;
+    macho_highest_lowest(hdr, &lowaddr, &highaddr);
+    macho_text_base(hdr, &text_base);
+    return (uint8_t *)((uint8_t *)hdr - text_base + lowaddr);
+}
+
+void macho_free(struct mach_header_64 *hdr)
+{
+    g_free(macho_get_buffer(hdr));
 }

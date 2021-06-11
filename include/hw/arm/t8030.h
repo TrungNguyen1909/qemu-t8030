@@ -185,9 +185,11 @@ typedef struct
     char trustcache_filename[1024];
     char kern_args[1024];
     FileMmioDev ramdisk_file_dev;
+    struct mach_header_64 *kernel;
     DTBNode *device_tree;
     bool use_ramfb;
     QemuMutex mutex;
+    uint32_t build_version;
 } T8030MachineState;
 
 typedef struct

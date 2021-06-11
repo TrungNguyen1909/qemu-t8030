@@ -36,8 +36,10 @@
 #define xnu_arm64_kBootArgsVersion2 2
 #define xnu_arm64_BOOT_LINE_LENGTH 608
 
-#define LC_SEGMENT_64   0x19
-#define LC_UNIXTHREAD   0x5
+#define LC_UNIXTHREAD       0x5
+#define LC_SEGMENT_64       0x19
+#define LC_SOURCE_VERSION   0x2A
+#define LC_BUILD_VERSION    0x32
 
 struct segment_command_64
 {
@@ -52,6 +54,31 @@ struct segment_command_64
     uint32_t /*vm_prot_t*/ initprot;
     uint32_t nsects;
     uint32_t flags;
+};
+
+struct source_version_command {
+    uint32_t  cmd;	/* LC_SOURCE_VERSION */
+    uint32_t  cmdsize;	/* 16 */
+    uint64_t  version;	/* A.B.C.D.E packed as a24.b10.c10.d10.e10 */
+};
+
+#define PLATFORM_MACOS 1
+#define PLATFORM_IOS 2
+#define PLATFORM_TVOS 3
+#define PLATFORM_WATCHOS 4
+#define PLATFORM_BRIDGEOS 5
+
+#define BUILD_VERSION_MAJOR(_v) ((_v) & 0xffff0000) >> 16
+#define BUILD_VERSION_MINOR(_v) ((_v) & 0x0000ff00) >> 8
+
+struct build_version_command {
+    uint32_t	cmd;		/* LC_BUILD_VERSION */
+    uint32_t	cmdsize;	/* sizeof(struct build_version_command) plus */
+                                /* ntools * sizeof(struct build_tool_version) */
+    uint32_t	platform;	/* platform */
+    uint32_t	minos;		/* X.Y.Z is encoded in nibbles xxxx.yy.zz */
+    uint32_t	sdk;		/* X.Y.Z is encoded in nibbles xxxx.yy.zz */
+    uint32_t	ntools;		/* number of tool entries following this */
 };
 
 #define MACH_MAGIC_64   0xFEEDFACFu
@@ -109,8 +136,24 @@ struct xnu_arm64_boot_args {
     uint64_t           memSizeActual;                              /* Actual size of memory */
 };
 
-void macho_file_highest_lowest(const char *filename, hwaddr *lowest,
-                                    hwaddr *highest);
+struct mach_header_64 *macho_load_file(const char *filename);
+
+struct mach_header_64 *macho_parse(uint8_t *data, uint32_t len);
+
+uint8_t *macho_get_buffer(struct mach_header_64 *hdr);
+
+void macho_free(struct mach_header_64 *hdr);
+
+uint32_t macho_build_version(struct mach_header_64 *mh);
+
+uint32_t macho_platform(struct mach_header_64 *mh);
+
+char *macho_platform_string(struct mach_header_64 *mh);
+
+void macho_highest_lowest(struct mach_header_64 *mh, uint64_t *lowaddr,
+                          uint64_t *highaddr);
+
+void macho_text_base(struct mach_header_64 *mh, uint64_t *text_base);
 
 void macho_tz_setup_bootargs(const char *name, AddressSpace *as,
                              MemoryRegion *mem, hwaddr bootargs_addr,
@@ -125,8 +168,8 @@ void macho_setup_bootargs(const char *name, AddressSpace *as,
                           hwaddr dtb_size, video_boot_args v_bootargs,
                           char *kern_args);
 
-void arm_load_macho(char *filename, AddressSpace *as, MemoryRegion *mem,
-                    const char *name, hwaddr phys_base, hwaddr virt_base, hwaddr *pc);
+hwaddr arm_load_macho(struct mach_header_64 *mh, AddressSpace *as, MemoryRegion *mem,
+                      const char *name, hwaddr phys_base, hwaddr virt_base);
 
 void macho_map_raw_file(const char *filename, AddressSpace *as, MemoryRegion *mem,
                          const char *name, hwaddr file_pa, uint64_t *size);

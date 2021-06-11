@@ -502,13 +502,10 @@ static void T8030_create_s3c_uart(const T8030MachineState *tms, Chardev *chr)
     assert(dev);
 }
 
-static void T8030_patch_kernel(AddressSpace *nsas)
+static void T8030_patch_kernel(struct mach_header_64 *hdr)
 {
-    // uint32_t value = 0;
-    // //disable_kprintf_output = 0
-    // address_space_rw(nsas, vtop_static(0xfffffff00783b370),
-    //                  MEMTXATTRS_UNSPECIFIED, (uint8_t *)&value,
-    //                  sizeof(value), 1);
+    //disable_kprintf_output = 0
+    // *(uint32_t *)vtop_static(0xFFFFFFF0077142C8) = 0;
 
     // TODO: patchfinder
     // handle_eval_rootauth:
@@ -519,17 +516,8 @@ static void T8030_patch_kernel(AddressSpace *nsas)
     // 0035fd6        ret
     // d5ccfd17       b  _authapfs_seal_is_broken_full
     // find in radare2: /x 68002837000A8052C0035FD6
-    // value = 0x52800000; // mov w0, 0
     // address for kernelcache.release.iphone12b of 15.0 (19A5261w)
-    // address_space_rw(nsas, vtop_static(0xfffffff0095ade94),
-    //                  MEMTXATTRS_UNSPECIFIED, (uint8_t *)&value,
-    //                  sizeof(value), 1);
-    
-    // //AppleImage4 _xnu_log 
-    // value = NOP_INST;
-    // address_space_rw(nsas, vtop_static(0xFFFFFFF008387A28),
-    //                  MEMTXATTRS_UNSPECIFIED, (uint8_t *)&value,
-    //                  sizeof(value), 1);
+    // *(uint32_t *)vtop_static(0xfffffff0095ade94) = 0x52800000; // mov w0, 0
 }
 
 static void T8030_memory_setup(MachineState *machine)
@@ -537,7 +525,7 @@ static void T8030_memory_setup(MachineState *machine)
     uint64_t used_ram_for_blobs = 0;
     hwaddr kernel_low;
     hwaddr kernel_high;
-    hwaddr virt_base;
+    struct mach_header_64 *hdr;
     hwaddr dtb_pa;
     hwaddr dtb_va;
     uint64_t dtb_size;
@@ -547,7 +535,6 @@ static void T8030_memory_setup(MachineState *machine)
     hwaddr remaining_mem_size;
     hwaddr allocated_ram_pa;
     hwaddr phys_ptr;
-    hwaddr phys_pc;
     video_boot_args v_bootargs = {0};
     T8030MachineState *tms = T8030_MACHINE(machine);
     MemoryRegion* sysmem = tms->sysmem;
@@ -563,18 +550,15 @@ static void T8030_memory_setup(MachineState *machine)
     //At the beginning of the non-secure ram we have the raw kernel file.
     //After that we have the static trust cache.
     //After that we have all the kernel sections.
-    //After that we have ramdosk
+    //After that we have ramdisk
     //After that we have the device tree
     //After that we have the kernel boot args
     //After that we have the rest of the RAM
 
-    macho_file_highest_lowest(tms->kernel_filename, &kernel_low, &kernel_high);
-
-    g_virt_base = virt_base = align_64k_low(kernel_low);
-    g_phys_base = T8030_PHYS_BASE;
+    hdr = tms->kernel;
+    assert(hdr);
+    macho_highest_lowest(hdr, &kernel_low, &kernel_high);
     phys_ptr = T8030_PHYS_BASE;
-    fprintf(stderr, "g_virt_base: 0x" TARGET_FMT_lx "\ng_phys_base: 0x" TARGET_FMT_lx "\n", g_virt_base, g_phys_base);
-    fprintf(stderr, "kernel_low: 0x" TARGET_FMT_lx "\nkernel_high: 0x" TARGET_FMT_lx "\n", kernel_low, kernel_high);
 
     // //now account for the trustcache
     phys_ptr += align_64k_high(0x2000000);
@@ -584,12 +568,15 @@ static void T8030_memory_setup(MachineState *machine)
 
     used_ram_for_blobs += align_64k_high(trustcache_size);
     //now account for the loaded kernel
-    arm_load_macho(tms->kernel_filename, nsas, sysmem, "Kernel",
-                   T8030_PHYS_BASE, virt_base, &phys_pc);
-    tms->kpc_pa = phys_pc;
+    g_phys_base = T8030_PHYS_BASE;
+    fprintf(stderr, "g_virt_base: 0x" TARGET_FMT_lx "\ng_phys_base: 0x" TARGET_FMT_lx "\n", g_virt_base, g_phys_base);
+    tms->kpc_pa = arm_load_macho(hdr, nsas, sysmem, "Kernel",
+                                 g_phys_base, g_virt_base);
+    fprintf(stderr, "entry: 0x" TARGET_FMT_lx "\n", tms->kpc_pa);
+    macho_free(hdr);
+    hdr = NULL;
+    tms->kernel = NULL;
     used_ram_for_blobs += (align_64k_high(kernel_high) - kernel_low);
-
-    T8030_patch_kernel(nsas);
 
     phys_ptr = align_64k_high(vtop_static(kernel_high));
 
@@ -643,7 +630,7 @@ static void T8030_memory_setup(MachineState *machine)
     assert(dtb_size <= T8030_MAX_DEVICETREE_SIZE);
 
     macho_setup_bootargs("BootArgs", nsas, sysmem, kbootargs_pa,
-                         virt_base, T8030_PHYS_BASE, mem_size,
+                         g_virt_base, T8030_PHYS_BASE, mem_size,
                          top_of_kernel_data_pa, dtb_va, dtb_size,
                          v_bootargs, tms->kern_args);
 
@@ -1318,12 +1305,31 @@ static void T8030_machine_reset(void* opaque)
 static void T8030_machine_init(MachineState *machine)
 {
     T8030MachineState *tms = T8030_MACHINE(machine);
+    struct mach_header_64 *hdr;
+    uint64_t kernel_low = 0, kernel_high = 0;
+    uint32_t build_version;
     DTBNode *child;
     DTBProp *prop;
     hwaddr *ranges;
 
     qemu_mutex_init(&tms->mutex);
     tms->sysmem = get_system_memory();
+
+    hdr = macho_load_file(tms->kernel_filename);
+    assert(hdr);
+    tms->kernel = hdr;
+    build_version = macho_build_version(hdr);
+    fprintf(stderr, "Loading %s %u.%u...\n", macho_platform_string(hdr),
+                                             BUILD_VERSION_MAJOR(build_version),
+                                             BUILD_VERSION_MINOR(build_version));
+    tms->build_version = build_version;
+    macho_highest_lowest(hdr, &kernel_low, &kernel_high);
+    fprintf(stderr, "kernel_low: 0x" TARGET_FMT_lx "\nkernel_high: 0x" TARGET_FMT_lx "\n", kernel_low, kernel_high);
+
+    g_virt_base = kernel_low;
+    g_phys_base = (hwaddr)macho_get_buffer(hdr);
+
+    T8030_patch_kernel(hdr);
     
     tms->device_tree = load_dtb_from_file(tms->dtb_filename);
     child = get_dtb_child_node_by_name(tms->device_tree, "arm-io");
