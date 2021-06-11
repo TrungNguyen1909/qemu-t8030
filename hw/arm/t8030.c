@@ -1076,7 +1076,7 @@ static void T8030_create_ans(MachineState* machine)
     child = get_dtb_child_node_by_name(child, "ans");
     assert(child != NULL);
 
-    tms->ans = apple_ans_create(child);
+    tms->ans = apple_ans_create(child, tms->build_version);
     assert(tms->ans);
 
     object_property_add_child(OBJECT(machine), "ans", OBJECT(tms->ans));

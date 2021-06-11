@@ -9,6 +9,7 @@
 #include "qemu/main-loop.h"
 #include "qemu/module.h"
 #include "qemu/timer.h"
+#include "hw/arm/xnu.h"
 #include "hw/arm/xnu_dtb.h"
 
 #define ANS_LOG_MSG(s, msg) \
@@ -198,11 +199,8 @@ static void iop_akf_reg_write(void *opaque, hwaddr addr,
                 s->cpu_ctrl = data;
                 msg = g_new0(struct iop_message, 1);
                 msg->type = MSG_SEND_HELLO;
-                // TODO: compatiblity between iOS version
-                // iOS 15 only accepts 12, 12
-                // iOS 14 only accepts 11, 11
-                msg->hello.major = 11;
-                msg->hello.minor = 11;
+                msg->hello.major = s->protocol_version;
+                msg->hello.minor = s->protocol_version;
                 msg->endpoint = 0;
                 s->ep0_status = EP0_WAIT_HELLO;
 
@@ -380,7 +378,7 @@ static void apple_ans_set_irq(void *opaque, int irq_num, int level)
     qemu_set_irq(s->irqs[s->nvme_interrupt_idx], level);
 }
 
-SysBusDevice *apple_ans_create(DTBNode *node)
+SysBusDevice *apple_ans_create(DTBNode *node, uint32_t build_version)
 {
     DeviceState  *dev;
     AppleANSState *s;
@@ -408,6 +406,17 @@ SysBusDevice *apple_ans_create(DTBNode *node)
     pex = PCIE_HOST_BRIDGE(dev);
 
     qemu_mutex_init(&s->mutex);
+
+    switch (BUILD_VERSION_MAJOR(build_version)) {
+        case 14:
+            s->protocol_version = 11;
+            break;
+        case 15:
+            s->protocol_version = 12;
+            break;
+        default:
+            break;
+    }
     prop = get_dtb_prop(node, "reg");
     assert(prop);
 

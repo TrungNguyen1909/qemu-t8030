@@ -131,6 +131,7 @@ struct AppleANSState {
     QemuThread iop_thread;
     QemuCond iop_halt;
     uint32_t ep0_status;
+    uint32_t protocol_version;
     bool stopping;
     uint32_t config;
     uint32_t cpu_ctrl;
@@ -148,6 +149,6 @@ struct AppleANSState {
     NvmeCtrl nvme;
     uint32_t nvme_interrupt_idx;
 };
-SysBusDevice *apple_ans_create(DTBNode* node);
+SysBusDevice *apple_ans_create(DTBNode* node, uint32_t build_version);
 
 #endif /* APPLE_ANS_H */
