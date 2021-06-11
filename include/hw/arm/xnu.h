@@ -24,7 +24,7 @@
 #ifndef HW_ARM_XNU_H
 #define HW_ARM_XNU_H
 
-#include "qemu-common.h"
+#include "qemu/osdep.h"
 #include "hw/arm/boot.h"
 #include "hw/arm/xnu_mem.h"
 #include "hw/arm/xnu_dtb.h"
@@ -41,25 +41,37 @@
 #define LC_SOURCE_VERSION   0x2A
 #define LC_BUILD_VERSION    0x32
 
-struct segment_command_64
-{
-    uint32_t cmd;
-    uint32_t cmdsize;
-    char segname[16];
-    uint64_t vmaddr;
-    uint64_t vmsize;
-    uint64_t fileoff;
-    uint64_t filesize;
-    uint32_t /*vm_prot_t*/ maxprot;
-    uint32_t /*vm_prot_t*/ initprot;
-    uint32_t nsects;
-    uint32_t flags;
+struct segment_command_64 { /* for 64-bit architectures */
+    uint32_t    cmd;        /* LC_SEGMENT_64 */
+    uint32_t    cmdsize;    /* includes sizeof section_64 structs */
+    char        segname[16];/* segment name */
+    uint64_t    vmaddr;     /* memory address of this segment */
+    uint64_t    vmsize;     /* memory size of this segment */
+    uint64_t    fileoff;    /* file offset of this segment */
+    uint64_t    filesize;   /* amount to map from the file */
+    uint32_t    maxprot;    /* maximum VM protection */
+    uint32_t    initprot;   /* initial VM protection */
+    uint32_t    nsects;     /* number of sections in segment */
+    uint32_t    flags;      /* flags */
 };
-
+struct section_64 { /* for 64-bit architectures */
+    char        sectname[16];   /* name of this section */
+    char        segname[16];    /* segment this section goes in */
+    uint64_t    addr;           /* memory address of this section */
+    uint64_t    size;           /* size in bytes of this section */
+    uint32_t    offset;         /* file offset of this section */
+    uint32_t    align;          /* section alignment (power of 2) */
+    uint32_t    reloff;         /* file offset of relocation entries */
+    uint32_t    nreloc;         /* number of relocation entries */
+    uint32_t    flags;          /* flags (section type and attributes)*/
+    uint32_t    reserved1;      /* reserved (for offset or index) */
+    uint32_t    reserved2;      /* reserved (for count or sizeof) */
+    uint32_t    reserved3;      /* reserved */
+};
 struct source_version_command {
-    uint32_t  cmd;	/* LC_SOURCE_VERSION */
-    uint32_t  cmdsize;	/* 16 */
-    uint64_t  version;	/* A.B.C.D.E packed as a24.b10.c10.d10.e10 */
+    uint32_t  cmd;  /* LC_SOURCE_VERSION */
+    uint32_t  cmdsize;  /* 16 */
+    uint64_t  version;  /* A.B.C.D.E packed as a24.b10.c10.d10.e10 */
 };
 
 #define PLATFORM_MACOS 1
@@ -72,13 +84,13 @@ struct source_version_command {
 #define BUILD_VERSION_MINOR(_v) ((_v) & 0x0000ff00) >> 8
 
 struct build_version_command {
-    uint32_t	cmd;		/* LC_BUILD_VERSION */
-    uint32_t	cmdsize;	/* sizeof(struct build_version_command) plus */
-                                /* ntools * sizeof(struct build_tool_version) */
-    uint32_t	platform;	/* platform */
-    uint32_t	minos;		/* X.Y.Z is encoded in nibbles xxxx.yy.zz */
-    uint32_t	sdk;		/* X.Y.Z is encoded in nibbles xxxx.yy.zz */
-    uint32_t	ntools;		/* number of tool entries following this */
+    uint32_t    cmd;        /* LC_BUILD_VERSION */
+    uint32_t    cmdsize;    /* sizeof(struct build_version_command) plus */
+                            /* ntools * sizeof(struct build_tool_version) */
+    uint32_t    platform;   /* platform */
+    uint32_t    minos;      /* X.Y.Z is encoded in nibbles xxxx.yy.zz */
+    uint32_t    sdk;        /* X.Y.Z is encoded in nibbles xxxx.yy.zz */
+    uint32_t    ntools;     /* number of tool entries following this */
 };
 
 #define MACH_MAGIC_64   0xFEEDFACFu
@@ -93,6 +105,8 @@ struct mach_header_64 {
     uint32_t    flags;      /* flags */
     uint32_t    reserved;   /* reserved */
 };
+
+extern struct mach_header_64 *xnu_header;
 
 struct load_command {
     uint32_t cmd;       /* type of load command */
@@ -109,15 +123,15 @@ typedef struct xnu_arm64_video_boot_args {
 } video_boot_args;
 
 typedef struct xnu_arm64_monitor_boot_args {
-	uint64_t	version;                        /* structure version - this is version 2 */
-	uint64_t	virtBase;                       /* virtual base of memory assigned to the monitor */
-	uint64_t	physBase;                       /* physical address corresponding to the virtual base */
-	uint64_t	memSize;                        /* size of memory assigned to the monitor */
-	uint64_t	kernArgs;                       /* physical address of the kernel boot_args structure */
-	uint64_t	kernEntry;                      /* kernel entrypoint */
-	uint64_t	kernPhysBase;                   /* physical base of the kernel's address space */
-	uint64_t	kernPhysSlide;                  /* offset from kernPhysBase to kernel load address */
-	uint64_t	kernVirtSlide;                  /* virtual slide applied to kernel at load time */
+    uint64_t    version;                        /* structure version - this is version 2 */
+    uint64_t    virtBase;                       /* virtual base of memory assigned to the monitor */
+    uint64_t    physBase;                       /* physical address corresponding to the virtual base */
+    uint64_t    memSize;                        /* size of memory assigned to the monitor */
+    uint64_t    kernArgs;                       /* physical address of the kernel boot_args structure */
+    uint64_t    kernEntry;                      /* kernel entrypoint */
+    uint64_t    kernPhysBase;                   /* physical base of the kernel's address space */
+    uint64_t    kernPhysSlide;                  /* offset from kernPhysBase to kernel load address */
+    uint64_t    kernVirtSlide;                  /* virtual slide applied to kernel at load time */
 } monitor_boot_args;
 
 struct xnu_arm64_boot_args {
@@ -135,6 +149,8 @@ struct xnu_arm64_boot_args {
     uint64_t           bootFlags;                                  /* Additional flags specified by the bootloader */
     uint64_t           memSizeActual;                              /* Actual size of memory */
 };
+
+#define kCacheableView 0x400000000ULL
 
 struct mach_header_64 *macho_load_file(const char *filename);
 
@@ -154,6 +170,22 @@ void macho_highest_lowest(struct mach_header_64 *mh, uint64_t *lowaddr,
                           uint64_t *highaddr);
 
 void macho_text_base(struct mach_header_64 *mh, uint64_t *text_base);
+
+struct segment_command_64* macho_get_segment(struct mach_header_64* header, const char* segname);
+
+struct section_64 *macho_get_section(struct segment_command_64 *seg, const char *name);
+
+uint64_t xnu_slide_hdr_va(struct mach_header_64 *header, uint64_t hdr_va);
+
+uint64_t xnu_slide_value(struct mach_header_64 *header);
+
+void *xnu_va_to_ptr(uint64_t va);
+
+uint64_t xnu_ptr_to_va(void *ptr);
+
+uint64_t xnu_rebase_va(uint64_t va);
+
+uint64_t kext_rebase_va(uint64_t va);
 
 void macho_tz_setup_bootargs(const char *name, AddressSpace *as,
                              MemoryRegion *mem, hwaddr bootargs_addr,
@@ -177,7 +209,7 @@ void macho_map_raw_file(const char *filename, AddressSpace *as, MemoryRegion *me
 void macho_load_raw_file(const char *filename, AddressSpace *as, MemoryRegion *mem,
                          const char *name, hwaddr file_pa, uint64_t *size);
                          
-DTBNode* load_dtb_from_file(char *filename);
+DTBNode *load_dtb_from_file(char *filename);
 
 void macho_load_dtb(DTBNode *root, AddressSpace *as, MemoryRegion *mem,
                     const char *name, hwaddr dtb_pa, uint64_t *size,

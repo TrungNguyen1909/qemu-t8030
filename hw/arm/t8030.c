@@ -46,8 +46,8 @@
 #include "hw/block/apple_ans.h"
 #include "hw/gpio/apple_gpio.h"
 #include "hw/i2c/apple_i2c.h"
-
 #include "hw/arm/exynos4210.h"
+#include "hw/arm/xnu_pf.h"
 
 #define T8030_PHYS_BASE (0x800000000)
 #define CPU_IMPL_REG_BASE (0x210050000)
@@ -506,18 +506,7 @@ static void T8030_patch_kernel(struct mach_header_64 *hdr)
 {
     //disable_kprintf_output = 0
     // *(uint32_t *)vtop_static(0xFFFFFFF0077142C8) = 0;
-
-    // TODO: patchfinder
-    // handle_eval_rootauth:
-    // 086040f9       ldr x8, [x0, 0xc0]
-    // 08e14039       ldrb w8, [x8, 0x38]
-    // 68002837       tbnz w8, 5, 0xfffffff0095ade9c
-    // 000a8052       mov w0, 0x50
-    // 0035fd6        ret
-    // d5ccfd17       b  _authapfs_seal_is_broken_full
-    // find in radare2: /x 68002837000A8052C0035FD6
-    // address for kernelcache.release.iphone12b of 15.0 (19A5261w)
-    // *(uint32_t *)vtop_static(0xfffffff0095ade94) = 0x52800000; // mov w0, 0
+    kpf();
 }
 
 static void T8030_memory_setup(MachineState *machine)
@@ -576,6 +565,7 @@ static void T8030_memory_setup(MachineState *machine)
     macho_free(hdr);
     hdr = NULL;
     tms->kernel = NULL;
+    xnu_header = NULL;
     used_ram_for_blobs += (align_64k_high(kernel_high) - kernel_low);
 
     phys_ptr = align_64k_high(vtop_static(kernel_high));
@@ -630,7 +620,7 @@ static void T8030_memory_setup(MachineState *machine)
     assert(dtb_size <= T8030_MAX_DEVICETREE_SIZE);
 
     macho_setup_bootargs("BootArgs", nsas, sysmem, kbootargs_pa,
-                         g_virt_base, T8030_PHYS_BASE, mem_size,
+                         g_virt_base, g_phys_base, mem_size,
                          top_of_kernel_data_pa, dtb_va, dtb_size,
                          v_bootargs, tms->kern_args);
 
@@ -1318,6 +1308,7 @@ static void T8030_machine_init(MachineState *machine)
     hdr = macho_load_file(tms->kernel_filename);
     assert(hdr);
     tms->kernel = hdr;
+    xnu_header = hdr;
     build_version = macho_build_version(hdr);
     fprintf(stderr, "Loading %s %u.%u...\n", macho_platform_string(hdr),
                                              BUILD_VERSION_MAJOR(build_version),

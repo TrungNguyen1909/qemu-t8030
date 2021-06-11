@@ -37,7 +37,7 @@
 #include "cpu.h"
 #include "hw/arm/xnu_mem.h"
 
-hwaddr g_virt_base, g_phys_base;
+hwaddr g_virt_base, g_phys_base, g_phys_slide = 0, g_virt_slide = 0;
 
 hwaddr vtop_bases(hwaddr va, hwaddr phys_base, hwaddr virt_base)
 {

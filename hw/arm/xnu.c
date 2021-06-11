@@ -33,6 +33,8 @@
 #include "img4.h"
 #include "lzfse.h"
 
+struct mach_header_64 *xnu_header;
+
 static const char *KEEP_COMP[] = {
     "uart-1,samsung\0$",
     "N104AP\0iPhone12,1\0AppleARM\0$", "arm-io,t8030\0$",
@@ -931,4 +933,76 @@ uint8_t *macho_get_buffer(struct mach_header_64 *hdr)
 void macho_free(struct mach_header_64 *hdr)
 {
     g_free(macho_get_buffer(hdr));
+}
+
+static bool xnu_is_slid(struct mach_header_64 *header)
+{
+    struct segment_command_64 *seg = macho_get_segment(header, "__TEXT");
+    if (seg->vmaddr == 0xFFFFFFF007004000ULL) {
+        return false;
+    }
+    return true;
+}
+
+uint64_t xnu_slide_hdr_va(struct mach_header_64 *header, uint64_t hdr_va)
+{
+    if (xnu_is_slid(header)) {
+        return hdr_va;
+    }
+
+    uint64_t text_va_base = ((uint64_t) header) - kCacheableView - g_phys_slide + g_virt_base;
+    uint64_t slide = text_va_base - 0xFFFFFFF007004000ULL;
+    return hdr_va + slide;
+}
+
+uint64_t xnu_slide_value(struct mach_header_64 *header)
+{
+    uint64_t text_va_base = ((uint64_t) header) - kCacheableView - g_phys_slide + g_virt_base;
+    uint64_t slide = text_va_base - 0xFFFFFFF007004000ULL;
+    return slide;
+}
+
+void *xnu_va_to_ptr(uint64_t va)
+{
+    return (void*)(va - g_virt_base + g_phys_slide + kCacheableView);
+}
+
+uint64_t xnu_ptr_to_va(void *ptr)
+{
+    return ((uint64_t)ptr) - kCacheableView + g_phys_slide + g_virt_base;
+}
+// NOTE: iBoot-based rebase only applies to main XNU.
+//       Kexts will never ever have been rebased when Pongo runs.
+static bool has_been_rebased(void)
+{
+    static int8_t rebase_status = -1;
+    // First, determine whether we've been rebased. his feels really hacky, but it correctly covers all cases:
+    //
+    // 1. New-style kernels rebase themselves, so this is always false.
+    // 2. Old-style kernels on a live device will always have been rebased.
+    // 3. Old-style kernels on kpf-test will not have been rebase, but we use a slide of 0x0 there
+    //    and the pointers are valid by themselves, so they can be treated as correctly rebased.
+    //
+    if (rebase_status == -1) {
+        struct segment_command_64 *seg = macho_get_segment(xnu_header, "__TEXT");
+        struct section_64 *sec = seg ? macho_get_section(seg, "__thread_starts") : NULL;
+        rebase_status = sec->size == 0 ? 1 : 0;
+    }
+    return rebase_status == 1;
+}
+
+uint64_t xnu_rebase_va(uint64_t va)
+{
+    if(!has_been_rebased()) {
+        va = (uint64_t)(((int64_t)va << 13) >> 13) + xnu_slide_value(xnu_header);
+    }
+    return va;
+}
+
+uint64_t kext_rebase_va(uint64_t va)
+{
+    if(!has_been_rebased()) {
+        va = (uint64_t)(((int64_t)va << 13) >> 13);
+    }
+    return va + xnu_slide_value(xnu_header);
 }
