@@ -229,6 +229,7 @@ static void extract_im4p_payload(const char *filename,
         char magic[4];
         char description[128];
         int len;
+        uint8_t *payload_data;
 
         len = 4;
         if ((ret = asn1_read_value(img4, "magic", magic, &len)) != ASN1_SUCCESS) {
@@ -253,7 +254,7 @@ static void extract_im4p_payload(const char *filename,
             exit(EXIT_FAILURE);
         }
 
-        uint8_t *payload_data = NULL;
+        payload_data = NULL;
         len = 0;
 
         if ((ret = asn1_read_value(img4, "data", payload_data, &len) != ASN1_MEM_ERROR)) {
@@ -338,6 +339,9 @@ void macho_load_dtb(DTBNode *root, AddressSpace *as, MemoryRegion *mem,
     uint64_t memmap[2] = {0};
     uint64_t size_n;
     uint8_t *buf;
+    // need to set the random seed insread of iboot
+    uint64_t seed[8] = {0xdead000d, 0xdead000d, 0xdead000d, 0xdead000d,
+                        0xdead000d, 0xdead000d, 0xdead000d, 0xdead000d};
 
     // remove this prop as it is responsible for the waited for event
     // in PE that never happens
@@ -352,9 +356,6 @@ void macho_load_dtb(DTBNode *root, AddressSpace *as, MemoryRegion *mem,
     assert(prop);
     *(uint32_t *)prop->value = 0x10;
 
-    // need to set the random seed insread of iboot
-    uint64_t seed[8] = {0xdead000d, 0xdead000d, 0xdead000d, 0xdead000d,
-                        0xdead000d, 0xdead000d, 0xdead000d, 0xdead000d};
     child = get_dtb_child_node_by_name(root, "chosen");
     assert(child != NULL);
     prop = get_dtb_prop(child, "random-seed");
@@ -507,6 +508,7 @@ void macho_load_trustcache(const char *filename, AddressSpace *as, MemoryRegion 
     unsigned long file_size = 0;
     uint32_t length = 0;
     char payload_type[4];
+    uint32_t trustcache_version, trustcache_entry_count, expected_file_size;
 
     extract_im4p_payload(filename, payload_type, &file_data, &length);
 
@@ -532,9 +534,9 @@ void macho_load_trustcache(const char *filename, AddressSpace *as, MemoryRegion 
     //
     // The cache is then followed by entry_count entries, each of which
     // contains a 20 byte hash and 2 additional bytes (hence is 22 bytes long)
-    uint32_t trustcache_version = trustcache_data[2];
-    uint32_t trustcache_entry_count = trustcache_data[7];
-    uint32_t expected_file_size = 24 /* header size */ + trustcache_entry_count * 22 /* entry size */;
+    trustcache_version = trustcache_data[2];
+    trustcache_entry_count = trustcache_data[7];
+    expected_file_size = 24 /* header size */ + trustcache_entry_count * 22 /* entry size */;
 
     if (trustcache_version != 1) {
         error_report("The trust cache '%s' does not have a v1 header", filename);
@@ -650,6 +652,7 @@ void macho_setup_bootargs(const char *name, AddressSpace *as,
                           char *kern_args)
 {
     struct xnu_arm64_boot_args boot_args;
+
     memset(&boot_args, 0, sizeof(boot_args));
     boot_args.Revision = xnu_arm64_kBootArgsRevision2;
     boot_args.Version = xnu_arm64_kBootArgsVersion2;
@@ -767,6 +770,7 @@ struct mach_header_64 *macho_parse(uint8_t *data, uint32_t len)
     uint64_t lowaddr = 0, highaddr = 0;
     uint64_t virt_base = 0;
     uint64_t text_base = 0;
+    int index;
 
     mh = (struct mach_header_64 *)data;
     if (mh->magic != MACH_MAGIC_64) {
@@ -781,7 +785,7 @@ struct mach_header_64 *macho_parse(uint8_t *data, uint32_t len)
     virt_base = lowaddr;
     cmd = (struct load_command *)(data + sizeof(struct mach_header_64));
 
-    for (int index = 0; index < mh->ncmds; index++) {
+    for (index = 0; index < mh->ncmds; index++) {
         switch (cmd->cmd) {
         case LC_SEGMENT_64: {
             struct segment_command_64 *segCmd =
@@ -806,16 +810,18 @@ struct mach_header_64 *macho_parse(uint8_t *data, uint32_t len)
 
         cmd = (struct load_command *)((char *)cmd + cmd->cmdsize);
     }
+
     return (struct mach_header_64 *)(phys_base + text_base - virt_base);
 }
 
 uint32_t macho_build_version(struct mach_header_64 *mh)
 {
     struct load_command *cmd;
+    int index;
 
     cmd = (struct load_command *)((char *)mh + sizeof(struct mach_header_64));
 
-    for (int index = 0; index < mh->ncmds; index++) {
+    for (index = 0; index < mh->ncmds; index++) {
         switch (cmd->cmd) {
         case LC_BUILD_VERSION: {
             struct build_version_command *buildVerCmd = (struct build_version_command *)cmd;
@@ -835,10 +841,11 @@ uint32_t macho_build_version(struct mach_header_64 *mh)
 uint32_t macho_platform(struct mach_header_64 *mh)
 {
     struct load_command *cmd;
+    int index;
 
     cmd = (struct load_command *)((char *)mh + sizeof(struct mach_header_64));
 
-    for (int index = 0; index < mh->ncmds; index++) {
+    for (index = 0; index < mh->ncmds; index++) {
         switch (cmd->cmd) {
         case LC_BUILD_VERSION: {
             struct build_version_command *buildVerCmd = (struct build_version_command *)cmd;
@@ -925,8 +932,10 @@ hwaddr arm_load_macho(struct mach_header_64 *mh, AddressSpace *as, MemoryRegion 
 uint8_t *macho_get_buffer(struct mach_header_64 *hdr)
 {
     uint64_t lowaddr = 0, highaddr = 0, text_base = 0;
+
     macho_highest_lowest(hdr, &lowaddr, &highaddr);
     macho_text_base(hdr, &text_base);
+
     return (uint8_t *)((uint8_t *)hdr - text_base + lowaddr);
 }
 
@@ -941,17 +950,20 @@ static bool xnu_is_slid(struct mach_header_64 *header)
     if (seg->vmaddr == 0xFFFFFFF007004000ULL) {
         return false;
     }
+
     return true;
 }
 
 uint64_t xnu_slide_hdr_va(struct mach_header_64 *header, uint64_t hdr_va)
 {
+    uint64_t text_va_base, slide;
+
     if (xnu_is_slid(header)) {
         return hdr_va;
     }
 
-    uint64_t text_va_base = ((uint64_t) header) - kCacheableView - g_phys_slide + g_virt_base;
-    uint64_t slide = text_va_base - 0xFFFFFFF007004000ULL;
+    text_va_base = ((uint64_t)header) - kCacheableView - g_phys_slide + g_virt_base;
+    slide = text_va_base - 0xFFFFFFF007004000ULL;
     return hdr_va + slide;
 }
 
@@ -988,21 +1000,24 @@ static bool has_been_rebased(void)
         struct section_64 *sec = seg ? macho_get_section(seg, "__thread_starts") : NULL;
         rebase_status = sec->size == 0 ? 1 : 0;
     }
+
     return rebase_status == 1;
 }
 
 uint64_t xnu_rebase_va(uint64_t va)
 {
-    if(!has_been_rebased()) {
+    if (!has_been_rebased()) {
         va = (uint64_t)(((int64_t)va << 13) >> 13) + xnu_slide_value(xnu_header);
     }
+
     return va;
 }
 
 uint64_t kext_rebase_va(uint64_t va)
 {
-    if(!has_been_rebased()) {
+    if (!has_been_rebased()) {
         va = (uint64_t)(((int64_t)va << 13) >> 13);
     }
+
     return va + xnu_slide_value(xnu_header);
 }

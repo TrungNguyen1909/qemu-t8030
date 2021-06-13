@@ -42,6 +42,10 @@
 
 #ifndef CONFIG_USER_ONLY
 
+// TODO: move this function to a header file
+CPAccessResult access_tvm_trvm(CPUARMState *env, const ARMCPRegInfo *ri,
+                               bool isread);
+
 static bool get_phys_addr_lpae(CPUARMState *env, uint64_t address,
                                MMUAccessType access_type, ARMMMUIdx mmu_idx,
                                bool s1_is_el0,
