@@ -944,10 +944,50 @@ void macho_free(struct mach_header_64 *hdr)
     g_free(macho_get_buffer(hdr));
 }
 
+struct segment_command_64 *macho_get_segment(struct mach_header_64 *header, const char *segname)
+{
+    struct segment_command_64 *sgp;
+    uint32_t i;
+
+    sgp = (struct segment_command_64 *)
+        ((char *)header + sizeof(struct mach_header_64));
+
+    for(i = 0; i < header->ncmds; i++) {
+        if (sgp->cmd == LC_SEGMENT_64) {
+            if (strncmp(sgp->segname, segname, sizeof(sgp->segname)) == 0)
+                return sgp;
+        }
+
+        sgp = (struct segment_command_64 *)((char *)sgp + sgp->cmdsize);
+    }
+
+    // not found
+    return NULL;
+}
+
+struct section_64 *macho_get_section(struct segment_command_64 *seg, const char *sectname)
+{
+    struct section_64 *sp;
+    uint32_t i;
+
+    sp = (struct section_64 *)((char *)seg + sizeof(struct segment_command_64));
+
+    for(i = 0; i < seg->nsects; i++) {
+        if (strncmp(sp->sectname, sectname, sizeof(sp->sectname)) == 0) {
+            return sp;
+        }
+
+        sp = (struct section_64 *)((char *)sp + sizeof(struct section_64));
+    }
+
+    // not found
+    return NULL;
+}
+
 static bool xnu_is_slid(struct mach_header_64 *header)
 {
     struct segment_command_64 *seg = macho_get_segment(header, "__TEXT");
-    if (seg->vmaddr == 0xFFFFFFF007004000ULL) {
+    if (seg && seg->vmaddr == 0xFFFFFFF007004000ULL) {
         return false;
     }
 
@@ -983,6 +1023,7 @@ uint64_t xnu_ptr_to_va(void *ptr)
 {
     return ((uint64_t)ptr) - kCacheableView + g_phys_slide + g_virt_base;
 }
+
 // NOTE: iBoot-based rebase only applies to main XNU.
 //       Kexts will never ever have been rebased when Pongo runs.
 static bool has_been_rebased(void)
