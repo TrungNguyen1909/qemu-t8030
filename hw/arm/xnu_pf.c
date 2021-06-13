@@ -3,7 +3,7 @@
 
 xnu_pf_range_t *xnu_pf_range_from_va(uint64_t va, uint64_t size)
 {
-    xnu_pf_range_t *range = malloc(sizeof(xnu_pf_range_t));
+    xnu_pf_range_t *range = g_malloc0(sizeof(xnu_pf_range_t));
     range->va = va;
     range->size = size;
     range->cacheable_base = ((uint8_t *)(va - g_virt_base + g_phys_slide + kCacheableView));
@@ -58,7 +58,7 @@ struct mach_header_64 *xnu_pf_get_first_kext(struct mach_header_64 *kheader)
             error_report("unsupported xnu");
         }
         rv = (struct mach_header_64 *)kmod_start_range->cacheable_base;
-        free(kmod_start_range);
+        g_free(kmod_start_range);
 
         return rv;
     }
@@ -66,7 +66,7 @@ struct mach_header_64 *xnu_pf_get_first_kext(struct mach_header_64 *kheader)
     start = (uint64_t *)(kmod_start_range->cacheable_base);
     kextb = xnu_slide_value(kheader) + (0xffff000000000000 | start[0]);
 
-    free(kmod_start_range);
+    g_free(kmod_start_range);
 
     return (struct mach_header_64 *)xnu_va_to_ptr(kextb);
 }
@@ -124,7 +124,7 @@ struct mach_header_64 *xnu_pf_get_kext_header(struct mach_header_64 *kheader, co
                                     avalue = strstr(avalue, ">");
                                     if (avalue) {
                                         avalue++;
-                                        free(kext_info_range);
+                                        g_free(kext_info_range);
                                         return xnu_va_to_ptr(xnu_slide_value(kheader) + strtoull(avalue, 0, 0));
                                     }
                                 }
@@ -137,7 +137,7 @@ struct mach_header_64 *xnu_pf_get_kext_header(struct mach_header_64 *kheader, co
             last_dict = strstr(end_dict, "<dict>");
         }
 
-        free(kext_info_range);
+        g_free(kext_info_range);
         return NULL;
     }
     xnu_pf_range_t *kmod_start_range = xnu_pf_section(kheader, "__PRELINK_INFO", "__kmod_start");
@@ -151,14 +151,14 @@ struct mach_header_64 *xnu_pf_get_kext_header(struct mach_header_64 *kheader, co
     for (i = 0; i < count; i++) {
         const char *kext_name = (const char *)xnu_va_to_ptr(xnu_slide_value(kheader) + (0xffff000000000000 | info[i])) + 0x10;
         if (strcmp(kext_name, kext_bundle_id) == 0) {
-            free(kmod_info_range);
-            free(kmod_start_range);
+            g_free(kmod_info_range);
+            g_free(kmod_start_range);
             return (struct mach_header_64 *) xnu_va_to_ptr(xnu_slide_value(kheader) + (0xffff000000000000 | start[i]));
         }
     }
 
-    free(kmod_info_range);
-    free(kmod_start_range);
+    g_free(kmod_info_range);
+    g_free(kmod_start_range);
 
     return NULL;
 }
@@ -177,7 +177,7 @@ void xnu_pf_apply_each_kext(struct mach_header_64 *kheader, xnu_pf_patchset_t *p
             error_report("unsupported xnu");
         }
         xnu_pf_apply(kext_text_exec_range, patchset);
-        free(kext_text_exec_range);
+        g_free(kext_text_exec_range);
         return;
     }
 
@@ -191,10 +191,10 @@ void xnu_pf_apply_each_kext(struct mach_header_64 *kheader, xnu_pf_patchset_t *p
         xnu_pf_range_t *apply_range = xnu_pf_section(kexth, "__TEXT_EXEC", "__text");
         if (apply_range) {
             xnu_pf_apply(apply_range, patchset);
-            free(apply_range);
+            g_free(apply_range);
         }
     }
-    free(kmod_start_range);
+    g_free(kmod_start_range);
 
     patchset->is_required = is_required;
     if (is_required) {
@@ -218,7 +218,7 @@ xnu_pf_range_t *xnu_pf_all_x(struct mach_header_64 *header)
 
 xnu_pf_patchset_t *xnu_pf_patchset_create(uint8_t pf_accesstype)
 {
-    xnu_pf_patchset_t *r = malloc(sizeof(xnu_pf_patchset_t));
+    xnu_pf_patchset_t *r = g_malloc0(sizeof(xnu_pf_patchset_t));
     r->patch_head = NULL;
     r->accesstype = pf_accesstype;
     r->is_required = true;
@@ -374,7 +374,7 @@ xnu_pf_patch_t *xnu_pf_maskmatch(xnu_pf_patchset_t *patchset, const char *name,
         }
     }
 
-    mm = malloc(sizeof(struct xnu_pf_maskmatch) + 16 * entryc);
+    mm = g_malloc0(sizeof(struct xnu_pf_maskmatch) + 16 * entryc);
     memset(mm, 0, sizeof(struct xnu_pf_maskmatch));
     mm->patch.should_match = true;
     mm->patch.pf_callback = (void *)callback;
@@ -404,7 +404,7 @@ xnu_pf_patch_t *xnu_pf_ptr_to_data(xnu_pf_patchset_t *patchset, uint64_t slide,
                                    void *data, size_t datasz, bool required,
                                    xnu_pf_patch_callback callback)
 {
-    struct xnu_pf_ptr_to_datamatch *mm = malloc(sizeof(struct xnu_pf_ptr_to_datamatch));
+    struct xnu_pf_ptr_to_datamatch *mm = g_malloc0(sizeof(struct xnu_pf_ptr_to_datamatch));
 
     memset(mm, 0, sizeof(struct xnu_pf_ptr_to_datamatch));
     mm->patch.should_match = true;
@@ -587,8 +587,8 @@ void xnu_pf_patchset_destroy(xnu_pf_patchset_t *patchset)
     while (patch) {
         o_patch = patch;
         patch = patch->next_patch;
-        free(o_patch);
+        g_free(o_patch);
     }
 
-    free(patchset);
+    g_free(patchset);
 }
