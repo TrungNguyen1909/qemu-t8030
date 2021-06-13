@@ -7,6 +7,7 @@ xnu_pf_range_t *xnu_pf_range_from_va(uint64_t va, uint64_t size)
     range->va = va;
     range->size = size;
     range->cacheable_base = ((uint8_t *)(va - g_virt_base + g_phys_slide + kCacheableView));
+
     return range;
 }
 
@@ -20,16 +21,19 @@ xnu_pf_range_t *xnu_pf_segment(struct mach_header_64 *header, const char *segmen
     if (header != xnu_header) {
         return xnu_pf_range_from_va(xnu_slide_value(xnu_header) + (0xffff000000000000 | seg->vmaddr), seg->filesize);
     }
+
     return xnu_pf_range_from_va(xnu_slide_hdr_va(header, seg->vmaddr), seg->filesize);
 }
 
 xnu_pf_range_t *xnu_pf_section(struct mach_header_64 *header, const char *segment_name, const char *section_name)
 {
+    struct section_64 *sec;
     struct segment_command_64 *seg = macho_get_segment(header, segment_name);
     if (!seg) {
         return NULL;
     }
-    struct section_64 *sec = macho_get_section(seg, section_name);
+
+    sec = macho_get_section(seg, section_name);
     if (!sec) {
         return NULL;
     }
@@ -43,43 +47,55 @@ xnu_pf_range_t *xnu_pf_section(struct mach_header_64 *header, const char *segmen
 
 struct mach_header_64 *xnu_pf_get_first_kext(struct mach_header_64 *kheader)
 {
+    uint64_t *start, kextb;
     xnu_pf_range_t *kmod_start_range = xnu_pf_section(kheader, "__PRELINK_INFO", "__kmod_start");
+
     if (!kmod_start_range) {
+        struct mach_header_64 *rv;
+
         kmod_start_range = xnu_pf_section(kheader, "__PRELINK_TEXT", "__text");
         if (!kmod_start_range) {
             error_report("unsupported xnu");
         }
-        struct mach_header_64 *rv = (struct mach_header_64 *)kmod_start_range->cacheable_base;
+        rv = (struct mach_header_64 *)kmod_start_range->cacheable_base;
         free(kmod_start_range);
+
         return rv;
     }
 
-    uint64_t *start = (uint64_t *)(kmod_start_range->cacheable_base);
-    uint64_t kextb = xnu_slide_value(kheader) + (0xffff000000000000 | start[0]);
+    start = (uint64_t *)(kmod_start_range->cacheable_base);
+    kextb = xnu_slide_value(kheader) + (0xffff000000000000 | start[0]);
 
     free(kmod_start_range);
+
     return (struct mach_header_64 *)xnu_va_to_ptr(kextb);
 }
 
 struct mach_header_64 *xnu_pf_get_kext_header(struct mach_header_64 *kheader, const char *kext_bundle_id)
 {
+    uint64_t *info, *start;
+    uint32_t count;
+    uint32_t i;
+
     xnu_pf_range_t *kmod_info_range = xnu_pf_section(kheader, "__PRELINK_INFO", "__kmod_info");
     if (!kmod_info_range) {
         char kname[256];
+        const char *prelinkinfo, *last_dict;
         xnu_pf_range_t *kext_info_range = xnu_pf_section(kheader, "__PRELINK_INFO", "__info");
         if (!kext_info_range) {
             error_report("unsupported xnu");
         }
 
-        const char *prelinkinfo = strstr((const char *)kext_info_range->cacheable_base, "PrelinkInfoDictionary");
-        const char *last_dict = strstr(prelinkinfo, "<array>") + 7;
+        prelinkinfo = strstr((const char *)kext_info_range->cacheable_base, "PrelinkInfoDictionary");
+        last_dict = strstr(prelinkinfo, "<array>") + 7;
         while (last_dict) {
+            const char *nested_dict, *ident;
             const char *end_dict = strstr(last_dict, "</dict>");
             if (!end_dict) {
                 break;
             }
 
-            const char *nested_dict = strstr(last_dict + 1, "<dict>");
+            nested_dict = strstr(last_dict + 1, "<dict>");
             while (nested_dict) {
                 if (nested_dict > end_dict) {
                     break;
@@ -89,13 +105,14 @@ struct mach_header_64 *xnu_pf_get_kext_header(struct mach_header_64 *kheader, co
                 end_dict = strstr(end_dict + 1, "</dict>");
             }
 
-
-            const char *ident = memmem(last_dict, end_dict - last_dict, "CFBundleIdentifier", strlen("CFBundleIdentifier"));
+            ident = memmem(last_dict, end_dict - last_dict, "CFBundleIdentifier", strlen("CFBundleIdentifier"));
             if (ident) {
                 const char *value = strstr(ident, "<string>");
                 if (value) {
+                    const char *value_end;
+
                     value += strlen("<string>");
-                    const char *value_end = strstr(value, "</string>");
+                    value_end = strstr(value, "</string>");
                     if (value_end) {
                         memcpy(kname, value, value_end - value);
                         kname[value_end - value] = 0;
@@ -128,10 +145,10 @@ struct mach_header_64 *xnu_pf_get_kext_header(struct mach_header_64 *kheader, co
         return NULL;
     }
 
-    uint64_t *info = (uint64_t *)(kmod_info_range->cacheable_base);
-    uint64_t *start = (uint64_t *)(kmod_start_range->cacheable_base);
-    uint32_t count = kmod_info_range->size / 8;
-    for (uint32_t i = 0; i < count; i++) {
+    info = (uint64_t *)(kmod_info_range->cacheable_base);
+    start = (uint64_t *)(kmod_start_range->cacheable_base);
+    count = kmod_info_range->size / 8;
+    for (i = 0; i < count; i++) {
         const char *kext_name = (const char *)xnu_va_to_ptr(xnu_slide_value(kheader) + (0xffff000000000000 | info[i])) + 0x10;
         if (strcmp(kext_name, kext_bundle_id) == 0) {
             free(kmod_info_range);
@@ -142,11 +159,17 @@ struct mach_header_64 *xnu_pf_get_kext_header(struct mach_header_64 *kheader, co
 
     free(kmod_info_range);
     free(kmod_start_range);
+
     return NULL;
 }
 
 void xnu_pf_apply_each_kext(struct mach_header_64 *kheader, xnu_pf_patchset_t *patchset)
 {
+    bool is_required;
+    uint64_t *start;
+    uint32_t count;
+    uint32_t i;
+
     xnu_pf_range_t *kmod_start_range = xnu_pf_section(kheader, "__PRELINK_INFO", "__kmod_start");
     if (!kmod_start_range) {
         xnu_pf_range_t *kext_text_exec_range = xnu_pf_section(kheader, "__PLK_TEXT_EXEC", "__text");
@@ -158,12 +181,12 @@ void xnu_pf_apply_each_kext(struct mach_header_64 *kheader, xnu_pf_patchset_t *p
         return;
     }
 
-    bool is_required = patchset->is_required;
+    is_required = patchset->is_required;
     patchset->is_required = false;
 
-    uint64_t *start = (uint64_t *)(kmod_start_range->cacheable_base);
-    uint32_t count = kmod_start_range->size / 8;
-    for (uint32_t i = 0; i < count; i++) {
+    start = (uint64_t *)(kmod_start_range->cacheable_base);
+    count = kmod_start_range->size / 8;
+    for (i = 0; i < count; i++) {
         struct mach_header_64 *kexth = (struct mach_header_64 *)xnu_va_to_ptr(xnu_slide_value(kheader) + (0xffff000000000000 | start[i]));
         xnu_pf_range_t *apply_range = xnu_pf_section(kexth, "__TEXT_EXEC", "__text");
         if (apply_range) {
@@ -210,8 +233,9 @@ struct xnu_pf_maskmatch {
 
 static inline bool xnu_pf_maskmatch_match_8(struct xnu_pf_maskmatch *patch, uint8_t access_type, uint8_t *preread, uint8_t *cacheable_stream)
 {
-    uint32_t count = patch->pair_count;
-    for (uint32_t i = 0; i < count; i++) {
+    uint32_t i, count = patch->pair_count;
+
+    for (i = 0; i < count; i++) {
         if (count < 8) {
             if ((preread[i] & patch->pairs[i][1]) != patch->pairs[i][0]) {
                 return false;
@@ -222,13 +246,15 @@ static inline bool xnu_pf_maskmatch_match_8(struct xnu_pf_maskmatch *patch, uint
             }
         }
     }
+
     return true;
 }
 
 static inline bool xnu_pf_maskmatch_match_16(struct xnu_pf_maskmatch *patch, uint8_t access_type, uint16_t *preread, uint16_t *cacheable_stream)
 {
-    uint32_t count = patch->pair_count;
-    for (uint32_t i = 0; i < count; i++) {
+    uint32_t i, count = patch->pair_count;
+
+    for (i = 0; i < count; i++) {
         if (count < 8) {
             if ((preread[i] & patch->pairs[i][1]) != patch->pairs[i][0]) {
                 return false;
@@ -239,13 +265,14 @@ static inline bool xnu_pf_maskmatch_match_16(struct xnu_pf_maskmatch *patch, uin
             }
         }
     }
+
     return true;
 }
 
 static inline bool xnu_pf_maskmatch_match_32(struct xnu_pf_maskmatch *patch, uint8_t access_type, uint32_t *preread, uint32_t *cacheable_stream)
 {
-    uint32_t count = patch->pair_count;
-    for (uint32_t i = 0; i < count; i++) {
+    uint32_t i, count = patch->pair_count;
+    for (i = 0; i < count; i++) {
         if (count < 8) {
             if ((preread[i] & patch->pairs[i][1]) != patch->pairs[i][0]) {
                 return false;
@@ -256,13 +283,15 @@ static inline bool xnu_pf_maskmatch_match_32(struct xnu_pf_maskmatch *patch, uin
             }
         }
     }
+
     return true;
 }
 
 static inline bool xnu_pf_maskmatch_match_64(struct xnu_pf_maskmatch *patch, uint8_t access_type, uint64_t *preread, uint64_t *cacheable_stream)
 {
-    uint32_t count = patch->pair_count;
-    for (uint32_t i = 0; i < count; i++) {
+    uint32_t i, count = patch->pair_count;
+
+    for (i = 0; i < count; i++) {
         if (count < 8) {
             if ((preread[i] & patch->pairs[i][1]) != patch->pairs[i][0]) {
                 return false;
@@ -273,12 +302,14 @@ static inline bool xnu_pf_maskmatch_match_64(struct xnu_pf_maskmatch *patch, uin
             }
         }
     }
+
     return true;
 }
 
 static void xnu_pf_maskmatch_match(struct xnu_pf_maskmatch *patch, uint8_t access_type, void *preread, void *cacheable_stream)
 {
     bool val = false;
+
     switch (access_type) {
     case XNU_PF_ACCESS_8BIT:
         val = xnu_pf_maskmatch_match_8(patch, access_type, preread, cacheable_stream);
@@ -295,6 +326,7 @@ static void xnu_pf_maskmatch_match(struct xnu_pf_maskmatch *patch, uint8_t acces
     default:
         break;
     }
+
     if (val) {
         if (patch->patch.pf_callback((struct xnu_pf_patch *)patch, cacheable_stream)) {
             patch->patch.has_fired = true;
@@ -313,6 +345,7 @@ struct xnu_pf_ptr_to_datamatch {
 static void xnu_pf_ptr_to_data_match(struct xnu_pf_ptr_to_datamatch *patch, uint8_t access_type, void *preread, void *cacheable_stream)
 {
     uint64_t pointer = *(uint64_t *)preread;
+
     pointer |= 0xffff000000000000;
     pointer += patch->slide;
 
@@ -330,14 +363,18 @@ xnu_pf_patch_t *xnu_pf_maskmatch(xnu_pf_patchset_t *patchset, const char *name,
                                  uint32_t entryc, bool required,
                                  xnu_pf_patch_callback callback)
 {
+    uint32_t i;
+    struct xnu_pf_maskmatch *mm;
+    uint32_t loadc;
+
     /* Sanity check */
-    for (uint32_t i = 0; i < entryc; i++) {
+    for (i = 0; i < entryc; i++) {
         if ((matches[i] & masks[i]) != matches[i]) {
             error_report("Bad maskmatch: %s (index %u)", name, i);
         }
     }
 
-    struct xnu_pf_maskmatch *mm = malloc(sizeof(struct xnu_pf_maskmatch) + 16 * entryc);
+    mm = malloc(sizeof(struct xnu_pf_maskmatch) + 16 * entryc);
     memset(mm, 0, sizeof(struct xnu_pf_maskmatch));
     mm->patch.should_match = true;
     mm->patch.pf_callback = (void *)callback;
@@ -346,18 +383,19 @@ xnu_pf_patch_t *xnu_pf_maskmatch(xnu_pf_patchset_t *patchset, const char *name,
     mm->patch.name = name;
     mm->pair_count = entryc;
 
-    uint32_t loadc = entryc;
+    loadc = entryc;
     if (loadc > 8) {
         loadc = 8;
     }
 
-    for (uint32_t i = 0; i < entryc; i++) {
+    for (i = 0; i < entryc; i++) {
         mm->pairs[i][0] = matches[i];
         mm->pairs[i][1] = masks[i];
     }
 
     mm->patch.next_patch = patchset->patch_head;
     patchset->patch_head = &mm->patch;
+
     return &mm->patch;
 }
 
@@ -367,6 +405,7 @@ xnu_pf_patch_t *xnu_pf_ptr_to_data(xnu_pf_patchset_t *patchset, uint64_t slide,
                                    xnu_pf_patch_callback callback)
 {
     struct xnu_pf_ptr_to_datamatch *mm = malloc(sizeof(struct xnu_pf_ptr_to_datamatch));
+
     memset(mm, 0, sizeof(struct xnu_pf_ptr_to_datamatch));
     mm->patch.should_match = true;
     mm->patch.pf_callback = (void *)callback;
@@ -380,6 +419,7 @@ xnu_pf_patch_t *xnu_pf_ptr_to_data(xnu_pf_patchset_t *patchset, uint64_t slide,
 
     mm->patch.next_patch = patchset->patch_head;
     patchset->patch_head = &mm->patch;
+
     return &mm->patch;
 }
 
@@ -388,6 +428,7 @@ void xnu_pf_disable_patch(xnu_pf_patch_t *patch)
     if (!patch->should_match) {
         return;
     }
+
     patch->should_match = false;
 }
 
@@ -396,6 +437,7 @@ void xnu_pf_enable_patch(xnu_pf_patch_t *patch)
     if (patch->should_match) {
         return;
     }
+
     patch->should_match = true;
 }
 
@@ -403,11 +445,14 @@ static inline void xnu_pf_apply_8(xnu_pf_range_t *range, xnu_pf_patchset_t *patc
 {
     uint8_t *stream = (uint8_t *)range->cacheable_base;
     uint8_t reads[8];
-    uint32_t stream_iters = range->size;
-    for (int i = 0; i < 8; i++) {
+    uint32_t index, stream_iters = range->size;
+    int i;
+
+    for (i = 0; i < 8; i++) {
         reads[i] = stream[i];
     }
-    for (uint32_t index = 0; index < stream_iters; index++) {
+
+    for (index = 0; index < stream_iters; index++) {
         xnu_pf_patch_t *patch = patchset->patch_head;
 
         while (patch) {
@@ -417,7 +462,7 @@ static inline void xnu_pf_apply_8(xnu_pf_range_t *range, xnu_pf_patchset_t *patc
             patch = patch->next_patch;
         }
 
-        for (int i = 0; i < 7; i++) {
+        for (i = 0; i < 7; i++) {
             reads[i] = reads[i + 1];
         }
         reads[7] = stream[index + 8];
@@ -428,11 +473,13 @@ static inline void xnu_pf_apply_16(xnu_pf_range_t *range, xnu_pf_patchset_t *pat
 {
     uint16_t *stream = (uint16_t *)range->cacheable_base;
     uint16_t reads[8];
-    uint32_t stream_iters = range->size >> 1;
-    for (int i = 0; i < 8; i++) {
+    uint32_t i, index, stream_iters = range->size >> 1;
+
+    for (i = 0; i < 8; i++) {
         reads[i] = stream[i];
     }
-    for (uint32_t index = 0; index < stream_iters; index++) {
+
+    for (index = 0; index < stream_iters; index++) {
         xnu_pf_patch_t *patch = patchset->patch_head;
 
         while (patch) {
@@ -442,7 +489,7 @@ static inline void xnu_pf_apply_16(xnu_pf_range_t *range, xnu_pf_patchset_t *pat
             patch = patch->next_patch;
         }
 
-        for (int i = 0; i < 7; i++) {
+        for (i = 0; i < 7; i++) {
             reads[i] = reads[i + 1];
         }
         reads[7] = stream[index + 8];
@@ -453,11 +500,13 @@ static inline void xnu_pf_apply_32(xnu_pf_range_t *range, xnu_pf_patchset_t *pat
 {
     uint32_t *stream = (uint32_t *)range->cacheable_base;
     uint32_t reads[8];
-    uint32_t stream_iters = range->size >> 2;
-    for (int i = 0; i < 8; i++) {
+    uint32_t i, index, stream_iters = range->size >> 2;
+
+    for (i = 0; i < 8; i++) {
         reads[i] = stream[i];
     }
-    for (uint32_t index = 0; index < stream_iters; index++) {
+
+    for (index = 0; index < stream_iters; index++) {
         xnu_pf_patch_t *patch = patchset->patch_head;
 
         while (patch) {
@@ -467,7 +516,7 @@ static inline void xnu_pf_apply_32(xnu_pf_range_t *range, xnu_pf_patchset_t *pat
             patch = patch->next_patch;
         }
 
-        for (int i = 0; i < 7; i++) {
+        for (i = 0; i < 7; i++) {
             reads[i] = reads[i + 1];
         }
         reads[7] = stream[index + 8];
@@ -478,11 +527,13 @@ static inline void xnu_pf_apply_64(xnu_pf_range_t *range, xnu_pf_patchset_t *pat
 {
     uint64_t *stream = (uint64_t *)range->cacheable_base;
     uint64_t reads[8];
-    uint32_t stream_iters = range->size >> 2;
-    for (int i = 0; i < 8; i++) {
+    uint32_t i, index, stream_iters = range->size >> 2;
+
+    for (i = 0; i < 8; i++) {
         reads[i] = stream[i];
     }
-    for (uint32_t index = 0; index < stream_iters; index++) {
+
+    for (index = 0; index < stream_iters; index++) {
         xnu_pf_patch_t *patch = patchset->patch_head;
 
         while (patch) {
@@ -492,7 +543,7 @@ static inline void xnu_pf_apply_64(xnu_pf_range_t *range, xnu_pf_patchset_t *pat
             patch = patch->next_patch;
         }
 
-        for (int i = 0; i < 7; i++) {
+        for (i = 0; i < 7; i++) {
             reads[i] = reads[i + 1];
         }
         reads[7] = stream[index + 8];
@@ -518,6 +569,7 @@ void xnu_pf_apply(xnu_pf_range_t *range, xnu_pf_patchset_t *patchset)
     default:
         break;
     }
+
     if (patchset->is_required) {
         for (xnu_pf_patch_t *patch = patchset->patch_head; patch; patch = patch->next_patch) {
             if (patch->is_required && !patch->has_fired) {
@@ -531,10 +583,12 @@ void xnu_pf_patchset_destroy(xnu_pf_patchset_t *patchset)
 {
     xnu_pf_patch_t *o_patch;
     xnu_pf_patch_t *patch = patchset->patch_head;
+
     while (patch) {
         o_patch = patch;
         patch = patch->next_patch;
         free(o_patch);
     }
+
     free(patchset);
 }

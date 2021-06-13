@@ -13,8 +13,11 @@ static uint32_t *find_next_insn(uint32_t *from, uint32_t num, uint32_t insn, uin
         from++;
         num--;
     }
+
+    // not found
     return NULL;
 }
+
 static uint32_t *find_prev_insn(uint32_t *from, uint32_t num, uint32_t insn, uint32_t mask)
 {
     while (num) {
@@ -24,15 +27,19 @@ static uint32_t *find_prev_insn(uint32_t *from, uint32_t num, uint32_t insn, uin
         from--;
         num--;
     }
+
+    // not found
     return NULL;
 }
 
 static bool kpf_apfs_rootauth(struct xnu_pf_patch *patch, uint32_t *opcode_stream)
 {
     opcode_stream[1] = 0x52800000; // mov w0, 0
+
     puts("KPF: found handle_eval_rootauth");
     return true;
 }
+
 static bool kpf_apfs_vfsop_mount(struct xnu_pf_patch *patch, uint32_t *opcode_stream)
 {
     opcode_stream[0] = 0x52800000; // mov w0, 0
@@ -63,9 +70,6 @@ static void kpf_apfs_patches(xnu_pf_patchset_t *patchset)
         0xffffffff,
         0xffffffff
     };
-    xnu_pf_maskmatch(patchset, "handle_eval_rootauth", matches, masks,
-                     sizeof(masks) / sizeof(uint64_t), false,
-                     (void *)kpf_apfs_rootauth);
 
     /* apfs_vfsop_mount:
      * This patch allows mount -urw /
@@ -88,10 +92,16 @@ static void kpf_apfs_patches(xnu_pf_patchset_t *patchset)
         0xfffffc00,
         0xffc003a0,
     };
+
+    xnu_pf_maskmatch(patchset, "handle_eval_rootauth", matches, masks,
+                     sizeof(masks) / sizeof(uint64_t), false,
+                     (void *)kpf_apfs_rootauth);
+
     xnu_pf_maskmatch(patchset, "apfs_vfsop_mount", matches2, masks2,
                      sizeof(masks2) / sizeof(uint64_t), false,
                      (void *)kpf_apfs_vfsop_mount);
 }
+
 bool kpf_has_done_mac_mount;
 static bool kpf_mac_mount_callback(struct xnu_pf_patch *patch, uint32_t *opcode_stream)
 {
@@ -100,6 +110,7 @@ static bool kpf_mac_mount_callback(struct xnu_pf_patch *patch, uint32_t *opcode_
     // search for tbnz w*, 5, *
     // and nop it (enable MNT_UNION mounts)
     uint32_t *mac_mount_1 = find_prev_insn(mac_mount, 0x40, 0x37280000, 0xfffe0000);
+
     if (!mac_mount_1) {
         mac_mount_1 = find_next_insn(mac_mount, 0x40, 0x37280000, 0xfffe0000);
     }
@@ -108,6 +119,7 @@ static bool kpf_mac_mount_callback(struct xnu_pf_patch *patch, uint32_t *opcode_
         puts("kpf_mac_mount_callback: failed to find NOP point");
         return false;
     }
+
     mac_mount_1[0] = NOP;
     /* search for ldrb w8, [x*, 0x71] */
     mac_mount_1 = find_prev_insn(mac_mount, 0x40, 0x3941c408, 0xfffffc1f);
@@ -119,11 +131,13 @@ static bool kpf_mac_mount_callback(struct xnu_pf_patch *patch, uint32_t *opcode_
         puts("kpf_mac_mount_callback: failed to find xzr point");
         return false;
     }
+
     /* replace with a mov x8, xzr */
     /* this will bypass the (vp->v_mount->mnt_flag & MNT_ROOTFS) check */
     mac_mount_1[0] = 0xaa1f03e8;
     kpf_has_done_mac_mount = true;
     xnu_pf_disable_patch(patch);
+
     puts("KPF: Found mac_mount");
     return true;
 }
@@ -144,6 +158,7 @@ static void kpf_mac_mount_patch(xnu_pf_patchset_t *xnu_text_exec_patchset)
     uint64_t masks[] = {
         0xFFFFFFFF,
     };
+
     xnu_pf_maskmatch(xnu_text_exec_patchset, "mac_mount_patch1",
                      matches, masks, sizeof(matches) / sizeof(uint64_t),
                      false, (void *)kpf_mac_mount_callback);
@@ -153,12 +168,16 @@ static void kpf_mac_mount_patch(xnu_pf_patchset_t *xnu_text_exec_patchset)
                      false, (void *)kpf_mac_mount_callback);
 }
 
-void kpf()
+void kpf(void)
 {
     struct mach_header_64 *hdr = xnu_header;
     xnu_pf_patchset_t *xnu_text_exec_patchset = xnu_pf_patchset_create(XNU_PF_ACCESS_32BIT);
     xnu_pf_range_t *text_exec_range = xnu_pf_section(hdr, "__TEXT_EXEC", "__text");
     struct mach_header_64 *first_kext = xnu_pf_get_first_kext(hdr);
+    xnu_pf_patchset_t *apfs_patchset;
+    struct mach_header_64 *apfs_header;
+    xnu_pf_range_t *apfs_text_exec_range;
+
     if (first_kext) {
         xnu_pf_range_t *first_kext_text_exec_range = xnu_pf_section(first_kext, "__TEXT_EXEC", "__text");
 
@@ -176,9 +195,10 @@ void kpf()
         }
     }
 
-    xnu_pf_patchset_t *apfs_patchset = xnu_pf_patchset_create(XNU_PF_ACCESS_32BIT);
-    struct mach_header_64 *apfs_header = xnu_pf_get_kext_header(hdr, "com.apple.filesystems.apfs");
-    xnu_pf_range_t *apfs_text_exec_range = xnu_pf_section(apfs_header, "__TEXT_EXEC", "__text");
+    apfs_patchset = xnu_pf_patchset_create(XNU_PF_ACCESS_32BIT);
+    apfs_header = xnu_pf_get_kext_header(hdr, "com.apple.filesystems.apfs");
+    apfs_text_exec_range = xnu_pf_section(apfs_header, "__TEXT_EXEC", "__text");
+
     kpf_apfs_patches(apfs_patchset);
     xnu_pf_apply(apfs_text_exec_range, apfs_patchset);
     xnu_pf_patchset_destroy(apfs_patchset);
