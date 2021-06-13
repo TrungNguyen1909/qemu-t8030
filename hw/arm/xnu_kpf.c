@@ -34,6 +34,7 @@ static uint32_t *find_prev_insn(uint32_t *from, uint32_t num, uint32_t insn, uin
 
 static bool kpf_apfs_rootauth(struct xnu_pf_patch *patch, uint32_t *opcode_stream)
 {
+    opcode_stream[0] = NOP;
     opcode_stream[1] = 0x52800000; // mov w0, 0
 
     puts("KPF: found handle_eval_rootauth");
