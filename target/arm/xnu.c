@@ -881,45 +881,6 @@ char *macho_platform_string(struct mach_header_64 *mh)
     }
 }
 
-struct segment_command_64 *macho_get_segment(struct mach_header_64 *header,
-                                             const char *segname)
-{
-    int i;
-    struct load_command *lc;
-
-    lc = (struct load_command *)(header + 1);
-    for (i = 0; i < header->ncmds; i++) {
-        if (lc->cmd == LC_SEGMENT_64) {
-            struct segment_command_64 *seg = (struct segment_command_64 *)lc;
-            if (strcmp(seg->segname, segname) == 0) {
-                return seg;
-            }
-        }
-
-        lc = (struct load_command *)(lc->cmdsize + (char *)lc);
-    }
-
-    // not found
-    return NULL;
-}
-
-struct section_64 *macho_get_section(struct segment_command_64 *seg, const char *name)
-{
-    struct section_64 *sect, *fs = NULL;
-    uint32_t i = 0;
-
-    for (i = 0, sect = (struct section_64 *)((uint64_t)seg + (uint64_t)sizeof(struct segment_command_64));
-         i < seg->nsects;
-         i++, sect = (struct section_64 *)((uint64_t)sect + sizeof(struct section_64))) {
-        if (!strcmp(sect->sectname, name)) {
-            fs = sect;
-            break;
-        }
-    }
-
-    return fs;
-}
-
 hwaddr arm_load_macho(struct mach_header_64 *mh, AddressSpace *as, MemoryRegion *mem,
                     const char *name, hwaddr phys_base, hwaddr virt_base)
 {
