@@ -1,6 +1,6 @@
 arm_ss = ss.source_set()
 arm_ss.add(files('boot.c'), fdt)
-arm_ss.add(when: 'TARGET_AARCH64', if_true: files('t8030.c', 't8030_gxf.c', 'xnu_dtb.c', 'xnu_fb_cfg.c', 'xnu_file_mmio_dev.c', 'xnu_mem.c', 'xnu.c'))
+arm_ss.add(when: 'TARGET_AARCH64', if_true: files('t8030.c', 't8030_gxf.c'))
 arm_ss.add(when: 'TARGET_AARCH64', if_true: tasn1)
 arm_ss.add(when: 'CONFIG_PLATFORM_BUS', if_true: files('sysbus-fdt.c'))
 arm_ss.add(when: 'CONFIG_ARM_VIRT', if_true: files('virt.c'))

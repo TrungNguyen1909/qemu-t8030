@@ -68,15 +68,19 @@ typedef struct T8030CPUState{
     uint64_t mpidr;
     uint64_t ipi_sr;
     qemu_irq fast_ipi;
+    T8030_CPREG_VAR_DEF(ARM64_REG_EHID4);
+    T8030_CPREG_VAR_DEF(ARM64_REG_EHID10);
+    T8030_CPREG_VAR_DEF(ARM64_REG_HID0);
+    T8030_CPREG_VAR_DEF(ARM64_REG_HID3);
+    T8030_CPREG_VAR_DEF(ARM64_REG_HID4);
+    T8030_CPREG_VAR_DEF(ARM64_REG_HID5);
+    T8030_CPREG_VAR_DEF(ARM64_REG_HID7);
+    T8030_CPREG_VAR_DEF(ARM64_REG_HID8);
+    T8030_CPREG_VAR_DEF(ARM64_REG_HID9);
     T8030_CPREG_VAR_DEF(ARM64_REG_HID11);
     T8030_CPREG_VAR_DEF(ARM64_REG_HID13);
     T8030_CPREG_VAR_DEF(ARM64_REG_HID14);
-    T8030_CPREG_VAR_DEF(ARM64_REG_HID3);
-    T8030_CPREG_VAR_DEF(ARM64_REG_HID5);
-    T8030_CPREG_VAR_DEF(ARM64_REG_HID4);
-    T8030_CPREG_VAR_DEF(ARM64_REG_EHID4);
-    T8030_CPREG_VAR_DEF(ARM64_REG_HID8);
-    T8030_CPREG_VAR_DEF(ARM64_REG_HID7);
+    T8030_CPREG_VAR_DEF(ARM64_REG_HID16);
     T8030_CPREG_VAR_DEF(ARM64_REG_LSU_ERR_STS);
     T8030_CPREG_VAR_DEF(PMC0);
     T8030_CPREG_VAR_DEF(PMC1);
@@ -171,7 +175,6 @@ typedef struct
     uint64_t pendingIPI[MAX_CPU];
     bool pendingWakeup[MAX_CPU];
     SysBusDevice* aic;
-    SysBusDevice* ans;
     MemoryRegion* sysmem;
     struct arm_boot_info bootinfo;
     char ramdisk_filename[1024];
@@ -181,9 +184,11 @@ typedef struct
     char trustcache_filename[1024];
     char kern_args[1024];
     FileMmioDev ramdisk_file_dev;
+    struct mach_header_64 *kernel;
     DTBNode *device_tree;
     bool use_ramfb;
     QemuMutex mutex;
+    uint32_t build_version;
 } T8030MachineState;
 
 typedef struct

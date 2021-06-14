@@ -4,322 +4,42 @@
 #include "hw/irq.h"
 #include "migration/vmstate.h"
 #include "qemu/bitops.h"
-#include "qemu/lockable.h"
 #include "qemu/log.h"
-#include "qemu/main-loop.h"
 #include "qemu/module.h"
-#include "qemu/timer.h"
+#include "hw/arm/xnu.h"
 #include "hw/arm/xnu_dtb.h"
+#include "hw/iop/mailbox.h"
+
+#define TYPE_APPLE_ANS "apple.ans"
+OBJECT_DECLARE_SIMPLE_TYPE(AppleANSState, APPLE_ANS)
 
 #define ANS_LOG_MSG(s, msg) \
 do { qemu_log_mask(LOG_GUEST_ERROR, "ANS2: message:" \
                    " type=0x%x ep=%u QWORD0=0x" TARGET_FMT_plx \
                    " QWORD1=0x" TARGET_FMT_plx " ep0_state=0x%x\n", \
                    msg->type, msg->endpoint, msg->data[0], msg->data[1], \
-                   s->ep0_status); } while (0)
+                   s->mbox->ep0_status); } while (0)
 
+#define APPLE_BOOT_STATUS       0x1300
+#define   APPLE_BOOT_STATUS_OK  0xde71ce55
 
-/*
- * Push a message from AP to IOP,
- * called with iothread locked,
- * take ownership of msg
- */
-static inline void iop_inbox_push(AppleANSState *s, iop_message_t msg)
-{
-    QTAILQ_INSERT_TAIL(&s->inbox, msg, entry);
-    qemu_irq_lower(s->irqs[IRQ_IOP_INBOX]);
-    qemu_cond_broadcast(&s->iop_halt);
-}
+typedef struct QEMU_PACKED {
+    uint32_t unk0;
+    uint32_t unk4;
+    uint32_t numBlocks;
+} NVMeCreateNamespacesEntryStruct;
 
-static inline iop_message_t iop_inbox_get(AppleANSState *s)
-{
-    iop_message_t msg = QTAILQ_FIRST(&s->inbox);
-    QTAILQ_REMOVE(&s->inbox, msg, entry);
-    return msg;
-}
+struct AppleANSState {
+    PCIExpressHost parent_obj;
+    MemoryRegion *iomems[4];
+    MemoryRegion io_mmio;
+    MemoryRegion io_ioport;
+    MemoryRegion msix;
+    AppleIOPMailboxState *mbox;
+    qemu_irq irqs[2];
 
-static inline bool iop_inbox_empty(AppleANSState *s)
-{
-    return QTAILQ_EMPTY(&s->inbox);
-}
-
-/*
- * Push a message from IOP to AP,
- * called with iothread locked,
- * take ownership of msg
- */
-static inline void iop_outbox_push_nolock(AppleANSState *s, iop_message_t msg)
-{
-    if (!s->outboxEnable) {
-        return;
-    }
-    QTAILQ_INSERT_TAIL(&s->outbox, msg, entry);
-    qemu_irq_raise(s->irqs[IRQ_IOP_OUTBOX]);
-}
-
-/*
- * Push a message from IOP to AP,
- * called with iothread unlocked,
- * take ownership of msg
- */
-static inline void iop_outbox_push(AppleANSState *s, iop_message_t msg)
-{
-    qemu_mutex_unlock(&s->mutex);
-    qemu_mutex_lock_iothread();
-    iop_outbox_push_nolock(s, msg);
-    qemu_mutex_unlock_iothread();
-    qemu_mutex_lock(&s->mutex);
-}
-
-static inline bool iop_outbox_empty(AppleANSState *s)
-{
-    return QTAILQ_EMPTY(&s->outbox);
-}
-
-static inline uint32_t iop_outbox_flags(AppleANSState *s)
-{
-    uint32_t flags = 0;
-
-    if (iop_outbox_empty(s)) {
-        flags = A7V4_MSG_FLAG_LAST;
-    } else {
-        flags = A7V4_MSG_FLAG_NOTLAST;
-    }
-
-    return flags;
-}
-
-static void iop_handle_mgmt_msg(AppleANSState *s, iop_message_t msg)
-{
-    switch (s->ep0_status) {
-    case EP0_WAIT_HELLO:
-        if (msg->type == MSG_RECV_HELLO) {
-            iop_message_t m = g_new0(struct iop_message, 1);
-            m->type = MSG_TYPE_ROLLCALL;
-            m->rollcall.epMask = (1 << 0); /* Register ANS2Endpoint1 */
-            m->rollcall.epBlock = 1;
-            m->rollcall.epEnded = true;
-            iop_outbox_push(s, m);
-            s->ep0_status = EP0_WAIT_ROLLCALL;
-        } else
-            ANS_LOG_MSG(s, msg);
-        break;
-
-    case EP0_WAIT_ROLLCALL:
-        if (msg->type == MSG_TYPE_ROLLCALL) {
-            iop_message_t m = g_new0(struct iop_message, 1);
-            m->type = MSG_TYPE_POWER;
-            m->power.state = 32;
-            s->ep0_status = EP0_WAIT_POWERACK;
-            iop_outbox_push(s, m);
-        } else
-            ANS_LOG_MSG(s, msg);
-        break;
-
-    case EP0_WAIT_POWERACK:
-        if (msg->type == MSG_TYPE_POWERACK) {
-            iop_message_t m = g_new0(struct iop_message, 1);
-            m->type = MSG_TYPE_POWERACK;
-            m->power.state = msg->power.state;
-            s->ep0_status = EP0_DONE;
-            iop_outbox_push(s, m);
-        } else
-            ANS_LOG_MSG(s, msg);
-        break;
-
-    default:
-        ANS_LOG_MSG(s, msg);
-        break;
-    }
-
-    g_free(msg);
-}
-
-static void *iop_thread_fn(void *opaque)
-{
-    AppleANSState *s = APPLE_ANS(opaque);
-
-    while (true) {
-        bool has_work, stopped;
-
-        WITH_QEMU_LOCK_GUARD(&s->mutex) {
-            stopped = s->stopping;
-            has_work = !iop_inbox_empty(s);
-
-            if (stopped) {
-                break;
-            }
-
-            if (has_work) {
-                iop_message_t msg = iop_inbox_get(s);
-                switch (msg->endpoint) {
-                case 0:
-                    iop_handle_mgmt_msg(s, msg);
-                    break;
-                default:
-                    qemu_log_mask(LOG_GUEST_ERROR,
-                                    "ANS2: Skipping message to unknown endpoint: %d\n",
-                                    msg->endpoint);
-                    g_free(msg);
-                }
-
-                if (iop_inbox_empty(s)) {
-                    qemu_mutex_unlock(&s->mutex);
-                    qemu_mutex_lock_iothread();
-                    qemu_irq_raise(s->irqs[IRQ_IOP_INBOX]);
-                    qemu_mutex_unlock_iothread();
-                    qemu_mutex_lock(&s->mutex);
-                }
-            } else {
-                qemu_cond_wait(&s->iop_halt, &s->mutex);
-            }
-        }
-    }
-
-    return NULL;
-}
-
-static void iop_akf_reg_write(void *opaque, hwaddr addr,
-                              uint64_t data, unsigned size)
-{
-    AppleANSState *s = APPLE_ANS(opaque);
-
-    WITH_QEMU_LOCK_GUARD(&s->mutex) {
-        switch (addr) {
-        case REG_AKF_CONFIG:
-            s->config = data;
-            return;
-
-        case REG_A7V4_CPU_CTRL:
-            if (data & REG_A7V4_CPU_CTRL_RUN) {
-                uint32_t config;
-                iop_message_t msg;
-
-                s->cpu_ctrl = data;
-                msg = g_new0(struct iop_message, 1);
-                msg->type = MSG_SEND_HELLO;
-                msg->hello.major = 11;
-                msg->hello.minor = 11;
-                msg->endpoint = 0;
-                s->ep0_status = EP0_WAIT_HELLO;
-
-                config = pci_default_read_config(PCI_DEVICE(&s->nvme),
-                                                 PCI_COMMAND, 4);
-                config |= 0x0002 | 0x0004; /* memory | bus */
-                pci_default_write_config(PCI_DEVICE(&s->nvme),
-                                            PCI_COMMAND, config, 4);
-                assert(PCI_DEVICE(&s->nvme)->bus_master_enable_region.enabled);
-
-                iop_outbox_push_nolock(s, msg);
-            }
-            return;
-
-        case REG_A7V4_A2I_MSG0:
-            s->inboxBuffer[0] = data;
-            return;
-
-        case REG_A7V4_A2I_MSG1:
-            {
-                iop_message_t msg;
-
-                s->inboxBuffer[1] = data;
-                msg = g_new0(struct iop_message, 1);
-                memcpy(msg->data, s->inboxBuffer, sizeof(s->inboxBuffer));
-                iop_inbox_push(s, msg);
-                return;
-            }
-
-        case REG_A7V4_OUTBOX_CTRL:
-            if (data & REG_A7V4_OUTBOX_CTRL_ENABLE) {
-                s->outboxEnable = true;
-            } else {
-                s->outboxEnable = false;
-            }
-            return;
-
-        default:
-            break;
-        }
-
-        qemu_log_mask(LOG_GUEST_ERROR,
-                      "ANS2: AppleA7IOP AKF unknown reg WRITE @ 0x"
-                      TARGET_FMT_plx " value: 0x" TARGET_FMT_plx "\n",
-                      addr, data);
-    }
-}
-
-static uint64_t iop_akf_reg_read(void *opaque, hwaddr addr, unsigned size)
-{
-    AppleANSState *s = APPLE_ANS(opaque);
-    WITH_QEMU_LOCK_GUARD(&s->mutex) {
-        iop_message_t m;
-        uint64_t ret = 0;
-
-        switch (addr) {
-        case REG_AKF_CONFIG:
-            return s->config;
-
-        case REG_A7V4_CPU_CTRL:
-            return s->cpu_ctrl;
-
-        case REG_A7V4_I2A_MSG0:
-            m = QTAILQ_FIRST(&s->outbox);
-            assert(m);
-            return m->data[0];
-
-        case REG_A7V4_I2A_MSG1:
-            m = QTAILQ_FIRST(&s->outbox);
-            assert(m);
-
-            QTAILQ_REMOVE(&s->outbox, m, entry);
-            m->flags = iop_outbox_flags(s);
-            ret = m->data[1];
-
-            if (iop_outbox_empty(s)) {
-                qemu_irq_lower(s->irqs[IRQ_IOP_OUTBOX]);
-            }
-
-            g_free(m);
-            return ret;
-
-        case REG_A7V4_INBOX_CTRL:
-            if (iop_inbox_empty(s)) {
-                ret |= REG_A7V4_INBOX_CTRL_EMPTY;
-            }
-            return ret;
-
-        case REG_A7V4_OUTBOX_CTRL:
-            if (iop_outbox_empty(s)) {
-                ret |= REG_A7V4_OUTBOX_CTRL_EMPTY;
-            } else {
-                ret |= REG_A7V4_OUTBOX_CTRL_HAS_MSG;
-            }
-
-            if (s->outboxEnable) {
-                ret |= REG_A7V4_OUTBOX_CTRL_ENABLE;
-            }
-            return ret;
-
-        default:
-            break;
-        }
-
-        qemu_log_mask(LOG_UNIMP, "ANS2: AppleA7IOP AKF unknown reg READ @ 0x"
-                      TARGET_FMT_plx "\n", addr);
-    }
-
-    return 0;
-}
-
-static const MemoryRegionOps iop_akf_reg_ops = {
-    .write = iop_akf_reg_write,
-    .read = iop_akf_reg_read,
-    .endianness = DEVICE_NATIVE_ENDIAN,
-    .valid.min_access_size = 4,
-    .valid.max_access_size = 8,
-    .impl.min_access_size = 4,
-    .impl.max_access_size = 8,
-    .valid.unaligned = false,
+    NvmeCtrl nvme;
+    uint32_t nvme_interrupt_idx;
 };
 
 static void ascv2_core_reg_write(void *opaque, hwaddr addr,
@@ -377,7 +97,25 @@ static void apple_ans_set_irq(void *opaque, int irq_num, int level)
     qemu_set_irq(s->irqs[s->nvme_interrupt_idx], level);
 }
 
-SysBusDevice *apple_ans_create(DTBNode *node)
+static void apple_ans_start(void *opaque)
+{
+    AppleANSState *s = APPLE_ANS(opaque);
+    uint32_t config;
+
+    config = pci_default_read_config(PCI_DEVICE(&s->nvme),
+                                     PCI_COMMAND, 4);
+    config |= 0x0002 | 0x0004; /* memory | bus */
+    pci_default_write_config(PCI_DEVICE(&s->nvme),
+                             PCI_COMMAND, config, 4);
+    assert(PCI_DEVICE(&s->nvme)->bus_master_enable_region.enabled);
+}
+
+static const struct AppleIOPMailboxOps ans_mailbox_ops = {
+    .start = apple_ans_start,
+    .wakeup = apple_ans_start,
+};
+
+SysBusDevice *apple_ans_create(DTBNode *node, uint32_t build_version)
 {
     DeviceState  *dev;
     AppleANSState *s;
@@ -387,6 +125,7 @@ SysBusDevice *apple_ans_create(DTBNode *node)
     DTBNode *child;
     DTBProp *prop;
     uint64_t *reg;
+    uint32_t protocol_version = 0;
     int i;
     uint32_t data;
     struct segment_range {
@@ -404,7 +143,16 @@ SysBusDevice *apple_ans_create(DTBNode *node)
     sbd = SYS_BUS_DEVICE(dev);
     pex = PCIE_HOST_BRIDGE(dev);
 
-    qemu_mutex_init(&s->mutex);
+    switch (BUILD_VERSION_MAJOR(build_version)) {
+        case 14:
+            protocol_version = 11;
+            break;
+        case 15:
+            protocol_version = 12;
+            break;
+        default:
+            break;
+    }
     prop = get_dtb_prop(node, "reg");
     assert(prop);
 
@@ -415,10 +163,8 @@ SysBusDevice *apple_ans_create(DTBNode *node)
      * 1: AppleASCWrapV2 coreRegisterMap
      * 2: AppleA7IOP autoBootRegMap
      */
-    s->iomems[0] = g_new(MemoryRegion, 1);
-    memory_region_init_io(s->iomems[0], OBJECT(dev), &iop_akf_reg_ops, s,
-                          TYPE_APPLE_ANS ".akf-reg", reg[1]);
-    sysbus_init_mmio(sbd, s->iomems[0]);
+    s->mbox = apple_iop_mailbox_create("ANS2", s, reg[1], protocol_version, &ans_mailbox_ops);
+    sysbus_init_mmio(sbd, sysbus_mmio_get_region(SYS_BUS_DEVICE(s->mbox), 0));
 
     s->iomems[1] = g_new(MemoryRegion, 1);
     memory_region_init_io(s->iomems[1], OBJECT(dev), &ascv2_core_reg_ops, s,
@@ -430,13 +176,10 @@ SysBusDevice *apple_ans_create(DTBNode *node)
                           TYPE_APPLE_ANS ".iop-autoboot-reg", reg[5]);
     sysbus_init_mmio(sbd, s->iomems[2]);
 
-    for (i = 0; i < 5; i++) {
+    sysbus_pass_irq(sbd, SYS_BUS_DEVICE(s->mbox));
+    for (i = 0; i < 2; i++) {
         sysbus_init_irq(sbd, &s->irqs[i]);
     }
-
-    QTAILQ_INIT(&s->inbox);
-    QTAILQ_INIT(&s->outbox);
-    qemu_cond_init(&s->iop_halt);
 
     child = get_dtb_child_node_by_name(node, "iop-ans-nub");
     assert(child);
@@ -469,7 +212,7 @@ SysBusDevice *apple_ans_create(DTBNode *node)
     prop = get_dtb_prop(node, "nvme-interrupt-idx");
     assert(prop);
 
-    s->nvme_interrupt_idx = *(uint32_t *)prop->value;
+    s->nvme_interrupt_idx = *(uint32_t *)prop->value - 3;
     object_initialize_child(OBJECT(dev), "nvme", &s->nvme, TYPE_NVME);
 
     object_property_set_str(OBJECT(&s->nvme), "serial",
@@ -502,22 +245,14 @@ static void apple_ans_realize(DeviceState *dev, Error **errp)
 
     pci_realize_and_unref(PCI_DEVICE(&s->nvme), pci->bus, &error_fatal);
 
-    if (iop_inbox_empty(s)) {
-        qemu_irq_raise(s->irqs[IRQ_IOP_INBOX]);
-    }
-
-    qemu_thread_create(&s->iop_thread, "ans-iop", iop_thread_fn,
-                       (void *)s, QEMU_THREAD_JOINABLE);
+    sysbus_realize(SYS_BUS_DEVICE(s->mbox), errp);
 }
 
 static void apple_ans_unrealize(DeviceState *dev)
 {
     AppleANSState *s = APPLE_ANS(dev);
 
-    WITH_QEMU_LOCK_GUARD(&s->mutex) {
-        s->stopping = true;
-    }
-    qemu_cond_broadcast(&s->iop_halt);
+    qdev_unrealize(DEVICE(s->mbox));
 }
 
 static void apple_ans_class_init(ObjectClass *klass, void *data)

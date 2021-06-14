@@ -14,6 +14,7 @@ source i2c/Kconfig
 source ide/Kconfig
 source input/Kconfig
 source intc/Kconfig
+source iop/Kconfig
 source ipack/Kconfig
 source ipmi/Kconfig
 source isa/Kconfig

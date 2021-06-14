@@ -1,0 +1,1 @@
+specific_ss.add(when: ['CONFIG_SOFTMMU', 'TARGET_AARCH64'], if_true: files('mailbox.c'))
