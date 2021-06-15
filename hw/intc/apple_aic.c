@@ -464,6 +464,9 @@ SysBusDevice *apple_aic_create(uint32_t numCPU, DTBNode *node)
 
     dev = qdev_new(TYPE_APPLE_AIC);
     s = APPLE_AIC(dev);
+    prop = get_dtb_prop(node, "AAPL,phandle");
+    assert(prop);
+    s->phandle = *(uint32_t *)prop->value;
     prop = get_dtb_prop(node, "reg");
     assert(prop != NULL);
     reg = (hwaddr *)prop->value;

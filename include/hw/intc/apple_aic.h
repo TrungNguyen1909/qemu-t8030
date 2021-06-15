@@ -115,6 +115,7 @@ struct AppleAICState {
     SysBusDevice parent_obj;
     QEMUTimer *timer;
     QemuMutex mutex;
+    uint32_t phandle;
     uint32_t base_size;
     size_t numEIR;
     size_t numIRQ;
