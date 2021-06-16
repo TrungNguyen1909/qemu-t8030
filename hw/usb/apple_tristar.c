@@ -1,5 +1,5 @@
 #include "qemu/osdep.h"
-#include "hw/usb/apple-tristar.h"
+#include "hw/usb/apple_tristar.h"
 #include "hw/i2c/i2c.h"
 #include "hw/irq.h"
 #include "migration/vmstate.h"
@@ -291,16 +291,36 @@ enum {
 	    FIFO_FILL_STATUS_FIFO_RD_LVL_mask	= (127 << FIFO_FILL_STATUS_FIFO_RD_LVL_shift),
 };
 
+static uint8_t calculateCRC(uint8_t *data, size_t len)
+{
+    uint8_t crc = 0xff;
+    size_t i, j;
+    for (i = 0; i < len; i++) {
+        uint8_t v6 = data[i];
+        for (j = 0; j < 8; j++) {
+            uint8_t v8 = crc ^ v6;
+            crc >>= 1;
+            v6 >>= 1;
+            if (v8 & 1) {
+                crc ^= 0x8C;
+            }
+        }
+    }
+    return crc;
+}
+
 static void apple_tristar_update_irq(AppleTristarState *t)
 {
 	if (t->event0 & ~(t->mask)) {
 		if (!t->last_level) {
 			t->last_level = 1;
+			fprintf(stderr, "apple_tristar_update_irq: 1\n");
 			qemu_irq_raise(t->irq);
 		}
 	} else {
 		if (t->last_level) {
 			t->last_level = 0;
+            fprintf(stderr, "apple_tristar_update_irq: 0\n");
 			qemu_irq_lower(t->irq);
 		}
 	}
@@ -309,6 +329,7 @@ static void apple_tristar_update_irq(AppleTristarState *t)
 static uint8_t apple_tristar_reg_read(AppleTristarState *t, hwaddr addr)
 {
 	uint8_t val;
+	bool iflg = 0;
     
 	qemu_log_mask(LOG_UNIMP, "%s: addr: 0x" TARGET_FMT_plx "\n", __func__, addr);
 	
@@ -322,12 +343,17 @@ static uint8_t apple_tristar_reg_read(AppleTristarState *t, hwaddr addr)
     switch (addr) {
 	case EVENT0:
 		t->event0 = 0;
+		iflg = 1;
 		break;
 	case EVENT1:
 		t->event1 = 0;
+		iflg = 1;
 		break;
 	default:
 		break;
+    }
+    if (iflg) {
+        apple_tristar_update_irq(t);
     }
     return val;
 }
@@ -414,11 +440,17 @@ static int tristar_reg_i2c_send(I2CSlave *s, uint8_t data)
 static void tristar_reg_reset(AppleTristarState *t) {
     t->address = -1;
     t->mask = 0xff;
+    t->fifo[61] = 0xb1;
+    t->fifo[62] = 0x1;
 	t->fifo[63] = 0x74;
 	t->fifo[0] = 0x75;
+	t->fifo[1] = 0x10;
+	t->fifo[2] = 0x0c;
+	t->fifo[7] = calculateCRC(&t->fifo[0], 7);
 	t->rev = 0x8a;
 
-	t->status0 = STATUS0_IDBUS_CONNECTED | STATUS0_P_IN_STAT_insdet;
+	t->status0 = STATUS0_IDBUS_CONNECTED | STATUS0_SWITCH_EN | STATUS0_P_IN_STAT_insdet;
+	t->event0 = EVENT_RESP_VALID | EVENT_DIGITAL_ID | EVENT_CON_DET_L | EVENT_P_IN;
 }
 
 DeviceState *apple_tristar_create(DTBNode *node)

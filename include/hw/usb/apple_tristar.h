@@ -48,6 +48,9 @@ struct AppleTristarState {
             uint8_t con_det_smpl;       /* 0x1E */
             uint8_t rd_fifo;            /* 0x1F */
             uint8_t fifo[64];           /* 0x20 - 0x5f */
+            uint8_t fifo_ctrl1;         /* 0x60 */
+            uint8_t fifo_ctrl0;         /* 0x61 */
+            uint8_t fifo_fill_status;   /* 0x62 */
         };
     };
 

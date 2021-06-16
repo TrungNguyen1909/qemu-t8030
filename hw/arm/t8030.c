@@ -46,7 +46,7 @@
 #include "hw/block/apple_ans.h"
 #include "hw/gpio/apple_gpio.h"
 #include "hw/i2c/apple_i2c.h"
-#include "hw/usb/apple-tristar.h"
+#include "hw/usb/apple_tristar.h"
 #include "hw/usb/apple_otg.h"
 
 #include "hw/arm/exynos4210.h"
