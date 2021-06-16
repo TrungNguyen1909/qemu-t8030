@@ -1,5 +1,5 @@
 #include "qemu/osdep.h"
-#include "hw/usb/apple-otg.h"
+#include "hw/usb/apple_otg.h"
 #include "hw/irq.h"
 #include "migration/vmstate.h"
 #include "qemu/bitops.h"
@@ -19,11 +19,14 @@
 
 static void apple_otg_realize(DeviceState *dev, Error **errp)
 {
-    
+    AppleOTGState *s = APPLE_OTG(dev);
+    sysbus_realize(SYS_BUS_DEVICE(s->dwc2), errp);
+    sysbus_pass_irq(SYS_BUS_DEVICE(s), SYS_BUS_DEVICE(s->dwc2));
 }
 static void apple_otg_reset(DeviceState *dev)
 {
-
+    AppleOTGState *s = APPLE_OTG(dev);
+    qdev_reset_all_fn(s->dwc2);
 }
 static void phy_reg_write(void *opaque,
                   hwaddr addr,
@@ -75,23 +78,34 @@ static const MemoryRegionOps usbctl_reg_ops = {
     .read = usbctl_reg_read,
 };
 
-DeviceState *apple_otg_create(void)
+DeviceState *apple_otg_create(DTBNode *node)
 {
     DeviceState *dev;
     SysBusDevice *sbd;
     AppleOTGState *s;
+    DWC2State *dwc2;
+    DTBNode *child;
+    DTBProp  *prop;
 
     dev = qdev_new(TYPE_APPLE_OTG);
     sbd = SYS_BUS_DEVICE(dev);
     s = APPLE_OTG(dev);
 
-    s->phy = g_new(MemoryRegion, 1);
-    memory_region_init_io(s->phy, OBJECT(dev), &phy_reg_ops, s, TYPE_APPLE_OTG ".phy", sizeof(s->phy_reg));
-    sysbus_init_mmio(sbd, s->phy);
+    memory_region_init_io(&s->phy, OBJECT(dev), &phy_reg_ops, s, TYPE_APPLE_OTG ".phy", sizeof(s->phy_reg));
+    sysbus_init_mmio(sbd, &s->phy);
     *(uint32_t*)(s->phy_reg + rAUSB_USB20PHY_OTGSIG) |= (1 << 8); //cable connected
-    s->usbctl = g_new(MemoryRegion, 1);
-    memory_region_init_io(s->usbctl, OBJECT(dev), &usbctl_reg_ops, s, TYPE_APPLE_OTG ".usbctl", sizeof(s->usbctl_reg));
-    sysbus_init_mmio(sbd, s->usbctl);
+    memory_region_init_io(&s->usbctl, OBJECT(dev), &usbctl_reg_ops, s, TYPE_APPLE_OTG ".usbctl", sizeof(s->usbctl_reg));
+    sysbus_init_mmio(sbd, &s->usbctl);
+    child = get_dtb_child_node_by_name(node, "usb-device");
+    prop = get_dtb_prop(child, "reg");
+    dwc2 = DWC2_USB(qdev_new(TYPE_DWC2_USB));
+    assert(dwc2);
+    memory_region_init_alias(&s->dwc2_mr, OBJECT(dev), TYPE_APPLE_OTG ".dwc2",
+                        sysbus_mmio_get_region(SYS_BUS_DEVICE(dwc2), 0),
+                            0, ((uint64_t *)prop->value)[1]);
+    sysbus_init_mmio(sbd, &s->dwc2_mr);
+    assert(object_property_add_const_link(OBJECT(dwc2), "dma-mr", OBJECT(get_system_memory())));
+    s->dwc2 = dwc2;
     return dev;
 }
 

@@ -49,7 +49,6 @@ static const char *KEEP_COMP[] = {
     "iic,soft\0$",
     "dock,9pin\0$",
     "accbuck,fan53740\0$",
-    "tristar,cbtl1610\0$",
     "otgphyctrl,s8000\0otgphyctrl,s5l8960x\0$",
     "usb-complex,s8000\0usb-complex,s5l8960x\0$",
     "usb-device,s8000\0usb-device,t7000\0usb-device,s5l8900x\0$"
