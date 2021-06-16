@@ -77,7 +77,7 @@
 
 static void apple_gpio_update_pincfg(AppleGPIOState *s, int pin, uint32_t value)
 {
-    if (((value & INT_MASKED) != INT_MASKED) && ((value & INT_MASKED) != (s->gpio_cfg[pin] & INT_MASKED))) {
+    if ((value & INT_MASKED) != INT_MASKED) {
         int irqgrp = (value & INT_MASKED) >> INTR_GRP_SHIFT;
         clear_bit(pin, (unsigned long *)s->int_cfg[irqgrp]);
         switch (value & CFG_MASK) {
