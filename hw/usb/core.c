@@ -380,7 +380,9 @@ static void usb_process_one(USBPacket *p)
     nak = (p->status == USB_RET_NAK);
     p->status = USB_RET_SUCCESS;
 
-    if (p->ep->nr == 0) {
+    if (usb_device_can_handle_packet(dev)) {
+        usb_device_handle_packet(dev, p);
+    } else if (p->ep->nr == 0) {
         /* control pipe */
         if (p->parameter) {
             do_parameter(dev, p);

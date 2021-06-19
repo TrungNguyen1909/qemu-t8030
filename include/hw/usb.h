@@ -338,6 +338,17 @@ struct USBDeviceClass {
      */
     void (*handle_data)(USBDevice *dev, USBPacket *p);
 
+    /*
+     * Process packets.
+     * Called from handle_packet().
+     *
+     * If not null, all packets will be redirected here instead of
+     * handle_control and handle_data
+     * Status gets stored in p->status, and if p->status == USB_RET_SUCCESS
+     * then the number of bytes transferred is stored in p->actual_length
+     */
+    void (*handle_packet)(USBDevice *dev, USBPacket *p);
+
     void (*set_interface)(USBDevice *dev, int interface,
                           int alt_old, int alt_new);
 
@@ -568,6 +579,10 @@ void usb_device_handle_control(USBDevice *dev, USBPacket *p, int request,
                                int val, int index, int length, uint8_t *data);
 
 void usb_device_handle_data(USBDevice *dev, USBPacket *p);
+
+bool usb_device_can_handle_packet(USBDevice *dev);
+
+void usb_device_handle_packet(USBDevice *dev, USBPacket *p);
 
 void usb_device_set_interface(USBDevice *dev, int interface,
                               int alt_old, int alt_new);
