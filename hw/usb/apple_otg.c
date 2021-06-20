@@ -21,13 +21,18 @@ static void apple_otg_realize(DeviceState *dev, Error **errp)
 {
     AppleOTGState *s = APPLE_OTG(dev);
     sysbus_realize(SYS_BUS_DEVICE(s->dwc2), errp);
+    sysbus_realize(SYS_BUS_DEVICE(s->usbtcp), errp);
     sysbus_pass_irq(SYS_BUS_DEVICE(s), SYS_BUS_DEVICE(s->dwc2));
+    qdev_realize(DEVICE(s->dwc2->device), &s->usbtcp->bus.qbus, errp);
 }
+
 static void apple_otg_reset(DeviceState *dev)
 {
     AppleOTGState *s = APPLE_OTG(dev);
     qdev_reset_all_fn(s->dwc2);
+    qdev_reset_all_fn(s->usbtcp);
 }
+
 static void phy_reg_write(void *opaque,
                   hwaddr addr,
                   uint64_t data,
@@ -37,6 +42,7 @@ static void phy_reg_write(void *opaque,
     AppleOTGState *s = APPLE_OTG(opaque);
     memcpy(s->phy_reg + addr, &data, size);
 }
+
 static uint64_t phy_reg_read(void *opaque,
                      hwaddr addr,
                      unsigned size)
@@ -47,6 +53,7 @@ static uint64_t phy_reg_read(void *opaque,
     memcpy(&val, s->phy_reg + addr, size);
     return val;
 }
+
 static const MemoryRegionOps phy_reg_ops = {
     .write = phy_reg_write,
     .read = phy_reg_read,
@@ -104,8 +111,11 @@ DeviceState *apple_otg_create(DTBNode *node)
                         sysbus_mmio_get_region(SYS_BUS_DEVICE(dwc2), 0),
                             0, ((uint64_t *)prop->value)[1]);
     sysbus_init_mmio(sbd, &s->dwc2_mr);
-    assert(object_property_add_const_link(OBJECT(dwc2), "dma-mr", OBJECT(get_system_memory())));
+    memory_region_init_alias(&s->dma_mr, OBJECT(dev), TYPE_APPLE_OTG ".dma-mr", get_system_memory(), 0x800000000, UINT32_MAX);
+    assert(object_property_add_const_link(OBJECT(dwc2), "dma-mr", OBJECT(&s->dma_mr)));
     s->dwc2 = dwc2;
+
+    s->usbtcp = USB_TCP_HOST(qdev_new(TYPE_USB_TCP_HOST));
     return dev;
 }
 

@@ -5,6 +5,7 @@
 #include "qom/object.h"
 #include "hw/arm/xnu_dtb.h"
 #include "hw/usb/hcd-dwc2.h"
+#include "hw/usb/hcd-tcp.h"
 
 #define TYPE_APPLE_OTG "apple.otg"
 OBJECT_DECLARE_SIMPLE_TYPE(AppleOTGState, APPLE_OTG)
@@ -16,7 +17,9 @@ struct AppleOTGState {
     MemoryRegion usbctl;
     uint8_t      usbctl_reg[0x1000];
     MemoryRegion dwc2_mr;
+    MemoryRegion dma_mr;
     DWC2State    *dwc2;
+    struct USBTCPHostState *usbtcp;
 };
 
 DeviceState *apple_otg_create(DTBNode *node);
