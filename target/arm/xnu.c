@@ -51,7 +51,7 @@ static const char *KEEP_COMP[] = {
     "accbuck,fan53740\0$",
     "otgphyctrl,s8000\0otgphyctrl,s5l8960x\0$",
     "usb-complex,s8000\0usb-complex,s5l8960x\0$",
-    "usb-device,s8000\0usb-device,t7000\0usb-device,s5l8900x\0$"
+    "usb-device,s5l8900x\0$"
 };
 
 static const char *REM_NAMES[] = {

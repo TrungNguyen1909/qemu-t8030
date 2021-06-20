@@ -1293,6 +1293,7 @@ static void T8030_create_usb(MachineState *machine)
     add_dtb_prop(complex, "no-pmu", 4, (uint8_t*)&value);
 
     assert(device = add_dtb_node(complex, "usb-device"));
+    add_dtb_prop(device, "disable-charger-detect", sizeof(value), (uint8_t *)&value);
     add_dtb_prop(device, "phy-interface", 4, (uint8_t*)&(uint32_t[]){ 0x8 });
     add_dtb_prop(device, "publish-criteria", 4, (uint8_t*)&(uint32_t[]){ 0x3 });
     add_dtb_prop(device, "configuration-string", 16, (uint8_t*)"standardBringup");
@@ -1304,14 +1305,14 @@ static void T8030_create_usb(MachineState *machine)
     add_dtb_prop(device, "interrupt-parent", 4, (uint8_t*)&(uint32_t[]){ APPLE_AIC(tms->aic)->phandle });
     add_dtb_prop(device, "vendor-id", 4, (uint8_t*)&(uint32_t[]){ 0x5ac });
     add_dtb_prop(device, "vendor-string", 11, (uint8_t*)"Apple Inc.");
-    add_dtb_prop(device, "compatible", 54, (uint8_t*)"usb-device,s8000\0usb-device,t7000\0usb-device,s5l8900x");
+    add_dtb_prop(device, "compatible", 20, (uint8_t*)"usb-device,s5l8900x");
 
     add_dtb_prop(device, "interrupts", 4, (uint8_t*)&(uint32_t[]){ ((uint32_t*)get_dtb_prop(drd, "interrupts")->value)[0] });
     add_dtb_prop(device, "product-id", 4, (uint8_t*)&(uint32_t[]){ 0x12a8 });
     add_dtb_prop(device, "ahb-burst", 4, (uint8_t*)&(uint32_t[]){ 0xe });
     add_dtb_prop(device, "product-version", 4, (uint8_t*)&(uint32_t[]){ 0x1201 });
     add_dtb_prop(device, "clock-mask", 4, (uint8_t*)&(uint32_t[]){ 0x2 });
-    add_dtb_prop(device, "fifo-depth", 4, (uint8_t*)&(uint32_t[]){ 0x1000 });
+    add_dtb_prop(device, "fifo-depth", 4, (uint8_t*)&(uint32_t[]){ 0x820 });
     add_dtb_prop(device, "eps-dir-bitmap", 4, (uint8_t*)&(uint32_t[]){ 0x264 });
     add_dtb_prop(device, "device-type", 11, (uint8_t*)"usb-device");
     add_dtb_prop(device, "reg", 16, (uint8_t*)&(uint64_t[]){
@@ -1328,7 +1329,7 @@ static void T8030_create_usb(MachineState *machine)
     sysbus_realize_and_unref(SYS_BUS_DEVICE(otg), &error_fatal);
 
     sysbus_connect_irq(SYS_BUS_DEVICE(otg), 0, qdev_get_gpio_in(DEVICE(tms->aic),
-                       ((uint64_t*)get_dtb_prop(device, "interrupts")->value)[0]));
+                       ((uint64_t *)get_dtb_prop(device, "interrupts")->value)[0]));
 }
 
 static void T8030_cpu_reset(void *opaque)
