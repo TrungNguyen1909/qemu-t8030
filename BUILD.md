@@ -267,27 +267,33 @@ export PATH=$PATH:/binpack64/usr/bin:/binpack64/bin:/binpack64/usr/sbin:/binpack
 ```
 
 ----
-## Connect to device over USB
+## Connect to iOS emulator over USB
 
-The USB-over-TCP Protocol will run on port 7632 by default.
+This requires another Linux VM to connect to an iOS VM.
 
-Run a Linux QEMU instance as a USB host:
-(Here I will use Arch Linux installer ISO, but it doesn't really matter a lot)
+Note that the USB-over-TCP Protocol will run on port `7632` by default.
+
+### Run a Linux VM as USB host
+
+You can use any QEMU Linux VM. Example below uses Arch Linux installer ISO
 
 ```shell
-qemu-t8030/build/qemu-system-x86_64 -cdrom /Users/trung/Downloads/archlinux-2021.06.01-x86_64.iso -boot order=d -m 1024 -vga virtio -cpu qemu64 -usb -device usb-tcp-remote,bus=usb-bus.0
+./qemu-system-x86_64 -cdrom archlinux-2021.06.01-x86_64.iso -boot order=d -m 1024 -vga virtio -cpu qemu64 -usb -device usb-tcp-remote,bus=usb-bus.0
 ```
 
-Then boot iOS normally, the iOS QEMU instance will automatically connect to port 7632.
+### Start iOS VM
 
-When iOS booted, you can access your device over USB through Linux.
+Start an iOS QEMU instance, which will automatically connect to port `7632`.
 
-Currently, only `lsusb` is known to be able to detect the device.
+### Connect to iOS VM
 
-Other tools (`libimobiledevice`,...) is not yet supported.
+From inside the Linux VM, you can access to the iOS VM over USB.
+
+Currently, only `lsusb` is known to be able to detect the iOS device.
+
+Other tools such as `libimobiledevice` are not yet supported.
 
 ----
-
 ## Add a new binary to binpack64/bin in firmware
 
 ### Build binary - require Xcode on macOS
