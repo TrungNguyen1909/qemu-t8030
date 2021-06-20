@@ -85,9 +85,11 @@ static void apple_aic_reset(DeviceState *dev)
 
     /* mask all IRQs */
     memset(s->eir_mask, 0xffff, sizeof(uint32_t) * s->numEIR);
+
 #ifdef AIC_DEBUG_NEW_IRQ
     memset(s->eir_mask_once, 0xffff, sizeof(uint32_t) * s->numEIR);
 #endif
+
     /* dest default to 0 */
     memset(s->eir_dest, 0, sizeof(uint32_t) * s->numIRQ);
 
@@ -239,11 +241,14 @@ static void apple_aic_write(void *opaque,
         case rAIC_EIR_MASK_CLR(0) ... rAIC_EIR_MASK_CLR(kAIC_NUM_EIRS):
             {
                 uint32_t eir = (addr - rAIC_EIR_MASK_CLR(0)) / 4;
+
                 if (unlikely(eir >= s->numEIR)) {
                     break;
                 }
+
                 s->eir_mask[eir] &= ~val;
-                #ifdef AIC_DEBUG_NEW_IRQ
+
+#ifdef AIC_DEBUG_NEW_IRQ
                 if ((s->eir_mask[eir] | s->eir_mask_once[eir]) != s->eir_mask[eir]) {
                     for (int i = 0; i < 32; i++) {
                         if ((s->eir_mask[eir] & (1 << i)) == 0 && (s->eir_mask_once[eir] & (1 << i)) != 0) {
@@ -252,7 +257,7 @@ static void apple_aic_write(void *opaque,
                     }
                 }
                 s->eir_mask_once[eir] = s->eir_mask[eir];
-                #endif
+#endif
             }
             break;
 
@@ -435,11 +440,13 @@ static void apple_aic_init(Object *obj)
     }
 
     qdev_init_gpio_in(DEVICE(obj), apple_aic_set_irq, s->numIRQ);
+
     assert(s->numCPU > 0);
 
     s->eir_mask = g_malloc0(sizeof(uint32_t) * s->numEIR);
     s->eir_dest = g_malloc0(sizeof(uint32_t) * s->numIRQ);
     s->eir_state = g_malloc0(sizeof(bool) * s->numIRQ);
+
 #ifdef AIC_DEBUG_NEW_IRQ
     s->eir_mask_once = g_malloc0(sizeof(uint32_t) * s->numEIR);
 #endif

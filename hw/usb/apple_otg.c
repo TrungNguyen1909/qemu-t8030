@@ -38,7 +38,8 @@ static void phy_reg_write(void *opaque,
                   uint64_t data,
                   unsigned size)
 {
-    fprintf(stderr, "OTG: phy reg WRITE @ 0x" TARGET_FMT_plx " value: 0x" TARGET_FMT_plx "\n", addr, data);    
+    fprintf(stderr, "OTG: phy reg WRITE @ 0x" TARGET_FMT_plx " value: 0x" TARGET_FMT_plx "\n", addr, data);
+
     AppleOTGState *s = APPLE_OTG(opaque);
     memcpy(s->phy_reg + addr, &data, size);
 }
@@ -50,6 +51,7 @@ static uint64_t phy_reg_read(void *opaque,
     fprintf(stderr, "OTG: phy reg READ @ 0x" TARGET_FMT_plx "\n", addr);
     AppleOTGState *s = APPLE_OTG(opaque);
     uint64_t val = 0;
+
     memcpy(&val, s->phy_reg + addr, size);
     return val;
 }
@@ -64,8 +66,9 @@ static void usbctl_reg_write(void *opaque,
                   uint64_t data,
                   unsigned size)
 {
-    fprintf(stderr, "OTG: usbctl reg WRITE @ 0x" TARGET_FMT_plx " value: 0x" TARGET_FMT_plx "\n", addr, data);    
+    fprintf(stderr, "OTG: usbctl reg WRITE @ 0x" TARGET_FMT_plx " value: 0x" TARGET_FMT_plx "\n", addr, data);
     AppleOTGState *s = APPLE_OTG(opaque);
+
     memcpy(s->usbctl_reg + addr, &data, size);
 }
 
@@ -76,6 +79,7 @@ static uint64_t usbctl_reg_read(void *opaque,
     fprintf(stderr, "OTG: usbctl reg READ @ 0x" TARGET_FMT_plx "\n", addr);
     AppleOTGState *s = APPLE_OTG(opaque);
     uint64_t val = 0;
+
     memcpy(&val, s->usbctl_reg + addr, size);
     return val;
 }
@@ -109,13 +113,14 @@ DeviceState *apple_otg_create(DTBNode *node)
     assert(dwc2);
     memory_region_init_alias(&s->dwc2_mr, OBJECT(dev), TYPE_APPLE_OTG ".dwc2",
                         sysbus_mmio_get_region(SYS_BUS_DEVICE(dwc2), 0),
-                            0, ((uint64_t *)prop->value)[1]);
+                        0, ((uint64_t *)prop->value)[1]);
     sysbus_init_mmio(sbd, &s->dwc2_mr);
     memory_region_init_alias(&s->dma_mr, OBJECT(dev), TYPE_APPLE_OTG ".dma-mr", get_system_memory(), 0x800000000, UINT32_MAX);
     assert(object_property_add_const_link(OBJECT(dwc2), "dma-mr", OBJECT(&s->dma_mr)));
     s->dwc2 = dwc2;
 
     s->usbtcp = USB_TCP_HOST(qdev_new(TYPE_USB_TCP_HOST));
+
     return dev;
 }
 

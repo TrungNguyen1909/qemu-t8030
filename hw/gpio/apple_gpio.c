@@ -79,7 +79,9 @@ static void apple_gpio_update_pincfg(AppleGPIOState *s, int pin, uint32_t value)
 {
     if ((value & INT_MASKED) != INT_MASKED) {
         int irqgrp = (value & INT_MASKED) >> INTR_GRP_SHIFT;
+
         clear_bit(pin, (unsigned long *)s->int_cfg[irqgrp]);
+
         switch (value & CFG_MASK) {
         case CFG_INT_LVL_HI:
             if (test_bit(pin, (unsigned long *)s->in)) {
@@ -97,7 +99,9 @@ static void apple_gpio_update_pincfg(AppleGPIOState *s, int pin, uint32_t value)
         }
         qemu_set_irq(s->irqs[irqgrp], find_first_bit((unsigned long *)s->int_cfg[irqgrp], s->npins) != s->npins);
     }
+
     s->gpio_cfg[pin] = value;
+
     if (value & FUNC_MASK) {
         // TODO: Is this how FUNC_ALT0 supposed to behave?
         switch (value & FUNC_MASK) {
@@ -139,6 +143,7 @@ static void apple_gpio_set(void *opaque, int pin, int level)
     grp = pin >> 5;
     if ((s->gpio_cfg[pin] & INT_MASKED) != INT_MASKED) {
         irqgrp = (s->gpio_cfg[pin] & INT_MASKED) >> INTR_GRP_SHIFT;
+
         switch (s->gpio_cfg[pin] & CFG_MASK) {
         case CFG_GP_IN:
         case CFG_GP_OUT:
@@ -178,7 +183,9 @@ static void apple_gpio_set(void *opaque, int pin, int level)
             break;
         }
     }
+
     s->old_in[grp] = s->in[grp];
+
     if (irqgrp != -1) {
         qemu_set_irq(s->irqs[irqgrp], find_first_bit((unsigned long *)s->int_cfg[irqgrp], s->npins) != s->npins);
     }

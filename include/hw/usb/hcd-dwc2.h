@@ -179,7 +179,7 @@ struct DWC2State {
     };
 
 #define DWC2_DIEPREG_SIZE   (0x20 * DWC2_NB_EP)
-    uint32_t diepreg[DWC2_DIEPREG_SIZE / sizeof(uint32_t)];
+uint32_t diepreg[DWC2_DIEPREG_SIZE / sizeof(uint32_t)];
 
 #define diepctl(_ch)    diepreg[((_ch) << 3) + 0]     /* 900, 920, ... */
 #define diepint(_ch)    diepreg[((_ch) << 3) + 2]     /* 908, 928, ... */

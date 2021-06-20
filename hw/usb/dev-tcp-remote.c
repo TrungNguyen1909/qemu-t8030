@@ -18,6 +18,7 @@
 static USBTCPInflightPacket *usb_tcp_remote_find_inflight_packet(USBTCPRemoteState *s, int pid, uint8_t ep, uint64_t id)
 {
     USBTCPInflightPacket *p;
+
     WITH_QEMU_LOCK_GUARD(&s->queue_mutex) {
         QTAILQ_FOREACH(p, &s->queue, queue) {
             if (p->p->pid == pid && p->p->ep->nr == ep && p->p->id == id) {
@@ -25,6 +26,7 @@ static USBTCPInflightPacket *usb_tcp_remote_find_inflight_packet(USBTCPRemoteSta
             }
         }
     }
+
     return NULL;
 }
 
@@ -47,14 +49,17 @@ static void usb_tcp_remote_closed(USBTCPRemoteState *s)
 {
     /* fprintf(stderr, "%s\n", __func__); */
     close(s->fd);
+
     s->fd = -1;
     s->closed = true;
     s->addr = 0;
 
     usb_tcp_remote_clean_inflight_queue(s);
+
     if (USB_DEVICE(s)->attached) {
         usb_device_detach(USB_DEVICE(s));
     }
+
     qemu_cond_broadcast(&s->cond);
 }
 
@@ -62,14 +67,17 @@ static int usb_tcp_remote_read(USBTCPRemoteState *s, void *buffer, unsigned int 
 {
     int ret = 0;
     int n = 0;
+
     while (n < length) {
         ret = read(s->fd, (char *)buffer + n, length - n);
         if (ret <= 0) {
             usb_tcp_remote_closed(s);
             return -errno;
         }
+
         n += ret;
     }
+
     return n;
 }
 
@@ -77,25 +85,31 @@ static int usb_tcp_remote_write(USBTCPRemoteState *s, void *buffer, unsigned int
 {
     int ret = 0;
     int n = 0;
+
     while (n < length) {
         ret = write(s->fd, (char *)buffer + n, length - n);
         if (ret <= 0) {
             usb_tcp_remote_closed(s);
             return -errno;
         }
+
         n += ret;
     }
+
     return n;
 }
 
 static void *usb_tcp_remote_read_thread(void *opaque)
 {
     USBTCPRemoteState *s = USB_TCP_REMOTE(opaque);
+
     while (!s->closed) {
         tcp_usb_header_t hdr = { 0 };
+
         if (usb_tcp_remote_read(s, &hdr, sizeof(hdr)) < sizeof(hdr)) {
             break;
         }
+
         switch (hdr.type) {
         case TCP_USB_RESPONSE: {
             tcp_usb_response_header rhdr = { 0 };
@@ -117,7 +131,7 @@ static void *usb_tcp_remote_read_thread(void *opaque)
             } else {
                 fprintf(stderr,
                         "%s: TCP_USB_RESPONSE "
-                        "Invalid packet pid: 0x%x ep: 0x%x id: 0x%llx\n",
+                        "Invalid packet pid: 0x%x ep: 0x%x id: 0x%" PRIx64 "\n",
                         __func__, rhdr.pid, rhdr.ep, rhdr.id);
                 usb_tcp_remote_closed(s);
                 break;
@@ -136,6 +150,7 @@ static void *usb_tcp_remote_read_thread(void *opaque)
             } else {
                 p->actual_length = 0;
             }
+
             p->status = rhdr.status;
             if (p->state == USB_PACKET_ASYNC) {
                 if (p->status != USB_RET_SUCCESS
@@ -154,6 +169,7 @@ static void *usb_tcp_remote_read_thread(void *opaque)
             }
             break;
         }
+
         case TCP_USB_REQUEST:
         case TCP_USB_RESET:
         default:
@@ -162,6 +178,7 @@ static void *usb_tcp_remote_read_thread(void *opaque)
             break;
         }
     }
+
     return NULL;
 }
 
@@ -183,8 +200,11 @@ static void *usb_tcp_remote_thread(void *arg)
             }
 
             s->closed = 0;
+
             qemu_cond_broadcast(&s->cond);
+
             fprintf(stderr, "%s: USB device accepted!\n", __func__);
+
             usb_device_attach(USB_DEVICE(s), &error_abort);
             qemu_thread_create(&s->read_thread, TYPE_USB_TCP_REMOTE ".read", usb_tcp_remote_read_thread, s, QEMU_THREAD_JOINABLE);
         }
@@ -192,13 +212,18 @@ static void *usb_tcp_remote_thread(void *arg)
         while (!s->closed) {
             qemu_cond_wait(&s->cond, &s->mutex);
         }
+
         qemu_mutex_unlock(&s->mutex);
     }
+
     return NULL;
 }
 
 static void usb_tcp_remote_realize(USBDevice *dev, Error **errp)
 {
+    struct linger linger;
+    int enable = 1;
+    struct sockaddr_in ai;
     USBTCPRemoteState *s = USB_TCP_REMOTE(dev);
 
     dev->speed = USB_SPEED_FULL;
@@ -215,21 +240,19 @@ static void usb_tcp_remote_realize(USBDevice *dev, Error **errp)
     s->socket = -1;
     s->fd = -1;
     s->closed = true;
+
     s->socket = socket(AF_INET, SOCK_STREAM, 0);
     if (s->socket < 0) {
         error_setg(errp, "Cannot open socket: %d", s->socket);
         return;
     }
 
-    struct linger linger;
     linger.l_onoff = 0;
     linger.l_linger = 0;
     setsockopt(s->socket, SOL_SOCKET, SO_LINGER, &linger, sizeof(linger));
 
-    int enable = 1;
     setsockopt(s->socket, SOL_SOCKET, SO_REUSEADDR, &enable, sizeof(int));
 
-    struct sockaddr_in ai;
     ai.sin_family = AF_INET;
     ai.sin_port = htons(s->lport);
     ai.sin_addr.s_addr = INADDR_ANY;
@@ -238,10 +261,12 @@ static void usb_tcp_remote_realize(USBDevice *dev, Error **errp)
         error_setg(errp, "Cannot bind socket");
         return;
     }
+
     if (listen(s->socket, 5) < 0) {
         error_setg(errp, "Cannot listen on socket");
         return;
     }
+
     qemu_thread_create(&s->thread, TYPE_USB_TCP_REMOTE ".thread",
                        &usb_tcp_remote_thread, s, QEMU_THREAD_JOINABLE);
 }
@@ -249,31 +274,39 @@ static void usb_tcp_remote_realize(USBDevice *dev, Error **errp)
 static void usb_tcp_remote_unrealize(USBDevice *dev)
 {
     USBTCPRemoteState *s = USB_TCP_REMOTE(dev);
+
     if (s->socket >= 0) {
         close(s->socket);
         s->socket = -1;
     }
+
     if (s->fd >= 0) {
         close(s->fd);
         s->fd = -1;
     }
+
     s->closed = true;
+
     qemu_cond_broadcast(&s->cond);
+
     s->stopped = true;
     usb_tcp_remote_clean_inflight_queue(s);
 }
 
 static void usb_tcp_remote_handle_reset(USBDevice *dev)
 {
+    tcp_usb_header_t hdr = { 0 };
     USBTCPRemoteState *s = USB_TCP_REMOTE(dev);
+
     if (s->closed) {
         return;
     }
+
     /* fprintf(stderr, "%s\n", __func__); */
     usb_tcp_remote_clean_inflight_queue(s);
-    tcp_usb_header_t hdr = { 0 };
     s->addr = 0;
     hdr.type = TCP_USB_RESET;
+
     WITH_QEMU_LOCK_GUARD(&s->request_mutex) {
         usb_tcp_remote_write(s, &hdr, sizeof(hdr));
     }
@@ -286,6 +319,7 @@ static void usb_tcp_remote_handle_packet(USBDevice *dev, USBPacket *p)
     tcp_usb_request_header pkt = { 0 };
     USBTCPInflightPacket inflightPacket = { 0 };
     g_autofree void *buffer = NULL;
+
     if (s->closed) {
         p->status = USB_RET_STALL;
         return;
@@ -309,6 +343,7 @@ static void usb_tcp_remote_handle_packet(USBDevice *dev, USBPacket *p)
         /* qemu_hexdump(stderr, __func__, buffer, pkt.length); */
         if (p->pid == USB_TOKEN_SETUP && p->ep->nr == 0) {
             struct usb_control_packet *setup = (struct usb_control_packet *)buffer;
+
             if (setup->bRequest == USB_REQ_SET_ADDRESS) {
                 s->addr = setup->wValue;
             }
@@ -330,10 +365,12 @@ static void usb_tcp_remote_handle_packet(USBDevice *dev, USBPacket *p)
            p->status = USB_RET_STALL;
            goto out;
        }
+
        if (usb_tcp_remote_write(s, &pkt, sizeof(pkt)) < sizeof(pkt)) {
            p->status = USB_RET_STALL;
            goto out;
        }
+
        if (buffer) {
            if (usb_tcp_remote_write(s, buffer, pkt.length) < pkt.length) {
                p->status = USB_RET_STALL;
@@ -342,11 +379,12 @@ static void usb_tcp_remote_handle_packet(USBDevice *dev, USBPacket *p)
        }
    }
 
-    WITH_QEMU_LOCK_GUARD(&inflightPacket.m) {
-        while ((qatomic_read(&inflightPacket.handled) & 1) == 0) {
-            qemu_cond_wait(&inflightPacket.c, &inflightPacket.m);
-        }
-    }
+   WITH_QEMU_LOCK_GUARD(&inflightPacket.m) {
+       while ((qatomic_read(&inflightPacket.handled) & 1) == 0) {
+           qemu_cond_wait(&inflightPacket.c, &inflightPacket.m);
+       }
+   }
+
 out:
     if (p->status != USB_RET_SUCCESS && p->status != USB_RET_ASYNC && p->status != USB_RET_NAK) {
         s->addr = dev->addr;
@@ -360,6 +398,7 @@ out:
     WITH_QEMU_LOCK_GUARD(&s->queue_mutex) {
         QTAILQ_REMOVE(&s->queue, &inflightPacket, queue);
     }
+
     qemu_cond_destroy(&inflightPacket.c);
     qemu_mutex_destroy(&inflightPacket.m);
 }
@@ -384,8 +423,11 @@ static void usb_tcp_remote_dev_class_init(ObjectClass *klass, void *data)
     uc->handle_data    = NULL;
     uc->handle_packet  = usb_tcp_remote_handle_packet;
     uc->product_desc   = "QEMU USB Passthrough Device";
+
     dc->desc = "QEMU USB Passthrough Device";
+
     device_class_set_props(dc, usb_tcp_remote_properties);
+
     set_bit(DEVICE_CATEGORY_USB, dc->categories);
 }
 

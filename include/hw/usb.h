@@ -184,11 +184,11 @@
 
 /* binary representation */
 struct usb_control_packet {
-	uint8_t  bmRequestType;
-	uint8_t  bRequest;
-	uint16_t wValue;
-	uint16_t wIndex;
-	uint16_t wLength;
+    uint8_t  bmRequestType;
+    uint8_t  bRequest;
+    uint16_t wValue;
+    uint16_t wIndex;
+    uint16_t wLength;
 } QEMU_PACKED;
 
 typedef struct USBBusOps USBBusOps;
