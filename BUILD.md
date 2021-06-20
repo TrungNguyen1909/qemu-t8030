@@ -47,7 +47,7 @@ There is a `jtool2.ELF64` inside the package.
 git clone https://github.com/TrungNguyen1909/qemu-t8030
 cd qemu-tt8030
 mkdir build; cd build
-../configure --target-list=aarch64-softmmu --disable-capstone --disable-slirp
+../configure --target-list=aarch64-softmmu,x86_64-softmmu --disable-capstone --disable-slirp
 make -j$(nproc)
 ```
 
@@ -265,6 +265,26 @@ Run on iOS shell:
 ```sh
 export PATH=$PATH:/binpack64/usr/bin:/binpack64/bin:/binpack64/usr/sbin:/binpack64/sbin
 ```
+
+----
+## Connect to device over USB
+
+The USB-over-TCP Protocol will run on port 7632 by default.
+
+Run a Linux QEMU instance as a USB host:
+(Here I will use Arch Linux installer ISO, but it doesn't really matter a lot)
+
+```shell
+qemu-t8030/build/qemu-system-x86_64 -cdrom /Users/trung/Downloads/archlinux-2021.06.01-x86_64.iso -boot order=d -m 1024 -vga virtio -cpu qemu64 -usb -device usb-tcp-remote,bus=usb-bus.0
+```
+
+Then boot iOS normally, the iOS QEMU instance will automatically connect to port 7632.
+
+When iOS booted, you can access your device over USB through Linux.
+
+Currently, only `lsusb` is known to be able to detect the device.
+
+Other tools (`libimobiledevice`,...) is not yet supported.
 
 ----
 
