@@ -406,10 +406,10 @@ static const ARMCPRegInfo T8030_cp_reginfo_tcg[] = {
     T8030_CPREG_DEF(ARM64_REG_CTRR_A_UPR_EL1, 3, 4, 15, 2, 4, PL1_RW),
     T8030_CPREG_DEF(ARM64_REG_CTRR_CTL_EL1, 3, 4, 15, 2, 5, PL1_RW),
     T8030_CPREG_DEF(ARM64_REG_CTRR_LOCK_EL1, 3, 4, 15, 2, 2, PL1_RW),
-    
+
     //Cluster
-    {                                                                        
-        .cp = CP_REG_ARM64_SYSREG_CP,                                        
+    {
+        .cp = CP_REG_ARM64_SYSREG_CP,
         .name = "ARM64_REG_IPI_RR_LOCAL",
         .opc0 = 3, .opc1 = 5, .crn = 15, .crm = 0, .opc2 = 0,
         .access = PL1_W, .type = ARM_CP_IO | ARM_CP_NO_RAW,
@@ -417,8 +417,8 @@ static const ARMCPRegInfo T8030_cp_reginfo_tcg[] = {
         .readfn = arm_cp_read_zero,
         .writefn = T8030_ipi_rr_local
     },
-    {                                                                        
-        .cp = CP_REG_ARM64_SYSREG_CP,                                        
+    {
+        .cp = CP_REG_ARM64_SYSREG_CP,
         .name = "ARM64_REG_IPI_RR_GLOBAL",
         .opc0 = 3, .opc1 = 5, .crn = 15, .crm = 0, .opc2 = 1,
         .access = PL1_W, .type = ARM_CP_IO | ARM_CP_NO_RAW,
@@ -426,8 +426,8 @@ static const ARMCPRegInfo T8030_cp_reginfo_tcg[] = {
         .readfn = arm_cp_read_zero,
         .writefn = T8030_ipi_rr_global
     },
-    {                                                                        
-        .cp = CP_REG_ARM64_SYSREG_CP,                                        
+    {
+        .cp = CP_REG_ARM64_SYSREG_CP,
         .name = "ARM64_REG_IPI_SR",
         .opc0 = 3, .opc1 = 5, .crn = 15, .crm = 1, .opc2 = 1,
         .access = PL1_RW, .type = ARM_CP_IO | ARM_CP_NO_RAW,
@@ -435,8 +435,8 @@ static const ARMCPRegInfo T8030_cp_reginfo_tcg[] = {
         .readfn = T8030_ipi_read_sr,
         .writefn = T8030_ipi_write_sr
     },
-    {                                                                        
-        .cp = CP_REG_ARM64_SYSREG_CP,                                        
+    {
+        .cp = CP_REG_ARM64_SYSREG_CP,
         .name = "ARM64_REG_IPI_CR",
         .opc0 = 3, .opc1 = 5, .crn = 15, .crm = 3, .opc2 = 1,
         .access = PL1_RW, .type = ARM_CP_IO,
@@ -590,7 +590,7 @@ static void T8030_memory_setup(MachineState *machine)
         phys_ptr += tms->ramdisk_file_dev.size;
         used_ram_for_blobs += tms->ramdisk_file_dev.size;
     }
-    
+
     //now account for kernel boot args
     used_ram_for_blobs += align_64k_high(sizeof(struct xnu_arm64_boot_args));
     kbootargs_pa = phys_ptr;
@@ -600,7 +600,7 @@ static void T8030_memory_setup(MachineState *machine)
 
     top_of_kernel_data_pa = phys_ptr;
     allocated_ram_pa = phys_ptr;
-    
+
     remaining_mem_size = T8030_PHYS_BASE + machine->ram_size - allocated_ram_pa;
     mem_size = machine->ram_size;
     tms->dram_base = T8030_PHYS_BASE;
@@ -611,7 +611,7 @@ static void T8030_memory_setup(MachineState *machine)
 
     nvram_data = g_malloc0(T8030_NVRAM_SIZE);
     blk_pread(nvram->blkconf.blk, 0, nvram_data, T8030_NVRAM_SIZE);
-    
+
     macho_load_dtb(tms->device_tree, nsas, sysmem, "DeviceTree",
                    dtb_pa, &dtb_size,
                    tms->ramdisk_file_dev.pa, ramdisk_size,
@@ -894,7 +894,7 @@ static void T8030_cpu_setup(MachineState *machine)
         }
 
         qdev_realize(DEVICE(cpuobj), NULL, &error_fatal);
-        
+
         tms->cpus[i]->nsas = cpu_get_address_space(cs, ARMASIdx_NS);
 
         prop = get_dtb_prop(node, "cpu-impl-reg");
@@ -1326,7 +1326,7 @@ static void T8030_cpu_reset(void *opaque)
     CPU_FOREACH(cpu) {
         ARM_CPU(cpu)->rvbar = tms->kpc_pa & ~0xfff;
     }
-    
+
     cs = CPU(first_cpu);
     env = &ARM_CPU(cs)->env;
     cpu_reset(cs);
@@ -1428,7 +1428,7 @@ static void T8030_machine_init(MachineState *machine)
     tms->ipi_cr = kDeferredIPITimerDefault;
 
     T8030_create_aic(machine);
-    
+
     T8030_create_s3c_uart(tms, serial_hd(0));
 
     T8030_pmgr_setup(machine);
@@ -1440,7 +1440,7 @@ static void T8030_machine_init(MachineState *machine)
     T8030_create_gpio(machine, "gpio");
     T8030_create_gpio(machine, "smc-gpio");
     T8030_create_gpio(machine, "nub-gpio");
-    
+
     T8030_create_i2c(machine, "i2c0");
     T8030_create_i2c(machine, "i2c1");
     T8030_create_i2c(machine, "i2c2");
