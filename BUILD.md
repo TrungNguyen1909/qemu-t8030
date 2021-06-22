@@ -17,7 +17,7 @@ pip3 install pyasn1
 ### macOS Homebrew
 
 ```sh
-brew install libtasn1 meson ninja pixman lzfse jtool2
+brew install libtasn1 meson ninja pixman lzfse jtool2 jq
 ```
 
 
