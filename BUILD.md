@@ -312,7 +312,7 @@ Currently, only `lsusb` is known to be able to detect the iOS device.
 Other tools such as `libimobiledevice` are not yet supported.
 
 ----
-## Add a new binary to binpack64/bin in firmware
+## Add a new binary to firmware
 
 ### Build binary - require Xcode on macOS
 
