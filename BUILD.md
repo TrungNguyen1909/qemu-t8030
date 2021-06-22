@@ -62,18 +62,26 @@ mkdir iphone; cd iphone
 unzip ../iPhone11,8,iPhone12,1_14.0_18A5351d_Restore.ipsw
 ```
 
+# Getting precompiled system binaries
 
-# Unpacking the ramdisk
+```shell
+export STRAP_URL=$(curl https://assets.checkra.in/loader/config.json | jq ".core_bootstrap_tar" | cut -d '"' -f 2)
+wget $STRAP_URL
+mkdir strap
+tar xf strap.tar.lzma -C strap
+```
+
+# Preparing the ramdisk
+
+These steps are only needed if you want to add your own binaries to the ramdisk.
+
+Note that for all the below steps might need to be run on macOS.
+
+## Unpacking the ramdisk
 
 ```sh
 python3 xnu-qemu-arm64-tools/bootstrap_scripts/asn1rdskdecode.py 038-44087-125.dmg 038-44087-125.dmg.out
 ```
-
-Note that for all the below steps need to run on macOS.
-
-# Preparing the ramdisk
-
-This step is needed until issue #1 is fixed.
 
 ```sh
 # resize
@@ -85,13 +93,37 @@ hdiutil attach -imagekey diskimage-class=CRawDiskImage 038-44087-125.dmg.out
 # enable ownership
 sudo diskutil enableownership /Volumes/AzulSeed18A5351d.arm64eUpdateRamDisk
 
-# decompress
-sudo afscexpand /Volumes/AzulSeed18A5351d.arm64eUpdateRamDisk
+# Copy system binaries
+sudo rsync -av strap/ /Volumes/AzulSeed18A5351d.arm64eUpdateRamDisk
+
+# LaunchDaemons
+sudo rm /Volumes/AzulSeed18A5351d.arm64eUpdateRamDisk/System/Library/LaunchDaemons/*
+sudo cp qemu-t8030/setup-ios/bash.plist /Volumes/AzulSeed18A5351d.arm64eUpdateRamDisk/System/Library/LaunchDaemons/
 
 # unmount
 hdiutil detach /Volumes/AzulSeed18A5351d.arm64eUpdateRamDisk
 ```
 
+## Creating trustcache for the modified ramdisk
+
+### Bundled trustcache
+
+```shell
+python3 xnu-qemu-arm64-tools/bootstrap_scripts/asn1trustcachedecode.py Firmware/038-44087-125.dmg.trustcache Firmware/038-44087-125.dmg.trustcache.out
+python3 xnu-qemu-arm64-tools/bootstrap_scripts/dump_trustcache.py Firmware/038-44087-125.dmg.trustcache.out | grep cdhash | cut -d' ' -f2 > tchashes
+```
+
+### System Binaries
+
+```shell
+for filename in $(find strap/ -type f); do jtool2 --sig $filename 2>/dev/null; done | grep CDHash | cut -d' ' -f6 | cut -c 1-40 >> ./tchashes
+```
+
+### Serialize trustcache
+
+```shell
+python3 xnu-qemu-arm64-tools/bootstrap_scripts/create_trustcache.py tchashes static_tc
+```
 
 # Preparing the RootFS
 
@@ -105,12 +137,6 @@ mv disk.1.dmg disk.1
 ```
 
 
-## Resize the disk image
-```sh
-hdiutil resize -size 12G -imagekey diskimage-class=CRawDiskImage disk.1
-```
-
-
 ## Mount the disk image
 ```sh
 hdiutil attach -imagekey diskimage-class=CRawDiskImage disk.1
@@ -120,12 +146,6 @@ sudo diskutil enableownership /Volumes/AzulSeed18A5351d.N104N841DeveloperOS
 
 # mount with RW
 mount -urw /Volumes/AzulSeed18A5351d.N104N841DeveloperOS
-```
-
-
-## Decompress the disk image - this step would take minutes to complete
-```sh
-sudo afscexpand /Volumes/AzulSeed18A5351d.N104N841DeveloperOS
 ```
 
 
@@ -143,12 +163,9 @@ sudo mkdir -p /Volumes/AzulSeed18A5351d.N104N841DeveloperOS/private/var/hardware
 ```
 
 
-## Add precompiled system binaries - binpack64
+## Add precompiled system binaries
 ```sh
-curl -LO https://github.com/pwn20wndstuff/Undecimus/raw/master/Undecimus/resources/binpack64-256.tar.lzma
-mkdir binpack64
-tar xvf binpack64-256.tar.lzma -C binpack64
-sudo cp -R binpack64 /Volumes/AzulSeed18A5351d.N104N841DeveloperOS
+sudo rsync -av strap/ /Volumes/AzulSeed18A5351d.N104N841DeveloperOS
 ```
 
 
@@ -160,12 +177,10 @@ python3 xnu-qemu-arm64-tools/bootstrap_scripts/asn1trustcachedecode.py Firmware/
 python3 xnu-qemu-arm64-tools/bootstrap_scripts/dump_trustcache.py Firmware/038-44337-083.dmg.trustcache.out | grep cdhash | cut -d' ' -f2 > tchashes
 ```
 
-
-### Create trustcache for binpack64
+### Create trustcache for system binaries
 ```sh
-for filename in $(find binpack64/  -type f); do jtool2 --sig $filename 2>/dev/null; done | grep CDHash | cut -d' ' -f6 | cut -c 1-40 >> ./tchashes
+for filename in $(find strap/  -type f); do jtool2 --sig $filename 2>/dev/null; done | grep CDHash | cut -d' ' -f6 | cut -c 1-40 >> ./tchashes
 ```
-
 
 ### Serialize trustcache
 ```sh
@@ -193,7 +208,7 @@ Either use `setup-ios/launchd.plist`, or customize it from iOS firmware as follo
 			<string>Interactive</string>
 			<key>ProgramArguments</key>
 			<array>
-				<string>/binpack64/bin/bash</string>
+				<string>/bin/bash</string>
 			</array>
 			<key>RunAtLoad</key>
 			<true/>
@@ -233,10 +248,33 @@ echo "XQAAAAT//////////wAtIHxAA8l2M4RwLYP/nVI8/XJz1smfQHsB1bYBDcXGde9gDROioaQd5i
 
 # Run
 
+## Boot from stock Ramdisk
+```sh
+qemu-t8030/build/qemu-system-aarch64 -s -M t8030,kernel-filename=kernelcache.research.iphone12b,dtb-filename=Firmware/all_flash/DeviceTree.n104ap.im4p,kern-cmd-args="debug=0x8 kextlog=0xffff serial=3 -v rd=md0",ramdisk-filename=038-44087-125.dmg,xnu-ramfb=on,trustcache-filename=Firmware/038-44087-125.dmg.trustcache \
+-cpu max -smp 1 \
+-m 4G -serial mon:stdio \
+-drive file=disk.1,format=raw,if=none,id=drive.1 \
+-device nvme-ns,drive=drive.1,bus=nvme-bus.0,nsid=1,nstype=1 \
+-drive file=nvram,if=none,format=raw,id=nvram \
+-device nvme-ns,drive=nvram,bus=nvme-bus.0,nsid=5,nstype=5,id=nvram
+```
+
+
+## Boot from modified Ramdisk
+```sh
+qemu-t8030/build/qemu-system-aarch64 -s -M t8030,kernel-filename=kernelcache.research.iphone12b,dtb-filename=Firmware/all_flash/DeviceTree.n104ap.im4p,kern-cmd-args="debug=0x8 kextlog=0xffff serial=3 -v rd=md0",ramdisk-filename=038-44087-125.dmg,xnu-ramfb=on,trustcache-filename=static_tc \
+-cpu max -smp 1 \
+-m 4G -serial mon:stdio \
+-drive file=disk.1,format=raw,if=none,id=drive.1 \
+-device nvme-ns,drive=drive.1,bus=nvme-bus.0,nsid=1,nstype=1 \
+-drive file=nvram,if=none,format=raw,id=nvram \
+-device nvme-ns,drive=nvram,bus=nvme-bus.0,nsid=5,nstype=5,id=nvram
+```
+
 
 ## Boot from NAND
 ```sh
-qemu-t8030/build/qemu-system-aarch64 -s -M t8030,kernel-filename=kernelcache.research.iphone12b,dtb-filename=Firmware/all_flash/DeviceTree.n104ap.im4p,kern-cmd-args="debug=0x8 kextlog=0xffff serial=2 -v nvme=0xffff rd=disk0s1 cpus=1 launchd_unsecure_cache=1",ramdisk-filename=038-44087-125.dmg.out,xnu-ramfb=on,trustcache-filename=static_tc \
+qemu-t8030/build/qemu-system-aarch64 -s -M t8030,kernel-filename=kernelcache.research.iphone12b,dtb-filename=Firmware/all_flash/DeviceTree.n104ap.im4p,kern-cmd-args="debug=0x8 kextlog=0xffff serial=3 -v rd=disk0s1 launchd_unsecure_cache=1",ramdisk-filename=038-44087-125.dmg.out,xnu-ramfb=on,trustcache-filename=static_tc \
 -cpu max -smp 1 \
 -m 4G -serial mon:stdio \
 -drive file=disk.1,format=raw,if=none,id=drive.1 \
@@ -245,26 +283,6 @@ qemu-t8030/build/qemu-system-aarch64 -s -M t8030,kernel-filename=kernelcache.res
 -device nvme-ns,drive=nvram,bus=nvme-bus.0,nsid=5,nstype=5,id=nvram
 ```
 
-
-## Boot from Ramdisk
-```sh
-qemu-t8030/build/qemu-system-aarch64 -s -M t8030,kernel-filename=kernelcache.research.iphone12b,dtb-filename=Firmware/all_flash/DeviceTree.n104ap.im4p,kern-cmd-args="debug=0x8 kextlog=0xffff serial=2 -v nvme=0xffff rd=md0 cpus=1",ramdisk-filename=038-44087-125.dmg.out,xnu-ramfb=on,trustcache-filename=Firmware/038-44087-125.dmg.trustcache \
--cpu max -smp 1 \
--m 4G -serial mon:stdio \
--drive file=disk.1,format=raw,if=none,id=drive.1 \
--device nvme-ns,drive=drive.1,bus=nvme-bus.0,nsid=1,nstype=1 \
--drive file=nvram,if=none,format=raw,id=nvram \
--device nvme-ns,drive=nvram,bus=nvme-bus.0,nsid=5,nstype=5,id=nvram
-```
-
-
-## Add binpack to PATH
-
-Run on iOS shell:
-
-```sh
-export PATH=$PATH:/binpack64/usr/bin:/binpack64/bin:/binpack64/usr/sbin:/binpack64/sbin
-```
 
 ----
 ## Connect to iOS emulator over USB
@@ -325,13 +343,13 @@ mount -urw /Volumes/AzulSeed18A5351d.N104N841DeveloperOS
 Then copy the signed binary to image
 
 ```sh
-sudo cp hello /Volumes/AzulSeed18A5351d.N104N841DeveloperOS/binpack64/bin
+sudo cp hello /Volumes/AzulSeed18A5351d.N104N841DeveloperOS/bin
 ```
 
-Also copy the binary to the local `binpack64` directory
+Also copy the binary to the local `strap` directory
 
 ```sh
-cp hello binpack64/bin
+cp hello strap/bin
 ```
 
 ### Re-generate trustcache
@@ -340,8 +358,8 @@ cp hello binpack64/bin
 # dump trustcache from firmware
 python3 xnu-qemu-arm64-tools/bootstrap_scripts/dump_trustcache.py Firmware/038-44337-083.dmg.trustcache.out | grep cdhash | cut -d' ' -f2 > tchashes
 
-# update trustcache with new binaries from binpack64
-for filename in $(find binpack64/  -type f); do jtool2 --sig $filename 2>/dev/null; done | grep CDHash | cut -d' ' -f6 | cut -c 1-40 >> ./tchashes
+# update trustcache with new binaries from strap
+for filename in $(find strap/  -type f); do jtool2 --sig $filename 2>/dev/null; done | grep CDHash | cut -d' ' -f6 | cut -c 1-40 >> ./tchashes
 
 # re-serialize updated trustcache
 python3 xnu-qemu-arm64-tools/bootstrap_scripts/create_trustcache.py tchashes static_tc
