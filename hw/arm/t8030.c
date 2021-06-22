@@ -51,10 +51,9 @@
 #include "hw/arm/exynos4210.h"
 #include "hw/arm/xnu_pf.h"
 
-#define T8030_PHYS_BASE 0x800000000
+#define T8030_DRAM_BASE 0x800000000
 #define CPU_IMPL_REG_BASE 0x210050000
 #define CPM_IMPL_REG_BASE 0x210e40000
-#define T8030_MAX_DEVICETREE_SIZE 0x40000
 #define T8030_NVRAM_SIZE 0x2000
 #define T8030_USB_OTG_BASE 0x39000000
 #define NOP_INST 0xd503201f
@@ -514,18 +513,14 @@ static void t8030_patch_kernel(struct mach_header_64 *hdr)
 
 static void t8030_memory_setup(MachineState *machine)
 {
-    uint64_t used_ram_for_blobs = 0;
-    hwaddr kernel_low;
-    hwaddr kernel_high;
     struct mach_header_64 *hdr;
+    hwaddr virt_end;
     hwaddr dtb_pa;
     hwaddr dtb_va;
     uint64_t dtb_size;
     hwaddr kbootargs_pa;
     hwaddr top_of_kernel_data_pa;
     hwaddr mem_size;
-    hwaddr remaining_mem_size;
-    hwaddr allocated_ram_pa;
     hwaddr phys_ptr;
     video_boot_args v_bootargs = {0};
     T8030MachineState *tms = T8030_MACHINE(machine);
@@ -543,74 +538,64 @@ static void t8030_memory_setup(MachineState *machine)
     //After that we have the static trust cache.
     //After that we have all the kernel sections.
     //After that we have ramdisk
-    //After that we have the device tree
     //After that we have the kernel boot args
+    //After that we have the device tree
     //After that we have the rest of the RAM
 
     hdr = tms->kernel;
     assert(hdr);
-    macho_highest_lowest(hdr, &kernel_low, &kernel_high);
-    phys_ptr = T8030_PHYS_BASE;
+    macho_highest_lowest(hdr, NULL, &virt_end);
+    g_phys_base = phys_ptr = T8030_DRAM_BASE;
 
     // //now account for the trustcache
-    phys_ptr += align_64k_high(0x2000000);
+    phys_ptr += align_16k_high(0x2000000);
     trustcache_pa = phys_ptr;
     macho_load_trustcache(tms->trustcache_filename, nsas, sysmem, trustcache_pa, &trustcache_size);
-    phys_ptr += align_64k_high(trustcache_size);
+    phys_ptr += align_16k_high(trustcache_size);
 
-    used_ram_for_blobs += align_64k_high(trustcache_size);
     //now account for the loaded kernel
-    g_phys_base = T8030_PHYS_BASE;
-    fprintf(stderr, "g_virt_base: 0x" TARGET_FMT_lx "\ng_phys_base: 0x" TARGET_FMT_lx "\n", g_virt_base, g_phys_base);
     tms->kpc_pa = arm_load_macho(hdr, nsas, sysmem, "Kernel",
                                  g_phys_base, g_virt_base);
+    fprintf(stderr, "g_virt_base: 0x" TARGET_FMT_lx "\ng_phys_base: 0x" TARGET_FMT_lx "\n", g_virt_base, g_phys_base);
     fprintf(stderr, "entry: 0x" TARGET_FMT_lx "\n", tms->kpc_pa);
     macho_free(hdr);
     hdr = NULL;
     tms->kernel = NULL;
     xnu_header = NULL;
-    used_ram_for_blobs += (align_64k_high(kernel_high) - kernel_low);
 
-    phys_ptr = align_64k_high(vtop_static(kernel_high));
+    phys_ptr = vtop_static(align_16k_high(virt_end));
 
-    //now account for device tree
-    dtb_pa = phys_ptr;
-
-    dtb_va = ptov_static(phys_ptr);
-    phys_ptr += align_64k_high(T8030_MAX_DEVICETREE_SIZE);
-    used_ram_for_blobs += align_64k_high(T8030_MAX_DEVICETREE_SIZE);
     //now account for the ramdisk
     tms->ramdisk_file_dev.pa = 0;
 
     if (tms->ramdisk_filename[0]) {
         tms->ramdisk_file_dev.pa = phys_ptr;
         macho_load_ramdisk(tms->ramdisk_filename, nsas, sysmem, phys_ptr, &tms->ramdisk_file_dev.size);
-        tms->ramdisk_file_dev.size = align_64k_high(tms->ramdisk_file_dev.size);
+        tms->ramdisk_file_dev.size = align_16k_high(tms->ramdisk_file_dev.size);
         ramdisk_size = tms->ramdisk_file_dev.size;
         phys_ptr += tms->ramdisk_file_dev.size;
-        used_ram_for_blobs += tms->ramdisk_file_dev.size;
     }
 
     //now account for kernel boot args
-    used_ram_for_blobs += align_64k_high(sizeof(struct xnu_arm64_boot_args));
     kbootargs_pa = phys_ptr;
     tms->kbootargs_pa = kbootargs_pa;
-    phys_ptr += align_64k_high(sizeof(struct xnu_arm64_boot_args));
+    phys_ptr += align_16k_high(0x4000);
     tms->extra_data_pa = phys_ptr;
 
-    top_of_kernel_data_pa = phys_ptr;
-    allocated_ram_pa = phys_ptr;
-
-    remaining_mem_size = T8030_PHYS_BASE + machine->ram_size - allocated_ram_pa;
-    mem_size = machine->ram_size;
-    tms->dram_base = T8030_PHYS_BASE;
+    //now account for device tree
+    tms->dram_base = T8030_DRAM_BASE;
     tms->dram_size = machine->ram_size;
+    dtb_pa = phys_ptr;
+
+    dtb_va = ptov_static(phys_ptr);
 
     nvram = NVME_NS(qdev_find_recursive(sysbus_get_default(), "nvram"));
     assert(nvram);
 
     nvram_data = g_malloc0(T8030_NVRAM_SIZE);
-    blk_pread(nvram->blkconf.blk, 0, nvram_data, T8030_NVRAM_SIZE);
+    if (blk_pread(nvram->blkconf.blk, 0, nvram_data, T8030_NVRAM_SIZE) <= 0) {
+        fprintf(stderr, "%s: Failed to read NVRAM\n", __func__);
+    }
 
     macho_load_dtb(tms->device_tree, nsas, sysmem, "DeviceTree",
                    dtb_pa, &dtb_size,
@@ -619,15 +604,20 @@ static void t8030_memory_setup(MachineState *machine)
                    kbootargs_pa,
                    tms->dram_base, tms->dram_size,
                    nvram_data, T8030_NVRAM_SIZE);
+
     g_free(nvram_data);
-    assert(dtb_size <= T8030_MAX_DEVICETREE_SIZE);
+    phys_ptr += align_16k_high(dtb_size);
+
+    top_of_kernel_data_pa = (align_16k_high(phys_ptr) + 0x3000ull) & ~0x3fffull;
+
+    mem_size = machine->ram_size;
 
     macho_setup_bootargs("BootArgs", nsas, sysmem, kbootargs_pa,
                          g_virt_base, g_phys_base, mem_size,
                          top_of_kernel_data_pa, dtb_va, dtb_size,
                          v_bootargs, tms->kern_args);
 
-    allocate_ram(sysmem, "RAM", allocated_ram_pa, remaining_mem_size);
+    allocate_ram(sysmem, "RAM", T8030_DRAM_BASE, mem_size, 0);
 }
 
 static void cpu_impl_reg_write(void *opaque, hwaddr addr, uint64_t data, unsigned size)
@@ -1280,7 +1270,7 @@ static void t8030_create_usb(MachineState *machine)
     add_dtb_prop(device, "disable-charger-detect", sizeof(value), (uint8_t *)&value);
     add_dtb_prop(device, "phy-interface", 4, (uint8_t*)&(uint32_t[]){ 0x8 });
     add_dtb_prop(device, "publish-criteria", 4, (uint8_t*)&(uint32_t[]){ 0x3 });
-    add_dtb_prop(device, "configuration-string", 16, (uint8_t*)"standardBringup");
+    add_dtb_prop(device, "configuration-string", 18, (uint8_t*)"stdMuxPTPEthValIDA");
     add_dtb_prop(device, "AAPL,phandle", 4, (uint8_t*)&(uint32_t[]){ 0x8e });
     add_dtb_prop(device, "product-string", 7, (uint8_t*)"iPhone");
     add_dtb_prop(device, "host-mac-address", 6, (uint8_t*)"\0\0\0\0\0\0");

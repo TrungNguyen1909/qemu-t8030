@@ -79,12 +79,8 @@ static void allocate_and_copy(MemoryRegion *mem, AddressSpace *as,
 {
     uint64_t memsize = size;
 
-    if (size > 0 && size < 0x4000) {
-        memsize = 0x4000;
-    }
-
     if (mem) {
-        allocate_ram(mem, name, pa, memsize);
+        allocate_ram(mem, name, pa, memsize, 1);
     }
 
     address_space_rw(as, pa, MEMTXATTRS_UNSPECIFIED, (uint8_t *)buf, size, 1);
@@ -572,7 +568,7 @@ void macho_load_ramdisk(const char *filename, AddressSpace *as, MemoryRegion *me
         exit(EXIT_FAILURE);
     }
 
-    file_size = align_64k_high(length);
+    file_size = length;
     file_data = g_realloc(file_data, file_size);
 
     allocate_and_copy(mem, as, "RamDisk", pa, file_size, file_data);
@@ -714,9 +710,12 @@ void macho_highest_lowest(struct mach_header_64 *mh, uint64_t *lowaddr,
         }
         cmd = (struct load_command *)((char *)cmd + cmd->cmdsize);
     }
-
-    *lowaddr = align_64k_low(low_addr_temp);
-    *highaddr = align_64k_high(high_addr_temp);
+    if (lowaddr) {
+        *lowaddr = (low_addr_temp) & 0xfffffffffff00000ULL;
+    }
+    if (highaddr) {
+        *highaddr = high_addr_temp;
+    }
 }
 
 void macho_text_base(struct mach_header_64 *mh, uint64_t *base)
@@ -742,7 +741,6 @@ void macho_text_base(struct mach_header_64 *mh, uint64_t *base)
         }
         cmd = (struct load_command *)((char *)cmd + cmd->cmdsize);
     }
-    return;
 }
 
 struct mach_header_64 *macho_load_file(const char *filename)
