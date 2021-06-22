@@ -701,9 +701,9 @@ static void pmgr_reg_write(void *opaque, hwaddr addr, uint64_t data, unsigned si
 
     // fprintf(stderr, "PMGR reg WRITE @ 0x" TARGET_FMT_lx " value: 0x" TARGET_FMT_lx "\n", addr, data);
     switch (addr) {
-        case 0xd4004:
-            t8030_wake_up_cpus(machine, data);
-            return;
+    case 0xd4004:
+        t8030_wake_up_cpus(machine, data);
+        return;
     }
 }
 
@@ -711,10 +711,12 @@ static uint64_t pmgr_reg_read(void *opaque, hwaddr addr, unsigned size)
 {
     // fprintf(stderr, "PMGR reg READ @ 0x" TARGET_FMT_lx "\n", addr);
     switch(addr) {
-        case 0xf0010: /* AppleT8030PMGR::commonSramCheck */
-            return 0x5000;
-        case 0x80100 ... 0x803b8:
-            return 0xf0;
+    case 0xf0010: /* AppleT8030PMGR::commonSramCheck */
+        return 0x5000;
+    case 0x80100 ... 0x803b8:
+        return 0xf0;
+    default:
+        break;
     }
     return 0;
 }
@@ -1228,7 +1230,8 @@ static void t8030_create_usb(MachineState *machine)
     DeviceState *otg;
     uint32_t value;
 
-    assert((phy = add_dtb_node(child, "otgphyctrl")));
+    phy = add_dtb_node(child, "otgphyctrl");
+    assert(phy);
     value = 0x2;
     add_dtb_prop(phy, "errata", sizeof(value), (uint8_t*)&value);
     add_dtb_prop(phy, "compatible", 37, (uint8_t*)"otgphyctrl,s8000\0otgphyctrl,s5l8960x\0");
@@ -1253,7 +1256,8 @@ static void t8030_create_usb(MachineState *machine)
         add_dtb_prop(phy, "reg", sizeof(reg), (uint8_t*)&reg);
     }
 
-    assert((complex = add_dtb_node(child, "usb-complex")));
+    complex = add_dtb_node(child, "usb-complex");
+    assert(complex);
     //TODO: clock-gates, usb_widget
     add_dtb_prop(complex, "compatible", 39, (uint8_t*)"usb-complex,s8000\0usb-complex,s5l8960x");
     add_dtb_prop(complex, "ranges", 8*3,  (uint8_t*)&(uint64_t[]){0x0, T8030_USB_OTG_BASE, 0x600000});
@@ -1266,11 +1270,12 @@ static void t8030_create_usb(MachineState *machine)
     value = 1;
     add_dtb_prop(complex, "no-pmu", 4, (uint8_t*)&value);
 
-    assert((device = add_dtb_node(complex, "usb-device")));
+    device = add_dtb_node(complex, "usb-device");
+    assert(device);
     add_dtb_prop(device, "disable-charger-detect", sizeof(value), (uint8_t *)&value);
     add_dtb_prop(device, "phy-interface", 4, (uint8_t*)&(uint32_t[]){ 0x8 });
     add_dtb_prop(device, "publish-criteria", 4, (uint8_t*)&(uint32_t[]){ 0x3 });
-    add_dtb_prop(device, "configuration-string", 18, (uint8_t*)"stdMuxPTPEthValIDA");
+    add_dtb_prop(device, "configuration-string", 16, (uint8_t*)"standardBringup");
     add_dtb_prop(device, "AAPL,phandle", 4, (uint8_t*)&(uint32_t[]){ 0x8e });
     add_dtb_prop(device, "product-string", 7, (uint8_t*)"iPhone");
     add_dtb_prop(device, "host-mac-address", 6, (uint8_t*)"\0\0\0\0\0\0");
