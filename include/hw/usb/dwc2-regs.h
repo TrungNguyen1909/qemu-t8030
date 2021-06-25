@@ -607,19 +607,26 @@
 #define DIEPTSIZ0_PKTCNT_SHIFT		19
 #define DIEPTSIZ0_PKTCNT_LIMIT		0x3
 #define DIEPTSIZ0_PKTCNT(_x)		((_x) << 19)
+#define DIEPTSIZ0_PKTCNT_GET(_v)    (((_v) >> 19) & 0x3)
 #define DIEPTSIZ0_XFERSIZE_MASK		(0x7f << 0)
 #define DIEPTSIZ0_XFERSIZE_SHIFT	0
 #define DIEPTSIZ0_XFERSIZE_LIMIT	0x7f
 #define DIEPTSIZ0_XFERSIZE(_x)		((_x) << 0)
+#define DIEPTSIZ0_XFERSIZE_GET(_v)  (((_v) >> 0) & 0x7f)
 
 #define DOEPTSIZ0			HSOTG_REG(0xB10)
 #define DOEPTSIZ0_SUPCNT_MASK		(0x3 << 29)
 #define DOEPTSIZ0_SUPCNT_SHIFT		29
 #define DOEPTSIZ0_SUPCNT_LIMIT		0x3
 #define DOEPTSIZ0_SUPCNT(_x)		((_x) << 29)
-#define DOEPTSIZ0_PKTCNT		BIT(19)
+#define DOEPTSIZ0_PKTCNT(_x)		(((_x) & 0x1) << 19)
+#define DOEPTSIZ0_PKTCNT_MASK		(0x1 << 19)
+#define DOEPTSIZ0_PKTCNT_SHIFT		19
+#define DOEPTSIZ0_PKTCNT_GET(_v)    (((_v) >> 19) & 0x1)
+#define DOEPTSIZ0_XFERSIZE(_v)      (((_v) & 0x7f) << 0)
 #define DOEPTSIZ0_XFERSIZE_MASK		(0x7f << 0)
 #define DOEPTSIZ0_XFERSIZE_SHIFT	0
+#define DOEPTSIZ0_XFERSIZE_GET(_v)  (((_v) >> 0) & 0x7f)
 
 #define DIEPTSIZ(_a)			HSOTG_REG(0x910 + ((_a) * 0x20))
 #define DOEPTSIZ(_a)			HSOTG_REG(0xB10 + ((_a) * 0x20))
@@ -631,12 +638,12 @@
 #define DXEPTSIZ_PKTCNT_SHIFT		19
 #define DXEPTSIZ_PKTCNT_LIMIT		0x3ff
 #define DXEPTSIZ_PKTCNT_GET(_v)		(((_v) >> 19) & 0x3ff)
-#define DXEPTSIZ_PKTCNT(_x)		((_x) << 19)
+#define DXEPTSIZ_PKTCNT(_x)		    (((_x) & 0x3ff) << 19)
 #define DXEPTSIZ_XFERSIZE_MASK		(0x7ffff << 0)
 #define DXEPTSIZ_XFERSIZE_SHIFT		0
 #define DXEPTSIZ_XFERSIZE_LIMIT		0x7ffff
 #define DXEPTSIZ_XFERSIZE_GET(_v)	(((_v) >> 0) & 0x7ffff)
-#define DXEPTSIZ_XFERSIZE(_x)		((_x) << 0)
+#define DXEPTSIZ_XFERSIZE(_x)		(((_x) & 0x7ffff) << 0)
 
 #define DIEPDMA(_a)			HSOTG_REG(0x914 + ((_a) * 0x20))
 #define DOEPDMA(_a)			HSOTG_REG(0xB14 + ((_a) * 0x20))

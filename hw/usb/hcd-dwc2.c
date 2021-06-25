@@ -42,6 +42,7 @@
 #include "qemu/error-report.h"
 #include "qemu/main-loop.h"
 #include "hw/qdev-properties.h"
+#include "qemu-common.h"
 
 #define USB_HZ_FS       12000000
 #define USB_HZ_HS       96000000
@@ -61,7 +62,7 @@
 #define get_bit(data, bitmask) \
     (!!((data) & (bitmask)))
 
-static inline size_t dwc2_tx_fifo_start(DWC2State *s, uint32_t _fifo)
+static inline int dwc2_tx_fifo_start(DWC2State *s, uint32_t _fifo)
 {
     if (_fifo == 0)
         return s->gnptxfsiz >> 16;
@@ -69,7 +70,7 @@ static inline size_t dwc2_tx_fifo_start(DWC2State *s, uint32_t _fifo)
         return s->dptxfsiz[_fifo-1] >> 16;
 }
 
-static inline size_t dwc2_tx_fifo_size(DWC2State *s, uint32_t _fifo)
+static inline int dwc2_tx_fifo_size(DWC2State *s, uint32_t _fifo)
 {
     if (_fifo == 0)
         return s->gnptxfsiz & 0xFFFF;
@@ -1164,7 +1165,12 @@ static void dwc2_update_in_ep(DWC2State *s, int ep)
     if (s->diepctl(ep) & DXEPCTL_SNAK) {
         s->diepctl(ep) |= DXEPCTL_NAKSTS;
         s->diepint(ep) |= DXEPINT_INEPNAKEFF;
-        s->diepctl(ep) &= ~ DXEPCTL_SNAK;
+        s->diepctl(ep) &= ~DXEPCTL_SNAK;
+    }
+    if (s->diepctl(ep) & DXEPCTL_CNAK) {
+        s->diepctl(ep) &= ~DXEPCTL_NAKSTS;
+        s->diepint(ep) &= ~DXEPINT_INEPNAKEFF;
+        s->diepctl(ep) &= ~DXEPCTL_CNAK;
     }
     if (s->diepctl(ep) & DXEPCTL_EPDIS) {
         s->diepint(ep) |= DXEPINT_EPDISBLD;
@@ -1178,6 +1184,11 @@ static void dwc2_update_out_ep(DWC2State *s, int ep)
         s->doepctl(ep) |= DXEPCTL_NAKSTS;
         s->doepint(ep) |= DXEPINT_INEPNAKEFF;
         s->doepctl(ep) &= ~ DXEPCTL_SNAK;
+    }
+    if (s->doepctl(ep) & DXEPCTL_CNAK) {
+        s->doepctl(ep) &= ~DXEPCTL_NAKSTS;
+        s->doepint(ep) &= ~DXEPINT_INEPNAKEFF;
+        s->doepctl(ep) &= ~DXEPCTL_CNAK;
     }
     if (s->doepctl(ep) & DXEPCTL_EPDIS) {
         s->doepint(ep) |= DXEPINT_EPDISBLD;
@@ -1353,6 +1364,7 @@ static void dwc2_diepreg_write(void *ptr, hwaddr addr, int index, uint64_t val,
     switch (DIEPCTL0 + (addr & 0x1c)) {
     case DIEPCTL(0):
         uflg = 1;
+        iflg = 1;
         break;
     case DIEPINT(0):
         val = old & ~val;
@@ -1426,6 +1438,7 @@ static void dwc2_doepreg_write(void *ptr, hwaddr addr, int index, uint64_t val,
     switch (DOEPCTL0 + (addr & 0x1c)) {
     case DOEPCTL(0):
         uflg = 1;
+        iflg = 1;
         break;
     case DOEPINT(0):
         val = old & ~val;
@@ -1875,17 +1888,27 @@ static void dwc2_usb_device_handle_packet(USBDevice *dev, USBPacket *p)
         if (s->diepctl(ep) & DXEPCTL_STALL) {
             s->diepctl(ep) &= ~DXEPCTL_STALL;
             p->status = USB_RET_STALL;
-        } else if (s->diepctl(ep) & DXEPCTL_EPENA) {
-            size_t sz, amtDone, txfz, txfs;
+        } else if ((s->diepctl(ep) & DXEPCTL_EPENA)
+                   && !(s->diepctl(ep) & DXEPCTL_NAKSTS)
+                   && !(s->gintsts & GINTSTS_GINNAKEFF)) {
+            int sz, amtDone, pktsize, pktcnt, txfz, txfs;
             // IN transfer
-            s->diepctl(ep) &= ~DXEPCTL_EPENA;
+            if (ep == 0) {
+                sz = DIEPTSIZ0_XFERSIZE_GET(s->dieptsiz(ep));
+                pktcnt = DIEPTSIZ0_PKTCNT_GET(s->dieptsiz(ep));
+            } else {
+                sz = DXEPTSIZ_XFERSIZE_GET(s->dieptsiz(ep));
+                pktcnt = DXEPTSIZ_PKTCNT_GET(s->dieptsiz(ep));
+            }
 
-            sz = (s->dieptsiz(ep) & TSIZ_XFERSIZE_MASK) >> TSIZ_XFERSIZE_SHIFT;
+            if (pktcnt <= 0) {
+                fprintf(stderr, "%s: USB_TOKEN_IN: pktcnt <= 0 ?\n", __func__);
+            }
             amtDone = sz;
             txfz = dwc2_tx_fifo_size(s, 0);
-
-            if (amtDone > p->iov.size - p->actual_length) {
-                amtDone = p->iov.size - p->actual_length;
+            pktsize = p->iov.size - p->actual_length;
+            if (amtDone > pktsize) {
+                amtDone = pktsize;
             }
             if (amtDone > txfz) {
                 amtDone = txfz;
@@ -1894,21 +1917,50 @@ static void dwc2_usb_device_handle_packet(USBDevice *dev, USBPacket *p)
             txfs = dwc2_tx_fifo_start(s, ep);
             assert(txfs + txfz <= DWC2_MAX_XFER_SIZE);
 
-            /* fprintf(stderr, "%s: starting IN transfer on EP %d (%zu)...\n", __func__, ep, amtDone); */
-
             if (amtDone > 0) {
+                fprintf(stderr, "%s: starting IN transfer on EP %d (%d/%d)...\n", __func__, ep, amtDone, pktsize);
                 if (s->diepdma(ep)) {
                     // TODO: is copying from this fifo correct?
                     dma_memory_read(&s->dma_as, s->diepdma(ep), &s->fifos_buf[txfs], amtDone);
                     s->diepdma(ep) += amtDone;
                 }
-
+                /* qemu_hexdump(stderr, __func__, &s->fifos_buf[txfs], amtDone); */
                 usb_packet_copy(p, &s->fifos_buf[txfs], amtDone);
+                if (ep == 0) {
+                    s->dieptsiz(ep) = (s->dieptsiz(ep) & ~DIEPTSIZ0_PKTCNT_MASK)
+                                      | DIEPTSIZ0_PKTCNT(pktcnt - 1);
+
+                    s->dieptsiz(ep) = (s->dieptsiz(ep) & ~DIEPTSIZ0_XFERSIZE_MASK)
+                                      | DIEPTSIZ0_XFERSIZE(sz - amtDone);
+                } else {
+                    s->dieptsiz(ep) = (s->dieptsiz(ep) & ~DXEPTSIZ_PKTCNT_MASK)
+                                      | DXEPTSIZ_PKTCNT(pktcnt - 1);
+
+                    s->dieptsiz(ep) = (s->dieptsiz(ep) & ~DXEPTSIZ_XFERSIZE_MASK)
+                                      | DXEPTSIZ_XFERSIZE(sz - amtDone);
+                }
+                if (sz - amtDone == 0) {
+                    s->diepctl(ep) &= ~DXEPCTL_EPENA;
+                    s->diepint(ep) |= DXEPINT_XFERCOMPL;
+                }
+                p->status = USB_RET_SUCCESS;
+            } else if (pktsize == 0) {
+                if (ep == 0) {
+                    s->dieptsiz(ep) = (s->dieptsiz(ep) & ~DIEPTSIZ0_PKTCNT_MASK)
+                                      | DIEPTSIZ0_PKTCNT(pktcnt - 1);
+                } else {
+                    s->dieptsiz(ep) = (s->dieptsiz(ep) & ~DXEPTSIZ_PKTCNT_MASK)
+                                      | DXEPTSIZ_PKTCNT(pktcnt - 1);
+                }
+                if (sz - amtDone == 0) {
+                    s->diepctl(ep) &= ~DXEPCTL_EPENA;
+                    s->diepint(ep) |= DXEPINT_XFERCOMPL;
+                }
+                p->status = USB_RET_SUCCESS;
+            } else {
+                s->diepint(ep) |= DXEPINT_INTKNTXFEMP;
+                p->status = USB_RET_SUCCESS;
             }
-            s->dieptsiz(ep) = (s->dieptsiz(ep) &~ TSIZ_XFERSIZE_MASK)
-                               | (((sz - amtDone) << TSIZ_XFERSIZE_SHIFT)& TSIZ_XFERSIZE_MASK);
-            s->diepint(ep) |= DXEPINT_XFERCOMPL;
-            p->status = USB_RET_SUCCESS;
         } else {
             p->status = USB_RET_NAK;
         }
@@ -1918,15 +1970,28 @@ static void dwc2_usb_device_handle_packet(USBDevice *dev, USBPacket *p)
         if (s->doepctl(ep) & DXEPCTL_STALL) {
             s->doepctl(ep) &= ~DXEPCTL_STALL;
             p->status = USB_RET_STALL;
-        } else if (s->doepctl(ep) & DXEPCTL_EPENA) {
-            size_t sz, amtDone, rxfz;
+        } else if ((s->doepctl(ep) & DXEPCTL_EPENA)
+                   && !(s->doepctl(ep) & DXEPCTL_NAKSTS)
+                   && !(s->gintsts & GINTSTS_GOUTNAKEFF)) {
+            int sz, amtDone, pktsize, pktcnt, supcnt, rxfz;
 
-            s->doepctl(ep) &= ~DXEPCTL_EPENA;
+            if (ep == 0) {
+                sz = DOEPTSIZ0_XFERSIZE_GET(s->doeptsiz(ep));
+                pktcnt = DOEPTSIZ0_PKTCNT_GET(s->doeptsiz(ep));
+                supcnt = DOEPTSIZ0_SUPCNT(s->doeptsiz(ep));
+            } else {
+                sz = DXEPTSIZ_XFERSIZE_GET(s->doeptsiz(ep));
+                pktcnt = DXEPTSIZ_PKTCNT_GET(s->doeptsiz(ep));
+                supcnt = 0;
+            }
 
-            sz = (s->doeptsiz(ep) & TSIZ_XFERSIZE_MASK) >> TSIZ_XFERSIZE_SHIFT;
+            if (pktcnt <= 0) {
+                fprintf(stderr, "%s: USB_TOKEN_OUT|SETUP: pktcnt <= 0 ?\n", __func__);
+            }
             amtDone = sz;
-            if (amtDone > p->iov.size - p->actual_length) {
-                amtDone = p->iov.size - p->actual_length;
+            pktsize = p->iov.size - p->actual_length;
+            if (amtDone > pktsize) {
+                amtDone = pktsize;
             }
 
             rxfz = s->grxfsiz;
@@ -1935,7 +2000,7 @@ static void dwc2_usb_device_handle_packet(USBDevice *dev, USBPacket *p)
             }
             assert(rxfz <= DWC2_MAX_XFER_SIZE);
 
-            /* fprintf(stderr, "%s: starting OUT transfer on EP %d (%zu)...\n", __func__, ep, amtDone); */
+            /* fprintf(stderr, "%s: starting OUT transfer on EP %d (%d/%d)...\n", __func__, ep, amtDone, pktsize); */
 
             if (amtDone > 0) {
                 // TODO: is this copy correct?
@@ -1945,8 +2010,27 @@ static void dwc2_usb_device_handle_packet(USBDevice *dev, USBPacket *p)
                     dma_memory_write(&s->dma_as, s->doepdma(ep), s->fifos_buf, amtDone);
                     s->doepdma(ep) += amtDone;
                 }
+                /* qemu_hexdump(stderr, __func__, s->fifos_buf, amtDone); */
             }
 
+            if (ep == 0) {
+                if (p->pid == USB_TOKEN_SETUP) {
+                    s->doeptsiz(ep) = (s->doeptsiz(ep) & ~DOEPTSIZ0_SUPCNT_MASK)
+                                      | DOEPTSIZ0_SUPCNT(supcnt - 1);
+                } else {
+                    s->doeptsiz(ep) = (s->doeptsiz(ep) & ~DOEPTSIZ0_PKTCNT_MASK)
+                                      | DOEPTSIZ0_PKTCNT(pktcnt - 1);
+                }
+
+                s->doeptsiz(ep) = (s->doeptsiz(ep) & ~DOEPTSIZ0_XFERSIZE_MASK)
+                                  | DOEPTSIZ0_XFERSIZE(sz - amtDone);
+            } else {
+                s->doeptsiz(ep) = (s->doeptsiz(ep) & ~DXEPTSIZ_PKTCNT_MASK)
+                                  | DXEPTSIZ_PKTCNT(pktcnt - 1);
+
+                s->doeptsiz(ep) = (s->doeptsiz(ep) & ~DXEPTSIZ_XFERSIZE_MASK)
+                                  | DXEPTSIZ_XFERSIZE(sz - amtDone);
+            }
             if (p->pid == USB_TOKEN_SETUP) {
                 struct usb_control_packet setup;
 
@@ -1961,13 +2045,13 @@ static void dwc2_usb_device_handle_packet(USBDevice *dev, USBPacket *p)
                     s->dsts |= DSTS_ENUMSPD_FS << DSTS_ENUMSPD_SHIFT;
                     dwc2_raise_global_irq(s, GINTSTS_ENUMDONE);
                 }
+                s->doepctl(ep) &= ~DXEPCTL_EPENA;
                 s->doepint(ep) |= DXEPINT_SETUP;
             } else {
+                s->doepctl(ep) &= ~DXEPCTL_EPENA;
                 s->doepint(ep) |= DXEPINT_XFERCOMPL;
             }
 
-            s->doeptsiz(ep) = (s->doeptsiz(ep) &~ TSIZ_XFERSIZE_MASK)
-                               | (((sz - amtDone) << TSIZ_XFERSIZE_SHIFT) & TSIZ_XFERSIZE_MASK);
             p->status = USB_RET_SUCCESS;
         } else {
             p->status = USB_RET_NAK;
