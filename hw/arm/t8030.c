@@ -1275,21 +1275,16 @@ static void t8030_create_usb(MachineState *machine)
     add_dtb_prop(device, "disable-charger-detect", sizeof(value), (uint8_t *)&value);
     add_dtb_prop(device, "phy-interface", 4, (uint8_t*)&(uint32_t[]){ 0x8 });
     add_dtb_prop(device, "publish-criteria", 4, (uint8_t*)&(uint32_t[]){ 0x3 });
-    add_dtb_prop(device, "configuration-string", 16, (uint8_t*)"standardBringup");
+    add_dtb_prop(device, "configuration-string", 18, (uint8_t*)"stdMuxPTPEthValIDA");
     add_dtb_prop(device, "AAPL,phandle", 4, (uint8_t*)&(uint32_t[]){ 0x8e });
-    add_dtb_prop(device, "product-string", 7, (uint8_t*)"iPhone");
     add_dtb_prop(device, "host-mac-address", 6, (uint8_t*)"\0\0\0\0\0\0");
     add_dtb_prop(device, "device-mac-address", 6, (uint8_t*)"\0\0\0\0\0\0");
     add_dtb_prop(device, "num-of-eps", 4, (uint8_t*)&(uint32_t[]){ 0x0e });
     add_dtb_prop(device, "interrupt-parent", 4, (uint8_t*)&(uint32_t[]){ APPLE_AIC(tms->aic)->phandle });
-    add_dtb_prop(device, "vendor-id", 4, (uint8_t*)&(uint32_t[]){ 0x5ac });
-    add_dtb_prop(device, "vendor-string", 11, (uint8_t*)"Apple Inc.");
     add_dtb_prop(device, "compatible", 20, (uint8_t*)"usb-device,s5l8900x");
 
     add_dtb_prop(device, "interrupts", 4, (uint8_t*)&(uint32_t[]){ ((uint32_t*)get_dtb_prop(drd, "interrupts")->value)[0] });
-    add_dtb_prop(device, "product-id", 4, (uint8_t*)&(uint32_t[]){ 0x12a8 });
     add_dtb_prop(device, "ahb-burst", 4, (uint8_t*)&(uint32_t[]){ 0xe });
-    add_dtb_prop(device, "product-version", 4, (uint8_t*)&(uint32_t[]){ 0x1201 });
     add_dtb_prop(device, "clock-mask", 4, (uint8_t*)&(uint32_t[]){ 0x2 });
     add_dtb_prop(device, "fifo-depth", 4, (uint8_t*)&(uint32_t[]){ 0x820 });
     add_dtb_prop(device, "eps-dir-bitmap", 4, (uint8_t*)&(uint32_t[]){ 0x264 });
