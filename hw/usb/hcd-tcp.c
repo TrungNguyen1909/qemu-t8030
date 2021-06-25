@@ -6,6 +6,7 @@
 #include "hw/usb/hcd-tcp.h"
 #include "qemu-common.h"
 #include "hw/qdev-properties.h"
+#include "qemu/main-loop.h"
 
 static void usb_tcp_host_closed(USBTCPHostState *s)
 {
@@ -146,19 +147,19 @@ static void *usb_tcp_host_read_thread(void *opaque)
                     }
 
                     if (pkt_hdr.addr != s->uport.dev->addr) {
-                        fprintf(stderr,
-                                "%s: USB_RET_NODEV: pkt_hdr.addr != s->uport.dev->addr: %d != %d\n",
-                                __func__, pkt_hdr.addr, s->uport.dev->addr);
+                        /*
+                         * fprintf(stderr,
+                         *         "%s: USB_RET_NODEV: pkt_hdr.addr != s->uport.dev->addr: %d != %d\n",
+                         *         __func__, pkt_hdr.addr, s->uport.dev->addr);
+                         */
                         /* Can't enforce this check because dwc2 address transition time is slow */
                     }
-
-                    usb_handle_packet(ep->dev, &pkt->p);
-                    usb_tcp_host_respond_packet(s, &pkt->p);
-
-                    if (usb_packet_is_inflight(&pkt->p)) {
-                        g_steal_pointer(&pkt);
+                    pkt->dev = ep->dev;
+                    WITH_QEMU_LOCK_GUARD(&s->queue_mutex) {
+                        QTAILQ_INSERT_TAIL(&s->queue, pkt, queue);
                     }
-
+                    qemu_bh_schedule(s->bh);
+                    g_steal_pointer(&pkt);
                     break;
                 }
                 case TCP_USB_RESPONSE:
@@ -239,6 +240,22 @@ static void usb_tcp_host_async_packet_complete(USBPort *port, USBPacket *p)
     usb_tcp_host_respond_packet(s, p);
 }
 
+static void usb_tcp_bh(void *opaque)
+{
+    USBTCPHostState *s = USB_TCP_HOST(opaque);
+    USBTCPPacket *pkt, *npkt;
+    WITH_QEMU_LOCK_GUARD(&s->queue_mutex) {
+        QTAILQ_FOREACH_SAFE(pkt, &s->queue, queue, npkt) {
+            usb_handle_packet(pkt->dev, &pkt->p);
+            usb_tcp_host_respond_packet(s, &pkt->p);
+            QTAILQ_REMOVE(&s->queue, pkt, queue);
+            if (!usb_packet_is_inflight(&pkt->p)) {
+                g_free(pkt);
+            }
+        }
+    }
+}
+
 static USBBusOps usb_tcp_bus_ops = { };
 
 static USBPortOps usb_tcp_host_port_ops = {
@@ -288,6 +305,9 @@ static void usb_tcp_host_init(Object *obj)
     qemu_mutex_init(&s->mutex);
     qemu_mutex_init(&s->write_mutex);
     qemu_cond_init(&s->cond);
+    QTAILQ_INIT(&s->queue);
+    qemu_mutex_init(&s->queue_mutex);
+    s->bh = qemu_bh_new(usb_tcp_bh, s);
     qemu_thread_create(&s->read_thread, TYPE_USB_TCP_HOST ".read", &usb_tcp_host_read_thread, s, QEMU_THREAD_JOINABLE);
 }
 

@@ -12,6 +12,8 @@ OBJECT_DECLARE_SIMPLE_TYPE(USBTCPHostState, USB_TCP_HOST)
 typedef struct USBTCPPacket {
     USBPacket p;
     void *buffer;
+    USBDevice *dev;
+    QTAILQ_ENTRY(USBTCPPacket) queue;
 } USBTCPPacket;
 
 struct USBTCPHostState {
@@ -24,6 +26,9 @@ struct USBTCPHostState {
     QemuMutex mutex;
     QemuMutex write_mutex;
     QemuCond cond;
+    QemuMutex queue_mutex;
+    QTAILQ_HEAD(, USBTCPPacket) queue;
+    QEMUBH *bh;
     int socket;
     char *host;
     uint32_t port;
