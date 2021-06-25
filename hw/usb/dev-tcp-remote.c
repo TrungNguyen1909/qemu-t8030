@@ -36,11 +36,9 @@ static void usb_tcp_remote_clean_inflight_queue(USBTCPRemoteState *s)
 
     WITH_QEMU_LOCK_GUARD(&s->queue_mutex) {
         QTAILQ_FOREACH(p, &s->queue, queue) {
-            WITH_QEMU_LOCK_GUARD(&p->m) {
-                p->p->status = USB_RET_STALL;
-                p->handled = 1;
-                qemu_cond_signal(&p->c);
-            }
+            p->p->status = USB_RET_STALL;
+            p->handled = 1;
+            qemu_cond_signal(&p->c);
         }
     }
 }
@@ -145,10 +143,8 @@ static void *usb_tcp_remote_read_thread(void *opaque)
                     }
                     usb_packet_copy(p, buffer, rhdr.length);
                 } else {
-                    p->actual_length = rhdr.length;
+                    p->actual_length += rhdr.length;
                 }
-            } else {
-                p->actual_length = 0;
             }
 
             p->status = rhdr.status;
@@ -379,6 +375,9 @@ static void usb_tcp_remote_handle_packet(USBDevice *dev, USBPacket *p)
        }
    }
 
+   /* TODO: This should be async instead of sync (USB_RET_ASYNC here instead of wait);
+    * however, QEMU USB stack does not allow NAK-ing an async packet.
+    */
    WITH_QEMU_LOCK_GUARD(&inflightPacket.m) {
        while ((qatomic_read(&inflightPacket.handled) & 1) == 0) {
            qemu_cond_wait(&inflightPacket.c, &inflightPacket.m);
