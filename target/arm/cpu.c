@@ -828,7 +828,7 @@ static void aarch64_cpu_dump_state(CPUState *cs, FILE *f, int flags)
                  psr & PSTATE_C ? 'C' : '-',
                  psr & PSTATE_V ? 'V' : '-',
                  ns_status,
-                 env->gxf.guarded ? 'G' : 'E',
+                 arm_is_guarded(env) ? 'G' : 'E',
                  el,
                  psr & PSTATE_SP ? 'h' : 't');
 

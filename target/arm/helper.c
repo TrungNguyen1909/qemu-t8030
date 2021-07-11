@@ -4004,7 +4004,7 @@ static void vmsa_tcr_el12_write(CPUARMState *env, const ARMCPRegInfo *ri,
 static void vmsa_tcr_el1_write(CPUARMState *env, const ARMCPRegInfo *ri,
                                uint64_t value)
 {
-    if (!env->gxf.guarded && env->cp15.vmsa_lock_el1 & VMSA_LOCK_TCR_EL1) {
+    if (!arm_is_guarded(env) && env->cp15.vmsa_lock_el1 & VMSA_LOCK_TCR_EL1) {
         return;
     }
     vmsa_tcr_el12_write(env, ri, value);
@@ -4024,7 +4024,7 @@ static void vmsa_ttbr_write(CPUARMState *env, const ARMCPRegInfo *ri,
 static void vmsa_ttbr0_el1_write(CPUARMState *env, const ARMCPRegInfo *ri,
                             uint64_t value)
 {
-    if (!env->gxf.guarded && env->cp15.vmsa_lock_el1 & VMSA_LOCK_TTBR0_EL1) {
+    if (!arm_is_guarded(env) && env->cp15.vmsa_lock_el1 & VMSA_LOCK_TTBR0_EL1) {
         return;
     }
 
@@ -4033,7 +4033,7 @@ static void vmsa_ttbr0_el1_write(CPUARMState *env, const ARMCPRegInfo *ri,
 static void vmsa_ttbr1_el1_write(CPUARMState *env, const ARMCPRegInfo *ri,
                             uint64_t value)
 {
-    if (!env->gxf.guarded && env->cp15.vmsa_lock_el1 & VMSA_LOCK_TTBR1_EL1) {
+    if (!arm_is_guarded(env) && env->cp15.vmsa_lock_el1 & VMSA_LOCK_TTBR1_EL1) {
         return;
     }
 
@@ -5063,11 +5063,11 @@ static void sctlr_write(CPUARMState *env, const ARMCPRegInfo *ri,
 static void sctlr_el1_write(CPUARMState *env, const ARMCPRegInfo *ri,
                         uint64_t value)
 {
-    if (!env->gxf.guarded && env->cp15.vmsa_lock_el1 & VMSA_LOCK_SCTLR_EL1) {
+    if (!arm_is_guarded(env) && env->cp15.vmsa_lock_el1 & VMSA_LOCK_SCTLR_EL1) {
         return;
     }
 
-    if (!env->gxf.guarded && env->cp15.vmsa_lock_el1 & VMSA_LOCK_SCTLR_M_BIT) {
+    if (!arm_is_guarded(env) && env->cp15.vmsa_lock_el1 & VMSA_LOCK_SCTLR_M_BIT) {
         value = (value & ~(SCTLR_M)) | (raw_read(env, ri) & SCTLR_M);
     }
 
@@ -10240,7 +10240,7 @@ static void arm_cpu_do_interrupt_aarch64(CPUState *cs)
     unsigned int new_mode, old_mode, cur_el;
     int rt;
 
-    if (env->gxf.guarded) {
+    if (arm_is_guarded(env)) {
         addr = env->gxf.vbar_gl[new_el];
     } else {
         addr = env->cp15.vbar_el[new_el];
@@ -10292,7 +10292,7 @@ static void arm_cpu_do_interrupt_aarch64(CPUState *cs)
     switch (cs->exception_index) {
     case EXCP_PREFETCH_ABORT:
     case EXCP_DATA_ABORT:
-        if (env->gxf.guarded) {
+        if (arm_is_guarded(env)) {
             env->gxf.far_gl[new_el] = env->exception.vaddress;
             qemu_log_mask(CPU_LOG_INT, "...with FAR 0x%" PRIx64 "\n",
                         env->gxf.far_gl[new_el]);
@@ -10347,7 +10347,7 @@ static void arm_cpu_do_interrupt_aarch64(CPUState *cs)
             break;
         }
 
-        if (env->gxf.guarded) {
+        if (arm_is_guarded(env)) {
             env->gxf.esr_gl[new_el] = env->exception.syndrome;
         } else {
             env->cp15.esr_el[new_el] = env->exception.syndrome;
@@ -10373,7 +10373,7 @@ static void arm_cpu_do_interrupt_aarch64(CPUState *cs)
         old_mode = pstate_read(env);
         aarch64_save_sp(env, arm_current_el(env));
 
-        if (genter || env->gxf.guarded) {
+        if (genter || arm_is_guarded(env)) {
             env->gxf.elr_gl[new_el] = env->pc;
         } else {
             env->elr_el[new_el] = env->pc;
@@ -10387,13 +10387,13 @@ static void arm_cpu_do_interrupt_aarch64(CPUState *cs)
         env->condexec_bits = 0;
     }
 
-    if (genter || env->gxf.guarded) {
+    if (genter || arm_is_guarded(env)) {
         env->gxf.spsr_gl[new_el] = old_mode;
     } else {
         env->banked_spsr[aarch64_banked_spsr_index(new_el)] = old_mode;
     }
 
-    if (genter || env->gxf.guarded) {
+    if (genter || arm_is_guarded(env)) {
         qemu_log_mask(CPU_LOG_INT, "...with ELR 0x%" PRIx64 "\n",
                     env->gxf.elr_gl[new_el]);
     } else {
@@ -10434,7 +10434,7 @@ static void arm_cpu_do_interrupt_aarch64(CPUState *cs)
     }
 
     pstate_write(env, PSTATE_DAIF | new_mode);
-    env->gxf.guarded |= genter;
+    env->gxf.gxf_status_el[new_el] |= genter;
     env->aarch64 = 1;
     aarch64_restore_sp(env, new_el);
     //TODO: MMU in GXF?
@@ -13541,7 +13541,7 @@ static uint64_t rebuild_hflags_a64(CPUARMState *env, int el, int fp_el,
         }
     }
 
-    if (env->gxf.guarded) {
+    if (arm_is_guarded(env)) {
         flags = FIELD_DP64(flags, TBFLAG_A64, GUARDED, 1);
     }
 

@@ -520,8 +520,10 @@ typedef struct CPUARMState {
     } cp15;
 
     struct {
-        uint64_t gxf_enter_el[3];
         uint64_t gxf_config_el[3];
+        uint64_t gxf_enter_el[3];
+        uint64_t gxf_status_el[3];
+        uint64_t gxf_abort_el[3];
         uint64_t sp_gl[3];
         uint64_t tpidr_gl[3];
         uint64_t vbar_gl[3];
@@ -530,7 +532,6 @@ typedef struct CPUARMState {
         uint64_t esr_gl[3];
         uint64_t elr_gl[3];
         uint64_t far_gl[3];
-        bool guarded;
     } gxf;
 
     struct {
@@ -2714,6 +2715,13 @@ static inline int arm_current_el(CPUARMState *env)
         return 1;
     }
 }
+
+/* Return true if the processor is in GXF state */
+static inline bool arm_is_guarded(CPUARMState *env)
+{
+    return env->gxf.gxf_status_el[arm_current_el(env)] & 1;
+}
+
 
 typedef struct ARMCPRegInfo ARMCPRegInfo;
 

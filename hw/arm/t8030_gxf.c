@@ -33,7 +33,7 @@ static void raw_write(CPUARMState *env, const ARMCPRegInfo *ri,
 static CPAccessResult access_gxf(CPUARMState *env, const ARMCPRegInfo *ri,
                                  bool isread)
 {
-    if (env->gxf.guarded) {
+    if (arm_is_guarded(env)) {
         return CP_ACCESS_OK;
     }
     return CP_ACCESS_TRAP;
@@ -41,7 +41,7 @@ static CPAccessResult access_gxf(CPUARMState *env, const ARMCPRegInfo *ri,
 
 static uint64_t tpidr_el1_read(CPUARMState *env, const ARMCPRegInfo *ri)
 {
-    if (env->gxf.guarded) {
+    if (arm_is_guarded(env)) {
         return env->gxf.tpidr_gl[1];
     } else {
         return env->cp15.tpidr_el[1];
@@ -50,7 +50,7 @@ static uint64_t tpidr_el1_read(CPUARMState *env, const ARMCPRegInfo *ri)
 
 static void tpidr_el1_write(CPUARMState *env, const ARMCPRegInfo *ri, uint64_t value)
 {
-    if (env->gxf.guarded) {
+    if (arm_is_guarded(env)) {
         env->gxf.tpidr_gl[1] = value;
     } else {
         env->cp15.tpidr_el[1] = value;
@@ -59,7 +59,7 @@ static void tpidr_el1_write(CPUARMState *env, const ARMCPRegInfo *ri, uint64_t v
 
 static uint64_t vbar_el1_read(CPUARMState *env, const ARMCPRegInfo *ri)
 {
-    if (env->gxf.guarded) {
+    if (arm_is_guarded(env)) {
         return env->gxf.vbar_gl[1];
     } else {
         return raw_read(env, ri);
@@ -68,10 +68,10 @@ static uint64_t vbar_el1_read(CPUARMState *env, const ARMCPRegInfo *ri)
 
 static void vbar_el1_write(CPUARMState *env, const ARMCPRegInfo *ri, uint64_t value)
 {
-    if (env->gxf.guarded) {
+    if (arm_is_guarded(env)) {
         env->gxf.vbar_gl[1] = value & ~0x1FULL;
     } else {
-        if (!env->gxf.guarded && env->cp15.vmsa_lock_el1 & VMSA_LOCK_VBAR_EL1) {
+        if (!arm_is_guarded(env) && env->cp15.vmsa_lock_el1 & VMSA_LOCK_VBAR_EL1) {
             return;
         }
 
@@ -81,7 +81,7 @@ static void vbar_el1_write(CPUARMState *env, const ARMCPRegInfo *ri, uint64_t va
 
 static uint64_t spsr_el1_read(CPUARMState *env, const ARMCPRegInfo *ri)
 {
-    if (env->gxf.guarded) {
+    if (arm_is_guarded(env)) {
         return env->gxf.spsr_gl[1];
     } else {
         return env->banked_spsr[BANK_SVC];
@@ -90,7 +90,7 @@ static uint64_t spsr_el1_read(CPUARMState *env, const ARMCPRegInfo *ri)
 
 static void spsr_el1_write(CPUARMState *env, const ARMCPRegInfo *ri, uint64_t value)
 {
-    if (env->gxf.guarded) {
+    if (arm_is_guarded(env)) {
         env->gxf.spsr_gl[1] = value;
     } else {
         env->banked_spsr[BANK_SVC] = value;
@@ -99,7 +99,7 @@ static void spsr_el1_write(CPUARMState *env, const ARMCPRegInfo *ri, uint64_t va
 
 static uint64_t elr_el1_read(CPUARMState *env, const ARMCPRegInfo *ri)
 {
-    if (env->gxf.guarded) {
+    if (arm_is_guarded(env)) {
         return env->gxf.elr_gl[1];
     } else {
         return env->elr_el[1];
@@ -108,7 +108,7 @@ static uint64_t elr_el1_read(CPUARMState *env, const ARMCPRegInfo *ri)
 
 static void elr_el1_write(CPUARMState *env, const ARMCPRegInfo *ri, uint64_t value)
 {
-    if (env->gxf.guarded) {
+    if (arm_is_guarded(env)) {
         env->gxf.elr_gl[1] = value;
     } else {
         env->elr_el[1] = value;
@@ -117,7 +117,7 @@ static void elr_el1_write(CPUARMState *env, const ARMCPRegInfo *ri, uint64_t val
 
 static uint64_t esr_el1_read(CPUARMState *env, const ARMCPRegInfo *ri)
 {
-    if (env->gxf.guarded) {
+    if (arm_is_guarded(env)) {
         return env->gxf.esr_gl[1];
     } else {
         return env->cp15.esr_el[1];
@@ -126,7 +126,7 @@ static uint64_t esr_el1_read(CPUARMState *env, const ARMCPRegInfo *ri)
 
 static void esr_el1_write(CPUARMState *env, const ARMCPRegInfo *ri, uint64_t value)
 {
-    if (env->gxf.guarded) {
+    if (arm_is_guarded(env)) {
         env->gxf.esr_gl[1] = value;
     } else {
         env->cp15.esr_el[1] = value;
@@ -135,7 +135,7 @@ static void esr_el1_write(CPUARMState *env, const ARMCPRegInfo *ri, uint64_t val
 
 static uint64_t far_el1_read(CPUARMState *env, const ARMCPRegInfo *ri)
 {
-    if (env->gxf.guarded) {
+    if (arm_is_guarded(env)) {
         return env->gxf.far_gl[1];
     } else {
         return env->cp15.far_el[1];
@@ -144,7 +144,7 @@ static uint64_t far_el1_read(CPUARMState *env, const ARMCPRegInfo *ri)
 
 static void far_el1_write(CPUARMState *env, const ARMCPRegInfo *ri, uint64_t value)
 {
-    if (env->gxf.guarded) {
+    if (arm_is_guarded(env)) {
         env->gxf.far_gl[1] = value;
     } else {
         env->cp15.far_el[1] = value;
@@ -186,43 +186,63 @@ static const ARMCPRegInfo t8030gxf_cp_reginfo[] = {
       .access = PL1_RW, .accessfn = access_tvm_trvm,
       .readfn = far_el1_read, .writefn = far_el1_write,
       .resetvalue = 0, },
-    { .name = "GXF_ENTER_EL1",                                                                       
-      .cp = CP_REG_ARM64_SYSREG_CP, .state = ARM_CP_STATE_AA64,                                       
+    { .name = "GXF_CONFIG_EL1",
+      .cp = CP_REG_ARM64_SYSREG_CP, .state = ARM_CP_STATE_AA64,
+      .opc0 = 3, .opc1 = 6, .crn = 15, .crm = 1, .opc2 = 2,
+      .access = PL1_RW, .resetvalue = 0,
+      .fieldoffset = offsetof(CPUARMState, gxf.gxf_config_el[1]) },
+    { .name = "GXF_STATUS_EL1",
+      .cp = CP_REG_ARM64_SYSREG_CP, .state = ARM_CP_STATE_AA64,
+      .opc0 = 3, .opc1 = 6, .crn = 15, .crm = 8, .opc2 = 0,
+      .access = PL1_R, .resetvalue = 0,
+      .fieldoffset = offsetof(CPUARMState, gxf.gxf_status_el[1]) },
+    { .name = "GXF_ENTER_EL1",
+      .cp = CP_REG_ARM64_SYSREG_CP, .state = ARM_CP_STATE_AA64,
       .opc0 = 3, .opc1 = 6, .crn = 15, .crm = 8, .opc2 = 1,
       .access = PL1_RW, .resetvalue = 0,
       .fieldoffset = offsetof(CPUARMState, gxf.gxf_enter_el[1]) },
-    { .name = "TPIDR_GL11",                                                                       
-      .cp = CP_REG_ARM64_SYSREG_CP, .state = ARM_CP_STATE_AA64,                                       
+    { .name = "GXF_ABORT_EL1",
+      .cp = CP_REG_ARM64_SYSREG_CP, .state = ARM_CP_STATE_AA64,
+      .opc0 = 3, .opc1 = 6, .crn = 15, .crm = 8, .opc2 = 2,
+      .access = PL1_RW, .resetvalue = 0,
+      .fieldoffset = offsetof(CPUARMState, gxf.gxf_abort_el[1]) },
+    { .name = "ASPSR_GL11",
+      .cp = CP_REG_ARM64_SYSREG_CP, .state = ARM_CP_STATE_AA64,
+      .opc0 = 3, .opc1 = 6, .crn = 15, .crm = 8, .opc2 = 3,
+      .access = PL1_RW, .accessfn = access_gxf, .resetvalue = 0,
+      .fieldoffset = offsetof(CPUARMState, gxf.aspsr_gl[1]) },
+    { .name = "TPIDR_GL11",
+      .cp = CP_REG_ARM64_SYSREG_CP, .state = ARM_CP_STATE_AA64,
       .opc0 = 3, .opc1 = 6, .crn = 15, .crm = 9, .opc2 = 1,
       .access = PL1_RW, .accessfn = access_gxf,
       .type = ARM_CP_ALIAS,
       .fieldoffset = offsetof(CPUARMState, cp15.tpidr_el[1]) },
-    { .name = "VBAR_GL11",                                                                       
-      .cp = CP_REG_ARM64_SYSREG_CP, .state = ARM_CP_STATE_AA64,                                       
+    { .name = "VBAR_GL11",
+      .cp = CP_REG_ARM64_SYSREG_CP, .state = ARM_CP_STATE_AA64,
       .opc0 = 3, .opc1 = 6, .crn = 15, .crm = 9, .opc2 = 2,
       .access = PL1_RW, .accessfn = access_gxf,
       .type = ARM_CP_ALIAS,
       .fieldoffset = offsetof(CPUARMState, cp15.vbar_el[1]) },
-    { .name = "SPSR_GL11",                                                                       
-      .cp = CP_REG_ARM64_SYSREG_CP, .state = ARM_CP_STATE_AA64,                                       
+    { .name = "SPSR_GL11",
+      .cp = CP_REG_ARM64_SYSREG_CP, .state = ARM_CP_STATE_AA64,
       .opc0 = 3, .opc1 = 6, .crn = 15, .crm = 9, .opc2 = 3,
       .access = PL1_RW, .accessfn = access_gxf,
       .type = ARM_CP_ALIAS,
       .fieldoffset = offsetof(CPUARMState, banked_spsr[BANK_SVC]) },
-    { .name = "ESR_GL11",                                                                       
-      .cp = CP_REG_ARM64_SYSREG_CP, .state = ARM_CP_STATE_AA64,                                       
+    { .name = "ESR_GL11",
+      .cp = CP_REG_ARM64_SYSREG_CP, .state = ARM_CP_STATE_AA64,
       .opc0 = 3, .opc1 = 6, .crn = 15, .crm = 9, .opc2 = 5,
       .access = PL1_RW, .accessfn = access_gxf,
       .type = ARM_CP_ALIAS,
       .fieldoffset = offsetof(CPUARMState, cp15.esr_el[1]) },
-    { .name = "ELR_GL11",                                                                       
-      .cp = CP_REG_ARM64_SYSREG_CP, .state = ARM_CP_STATE_AA64,                                       
+    { .name = "ELR_GL11",
+      .cp = CP_REG_ARM64_SYSREG_CP, .state = ARM_CP_STATE_AA64,
       .opc0 = 3, .opc1 = 6, .crn = 15, .crm = 9, .opc2 = 6,
       .access = PL1_RW, .accessfn = access_gxf,
       .type = ARM_CP_ALIAS,
       .fieldoffset = offsetof(CPUARMState, elr_el[1]) },
-    { .name = "FAR_GL11",                                                                       
-      .cp = CP_REG_ARM64_SYSREG_CP, .state = ARM_CP_STATE_AA64,                                       
+    { .name = "FAR_GL11",
+      .cp = CP_REG_ARM64_SYSREG_CP, .state = ARM_CP_STATE_AA64,
       .opc0 = 3, .opc1 = 6, .crn = 15, .crm = 9, .opc2 = 7,
       .access = PL1_RW, .accessfn = access_gxf,
       .type = ARM_CP_ALIAS,

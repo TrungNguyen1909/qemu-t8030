@@ -941,7 +941,7 @@ void HELPER(exception_return)(CPUARMState *env, uint64_t new_pc)
     int new_el;
     bool return_to_aa64;
 
-    if (env->gxf.guarded) { 
+    if (arm_is_guarded(env)) { 
         spsr = env->gxf.spsr_gl[cur_el];
     } else {
         spsr = env->banked_spsr[spsr_idx];
@@ -1096,7 +1096,7 @@ void HELPER(gexit)(CPUARMState *env)
         env->pstate &= ~PSTATE_SS;
     }
 
-    env->gxf.guarded = false;
+    env->gxf.gxf_status_el[cur_el] &= ~1;
     aarch64_restore_sp(env, cur_el);
     env->pc = env->gxf.elr_gl[cur_el];
     helper_rebuild_hflags_a64(env, cur_el);
