@@ -55,13 +55,13 @@ typedef struct
 } T8030MachineClass;
 
 typedef struct T8030CPUState{
-    ARMCPU* cpu;
-    AddressSpace* nsas;
-    MemoryRegion* impl_reg;
-    MemoryRegion* coresight_reg;
-    MemoryRegion* memory;
-    MemoryRegion* sysmem;
-    MachineState* machine;
+    ARMCPU *cpu;
+    AddressSpace *nsas;
+    MemoryRegion *impl_reg;
+    MemoryRegion *coresight_reg;
+    MemoryRegion *memory;
+    MemoryRegion *sysmem;
+    MachineState *machine;
     uint32_t cpu_id;
     uint32_t phys_id;
     uint32_t cluster_id;
@@ -90,8 +90,8 @@ typedef struct T8030CPUState{
     T8030_CPREG_VAR_DEF(ARM64_REG_KERNELKEYLO_EL1);
     T8030_CPREG_VAR_DEF(ARM64_REG_KERNELKEYHI_EL1);
     T8030_CPREG_VAR_DEF(S3_4_c15_c0_5);
-    T8030_CPREG_VAR_DEF(S3_4_c15_c1_3);
-    T8030_CPREG_VAR_DEF(S3_4_c15_c1_4);
+    T8030_CPREG_VAR_DEF(AMX_STATUS_EL1);
+    T8030_CPREG_VAR_DEF(AMX_CTL_EL1);
     T8030_CPREG_VAR_DEF(ARM64_REG_CYC_OVRD);
     T8030_CPREG_VAR_DEF(ARM64_REG_ACC_CFG);
     //SPRR
@@ -147,9 +147,9 @@ typedef struct {
     hwaddr base;
     uint8_t id;
     uint8_t type;
-    MemoryRegion* mr;
-    MachineState* machine;
-    T8030CPUState* cpus[MAX_CPU];
+    MemoryRegion *mr;
+    MachineState *machine;
+    T8030CPUState *cpus[MAX_CPU];
     int deferredIPI[MAX_CPU][MAX_CPU];
     int noWakeIPI[MAX_CPU][MAX_CPU];
     uint64_t tick;
@@ -167,15 +167,15 @@ typedef struct
     hwaddr soc_size;
     hwaddr dram_base;
     unsigned long dram_size;
-    T8030CPUState* cpus[MAX_CPU];
-    cluster* clusters[MAX_CLUSTER];
-    QEMUTimer* ipicr_timer;
+    T8030CPUState *cpus[MAX_CPU];
+    cluster *clusters[MAX_CLUSTER];
+    QEMUTimer *ipicr_timer;
     uint64_t ipi_cr;
     //store the pending IPI_SR value
     uint64_t pendingIPI[MAX_CPU];
     bool pendingWakeup[MAX_CPU];
-    SysBusDevice* aic;
-    MemoryRegion* sysmem;
+    SysBusDevice *aic;
+    MemoryRegion *sysmem;
     struct arm_boot_info bootinfo;
     char ramdisk_filename[1024];
     char kernel_filename[1024];
@@ -203,10 +203,10 @@ typedef struct
 #define RTCLOCK_SEC_DIVISOR     24000000ull
 
 static void
-absolutetime_to_nanoseconds(uint64_t   abstime,
-    uint64_t * result)
+absolutetime_to_nanoseconds(uint64_t abstime,
+                            uint64_t *result)
 {
-	uint64_t        t64;
+	uint64_t t64;
 
 	*result = (t64 = abstime / RTCLOCK_SEC_DIVISOR) * NSEC_PER_SEC;
 	abstime -= (t64 * RTCLOCK_SEC_DIVISOR);
@@ -214,10 +214,10 @@ absolutetime_to_nanoseconds(uint64_t   abstime,
 }
 
 static void
-nanoseconds_to_absolutetime(uint64_t   nanosecs,
-    uint64_t * result)
+nanoseconds_to_absolutetime(uint64_t nanosecs,
+                            uint64_t *result)
 {
-	uint64_t        t64;
+	uint64_t t64;
 
 	*result = (t64 = nanosecs / NSEC_PER_SEC) * RTCLOCK_SEC_DIVISOR;
 	nanosecs -= (t64 * NSEC_PER_SEC);
