@@ -5,6 +5,7 @@
 #include "target/arm/cpu.h"
 #include "target/arm/internals.h"
 #include "t8030_gxf.h"
+#include "exec/exec-all.h"
 
 CPAccessResult access_tvm_trvm(CPUARMState *env, const ARMCPRegInfo *ri,
                                bool isread);
@@ -151,6 +152,42 @@ static void far_el1_write(CPUARMState *env, const ARMCPRegInfo *ri, uint64_t val
     }
 }
 
+static void sprr_perm_el0_write(CPUARMState *env, const ARMCPRegInfo *ri, uint64_t value)
+{
+    uint64_t perm = raw_read(env, ri);
+    uint32_t mask = env->sprr.sprr_umask;
+    if (arm_current_el(env)) {
+        raw_write(env, ri, value);
+        return;
+    }
+    
+    for (int i = 0; i < 16; i++) {
+        uint32_t umask = SPRR_MASK_EXTRACT_IDX_ATTR(mask, i);
+        uint64_t requested_perm = APRR_EXTRACT_IDX_ATTR(value, i); 
+        uint64_t orig_perm = APRR_EXTRACT_IDX_ATTR(perm, i);
+        uint64_t changed_perm = ((requested_perm ^ orig_perm) & umask);
+        uint64_t result_perm = orig_perm;
+        /* Only change bits that are set in mask */
+
+        result_perm &= ~changed_perm;
+        result_perm |= requested_perm & changed_perm;
+        
+        perm &= ~(APRR_ATTR_MASK << APRR_SHIFT_FOR_IDX(i));
+        perm |= result_perm << APRR_SHIFT_FOR_IDX(i);
+    }
+
+    raw_write(env, ri, perm);
+
+    tlb_flush(env_cpu(env));
+}
+
+static void sprr_write_flush(CPUARMState *env, const ARMCPRegInfo *ri, uint64_t value)
+{
+    raw_write(env, ri, value);
+
+    tlb_flush(env_cpu(env));
+}
+
 static const ARMCPRegInfo t8030gxf_cp_reginfo[] = {
     { .name = "TPIDR_EL1", .state = ARM_CP_STATE_AA64,
       .opc0 = 3, .opc1 = 0, .opc2 = 4, .crn = 13, .crm = 0,
@@ -247,7 +284,48 @@ static const ARMCPRegInfo t8030gxf_cp_reginfo[] = {
       .access = PL1_RW, .accessfn = access_gxf,
       .type = ARM_CP_ALIAS,
       .fieldoffset = offsetof(CPUARMState, cp15.far_el[1]) },
-    REGINFO_SENTINEL,
+      //TODO: Implement lockdown for these registers to prevent unexpected changes
+    { .name = "SPRR_CONFIG_EL1",
+      .cp = CP_REG_ARM64_SYSREG_CP, .state = ARM_CP_STATE_AA64,
+      .opc0 = 3, .opc1 = 6, .crn = 15, .crm = 1, .opc2 = 0,
+      .access = PL1_RW, .resetvalue = 0,
+      .readfn = raw_read, .writefn = sprr_write_flush,
+      .fieldoffset = offsetof(CPUARMState, sprr.sprr_config_el[1]) },
+    { .name = "SPRR_CONFIG_EL0",
+      .cp = CP_REG_ARM64_SYSREG_CP, .state = ARM_CP_STATE_AA64,
+      .opc0 = 3, .opc1 = 6, .crn = 15, .crm = 1, .opc2 = 1,
+      .access = PL1_RW, .resetvalue = 0,
+      .readfn = raw_read, .writefn = sprr_write_flush,
+      .fieldoffset = offsetof(CPUARMState, sprr.sprr_config_el[0]) },
+    { .name = "SPRR_PERM_EL0",
+      .cp = CP_REG_ARM64_SYSREG_CP, .state = ARM_CP_STATE_AA64,
+      .opc0 = 3, .opc1 = 6, .crn = 15, .crm = 1, .opc2 = 5,
+      .access = PL0_RW, .resetvalue = 0,
+      .readfn = raw_read,
+      .writefn = sprr_perm_el0_write,
+      .fieldoffset = offsetof(CPUARMState, sprr.sprr_perm_el[0]) },
+    { .name = "SPRR_UNK_EL0",
+      .cp = CP_REG_ARM64_SYSREG_CP, .state = ARM_CP_STATE_AA64,
+      .opc0 = 3, .opc1 = 6, .crn = 15, .crm = 1, .opc2 = 6,
+      .access = PL1_RW | PL0_R, .resetvalue = 0,
+      .fieldoffset = offsetof(CPUARMState, sprr.sprr_unk_el[0]) },
+    { .name = "SPRR_UNK_EL1",
+      .cp = CP_REG_ARM64_SYSREG_CP, .state = ARM_CP_STATE_AA64,
+      .opc0 = 3, .opc1 = 6, .crn = 15, .crm = 1, .opc2 = 7,
+      .access = PL1_RW, .resetvalue = 0,
+      .fieldoffset = offsetof(CPUARMState, sprr.sprr_unk_el[1]) },
+    { .name = "SPRR_PERM_EL1",
+      .cp = CP_REG_ARM64_SYSREG_CP, .state = ARM_CP_STATE_AA64,
+      .opc0 = 3, .opc1 = 6, .crn = 15, .crm = 3, .opc2 = 0,
+      .access = PL1_RW, .resetvalue = 0,
+      .readfn = raw_read, .writefn = sprr_write_flush,
+      .fieldoffset = offsetof(CPUARMState, sprr.sprr_perm_el[1]) },
+    { .name = "SPRR_UMASK_EL1",
+      .cp = CP_REG_ARM64_SYSREG_CP, .state = ARM_CP_STATE_AA64,
+      .opc0 = 3, .opc1 = 6, .crn = 15, .crm = 3, .opc2 = 1,
+      .access = PL1_RW, .resetvalue = 0,
+      .fieldoffset = offsetof(CPUARMState, sprr.sprr_umask) },
+      REGINFO_SENTINEL,
 };
 
 void t8030cpu_init_gxf(ARMCPU *cpu)

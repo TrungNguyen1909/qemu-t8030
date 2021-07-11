@@ -226,6 +226,36 @@ typedef struct ARMPACKey {
 } ARMPACKey;
 #endif
 
+#define APRR_ATTR_X (1ULL)
+#define APRR_ATTR_W (2ULL)
+#define APRR_ATTR_R (4ULL)
+
+#define APRR_ATTR_WX  (APRR_ATTR_W | APRR_ATTR_X)
+#define APRR_ATTR_RX  (APRR_ATTR_R | APRR_ATTR_X)
+#define APRR_ATTR_RWX (APRR_ATTR_R | APRR_ATTR_W | APRR_ATTR_X)
+
+#define APRR_ATTR_NONE (0ULL)
+#define APRR_ATTR_MASK (APRR_ATTR_RWX)
+
+#define SPRR_ATTR_MASK (15ULL)
+
+#define APRR_SHIFT_FOR_IDX(x) \
+	((x) << 2ULL)
+
+#define APRR_EXTRACT_IDX_ATTR(_aprr_value, _idx) \
+	(((_aprr_value) >> APRR_SHIFT_FOR_IDX(_idx)) & APRR_ATTR_MASK)
+
+#define SPRR_SHIFT_FOR_IDX(x) \
+	((x) << 2ULL)
+
+#define SPRR_EXTRACT_IDX_ATTR(_sprr_value, _idx) \
+	(((_sprr_value) >> SPRR_SHIFT_FOR_IDX(_idx)) & SPRR_ATTR_MASK)
+    
+#define SPRR_MASK_SHIFT_FOR_IDX(x) \
+	((x) << 1ULL)
+
+#define SPRR_MASK_EXTRACT_IDX_ATTR(_sprr_mask_value, _idx) \
+	(((_sprr_mask_value) >> SPRR_MASK_SHIFT_FOR_IDX(_idx)) & APRR_ATTR_MASK)
 
 typedef struct CPUARMState {
     /* Regs for current mode.  */
@@ -533,6 +563,13 @@ typedef struct CPUARMState {
         uint64_t elr_gl[3];
         uint64_t far_gl[3];
     } gxf;
+
+    struct {
+        uint64_t sprr_perm_el[3];
+        uint64_t sprr_config_el[3];
+        uint64_t sprr_unk_el[3];
+        uint32_t sprr_umask;
+    } sprr;
 
     struct {
         /* M profile has up to 4 stack pointers:
