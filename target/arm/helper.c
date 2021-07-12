@@ -10789,6 +10789,74 @@ simple_ap_to_rw_prot(CPUARMState *env, ARMMMUIdx mmu_idx, int ap)
     return simple_ap_to_rw_prot_is_user(ap, regime_is_user(env, mmu_idx));
 }
 
+/* Translate section/page attributes to page
+ * R/W/X protection flags.
+ *
+ * @env:     CPUARMState
+ * @ap:      The 2-bit simple AP (AP[2:1])
+ * @xn:      XN (execute-never) bits
+ * @pxn:     PXN (privileged-execute-never) bits
+ */
+static inline int
+pte_to_sprr_prot(CPUARMState *env, int ap, int xn, int pxn)
+{
+    int sprr_idx = ((ap << 2) | (xn << 1) | pxn) & 0xf;
+    int cur_el = arm_current_el(env);
+    uint64_t sprr_perm = env->sprr.sprr_perm_el[cur_el];
+
+    if (env->sprr.sprr_config_el[cur_el] & 1) {
+        int attr = SPRR_EXTRACT_IDX_ATTR(sprr_perm, sprr_idx);
+        int prot = 0;
+
+        if (arm_is_guarded(env)) {
+            switch (attr >> 2) {
+            case 0:
+                prot = 0;
+                break;
+            case 1:
+                prot = PAGE_READ | PAGE_EXEC;
+                break;
+            case 2:
+                prot = PAGE_READ;
+                break;
+            case 3:
+                prot = PAGE_READ | PAGE_WRITE;
+                break;
+            default:
+                g_assert_not_reached();
+                break;
+            }
+        } else {
+            switch (attr & 3) {
+            case 0:
+                prot = 0;
+                break;
+            case 1:
+                prot = PAGE_READ | PAGE_EXEC;
+                if ((attr >> 2) == 2) {
+                    prot = PAGE_EXEC;
+                }
+                break;
+            case 2:
+                prot = PAGE_READ;
+                break;
+            case 3:
+                prot = PAGE_READ | PAGE_WRITE;
+                if ((attr >> 2) == 1) {
+                    /* No R/W in EL if RX in GXF */
+                    prot = 0;
+                }
+                break;
+            default:
+                g_assert_not_reached();
+                break;
+            }
+        }
+        return prot;
+    }
+    return PAGE_READ | PAGE_WRITE | PAGE_EXEC;
+}
+
 /* Translate S2 section/page access permissions to protection flags
  *
  * @env:     CPUARMState
