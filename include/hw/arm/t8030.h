@@ -177,24 +177,13 @@ typedef struct
     SysBusDevice *aic;
     MemoryRegion *sysmem;
     struct arm_boot_info bootinfo;
-    char ramdisk_filename[1024];
-    char kernel_filename[1024];
-    char dtb_filename[1024];
-    char driver_filename[1024];
     char trustcache_filename[1024];
-    char kern_args[1024];
-    FileMmioDev ramdisk_file_dev;
     struct mach_header_64 *kernel;
     DTBNode *device_tree;
-    bool use_ramfb;
+    video_boot_args video;
     QemuMutex mutex;
     uint32_t build_version;
 } T8030MachineState;
-
-typedef struct
-{
-    uint8_t ramfb[RAMFB_SIZE];
-} __attribute__((packed)) AllocatedData;
 
 #define NSEC_PER_USEC   1000ull         /* nanoseconds per microsecond */
 #define USEC_PER_SEC    1000000ull      /* microseconds per second */

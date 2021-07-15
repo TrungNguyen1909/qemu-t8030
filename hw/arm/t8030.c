@@ -518,11 +518,12 @@ static void t8030_memory_setup(MachineState *machine)
     hwaddr dtb_pa;
     hwaddr dtb_va;
     uint64_t dtb_size;
+    hwaddr ramdisk_pa;
+    hwaddr ramdisk_size;
     hwaddr kbootargs_pa;
     hwaddr top_of_kernel_data_pa;
     hwaddr mem_size;
     hwaddr phys_ptr;
-    video_boot_args v_bootargs = {0};
     T8030MachineState *tms = T8030_MACHINE(machine);
     MemoryRegion* sysmem = tms->sysmem;
     AddressSpace* nsas = tms->cpus[0]->nsas;
@@ -530,7 +531,6 @@ static void t8030_memory_setup(MachineState *machine)
     hwaddr trustcache_pa;
     void *nvram_data = NULL;
     NvmeNamespace* nvram;
-    hwaddr ramdisk_size = 0;
 
     //setup the memory layout:
 
@@ -566,14 +566,13 @@ static void t8030_memory_setup(MachineState *machine)
     phys_ptr = vtop_static(align_16k_high(virt_end));
 
     //now account for the ramdisk
-    tms->ramdisk_file_dev.pa = 0;
+    ramdisk_pa = 0;
 
-    if (tms->ramdisk_filename[0]) {
-        tms->ramdisk_file_dev.pa = phys_ptr;
-        macho_load_ramdisk(tms->ramdisk_filename, nsas, sysmem, phys_ptr, &tms->ramdisk_file_dev.size);
-        tms->ramdisk_file_dev.size = align_16k_high(tms->ramdisk_file_dev.size);
-        ramdisk_size = tms->ramdisk_file_dev.size;
-        phys_ptr += tms->ramdisk_file_dev.size;
+    if (machine->initrd_filename) {
+        ramdisk_pa = phys_ptr;
+        macho_load_ramdisk(machine->initrd_filename, nsas, sysmem, phys_ptr, &ramdisk_size);
+        ramdisk_size = align_16k_high(ramdisk_size);
+        phys_ptr += ramdisk_size;
     }
 
     //now account for kernel boot args
@@ -599,7 +598,7 @@ static void t8030_memory_setup(MachineState *machine)
 
     macho_load_dtb(tms->device_tree, nsas, sysmem, "DeviceTree",
                    dtb_pa, &dtb_size,
-                   tms->ramdisk_file_dev.pa, ramdisk_size,
+                   ramdisk_pa, ramdisk_size,
                    trustcache_pa, trustcache_size,
                    kbootargs_pa,
                    tms->dram_base, tms->dram_size,
@@ -615,7 +614,7 @@ static void t8030_memory_setup(MachineState *machine)
     macho_setup_bootargs("BootArgs", nsas, sysmem, kbootargs_pa,
                          g_virt_base, g_phys_base, mem_size,
                          top_of_kernel_data_pa, dtb_va, dtb_size,
-                         v_bootargs, tms->kern_args);
+                         tms->video, machine->kernel_cmdline);
 
     allocate_ram(sysmem, "RAM", T8030_DRAM_BASE, mem_size, 0);
 }
@@ -1386,7 +1385,7 @@ static void t8030_machine_init(MachineState *machine)
     qemu_mutex_init(&tms->mutex);
     tms->sysmem = get_system_memory();
 
-    hdr = macho_load_file(tms->kernel_filename);
+    hdr = macho_load_file(machine->kernel_filename);
     assert(hdr);
     tms->kernel = hdr;
     xnu_header = hdr;
@@ -1403,7 +1402,7 @@ static void t8030_machine_init(MachineState *machine)
 
     t8030_patch_kernel(hdr);
 
-    tms->device_tree = load_dtb_from_file(tms->dtb_filename);
+    tms->device_tree = load_dtb_from_file(machine->dtb);
     child = get_dtb_child_node_by_name(tms->device_tree, "arm-io");
     assert(child != NULL);
 
@@ -1446,45 +1445,6 @@ static void t8030_machine_init(MachineState *machine)
     qemu_register_reset(t8030_machine_reset, tms);
 }
 
-static void t8030_set_ramdisk_filename(Object *obj, const char *value, Error **errp)
-{
-    T8030MachineState *tms = T8030_MACHINE(obj);
-
-    g_strlcpy(tms->ramdisk_filename, value, sizeof(tms->ramdisk_filename));
-}
-
-static char *t8030_get_ramdisk_filename(Object *obj, Error **errp)
-{
-    T8030MachineState *tms = T8030_MACHINE(obj);
-    return g_strdup(tms->ramdisk_filename);
-}
-
-static void t8030_set_kernel_filename(Object *obj, const char *value, Error **errp)
-{
-    T8030MachineState *tms = T8030_MACHINE(obj);
-
-    g_strlcpy(tms->kernel_filename, value, sizeof(tms->kernel_filename));
-}
-
-static char *t8030_get_kernel_filename(Object *obj, Error **errp)
-{
-    T8030MachineState *tms = T8030_MACHINE(obj);
-    return g_strdup(tms->kernel_filename);
-}
-
-static void t8030_set_dtb_filename(Object *obj, const char *value, Error **errp)
-{
-    T8030MachineState *tms = T8030_MACHINE(obj);
-
-    g_strlcpy(tms->dtb_filename, value, sizeof(tms->dtb_filename));
-}
-
-static char *t8030_get_dtb_filename(Object *obj, Error **errp)
-{
-    T8030MachineState *tms = T8030_MACHINE(obj);
-    return g_strdup(tms->dtb_filename);
-}
-
 static void t8030_set_trustcache_filename(Object *obj, const char *value, Error **errp)
 {
     T8030MachineState *tms = T8030_MACHINE(obj);
@@ -1499,75 +1459,11 @@ static char *t8030_get_trustcache_filename(Object *obj, Error **errp)
     return g_strdup(tms->trustcache_filename);
 }
 
-static void t8030_set_kern_args(Object *obj, const char *value, Error **errp)
-{
-    T8030MachineState *tms = T8030_MACHINE(obj);
-
-    g_strlcpy(tms->kern_args, value, sizeof(tms->kern_args));
-}
-
-static char *t8030_get_kern_args(Object *obj, Error **errp)
-{
-    T8030MachineState *tms = T8030_MACHINE(obj);
-
-    return g_strdup(tms->kern_args);
-}
-
-static void t8030_set_xnu_ramfb(Object *obj, const char *value, Error **errp)
-{
-    T8030MachineState *tms = T8030_MACHINE(obj);
-
-    if (strcmp(value, "on") == 0)
-        tms->use_ramfb = true;
-    else {
-        if (strcmp(value, "off") != 0)
-            fprintf(stderr, "NOTE: the value of xnu-ramfb is not valid,\
-                            the framebuffer will be disabled.\n");
-        tms->use_ramfb = false;
-    }
-}
-
-static char *t8030_get_xnu_ramfb(Object *obj, Error **errp)
-{
-    T8030MachineState *tms = T8030_MACHINE(obj);
-
-    if (tms->use_ramfb)
-        return g_strdup("on");
-    else
-        return g_strdup("off");
-}
-
 static void t8030_instance_init(Object *obj)
 {
-    object_property_add_str(obj, "ramdisk-filename", t8030_get_ramdisk_filename,
-                            t8030_set_ramdisk_filename);
-    object_property_set_description(obj, "ramdisk-filename",
-                                    "Set the ramdisk filename to be loaded");
-
-    object_property_add_str(obj, "kernel-filename", t8030_get_kernel_filename,
-                            t8030_set_kernel_filename);
-    object_property_set_description(obj, "kernel-filename",
-                                    "Set the kernel filename to be loaded");
-
-    object_property_add_str(obj, "dtb-filename", t8030_get_dtb_filename, t8030_set_dtb_filename);
-    object_property_set_description(obj, "dtb-filename",
-                                    "Set the dev tree filename to be loaded");
-
     object_property_add_str(obj, "trustcache-filename", t8030_get_trustcache_filename, t8030_set_trustcache_filename);
     object_property_set_description(obj, "trustcache-filename",
                                     "Set the trustcache filename to be loaded");
-
-    object_property_add_str(obj, "kern-cmd-args", t8030_get_kern_args,
-                            t8030_set_kern_args);
-    object_property_set_description(obj, "kern-cmd-args",
-                                    "Set the XNU kernel cmd args");
-
-    object_property_add_str(obj, "xnu-ramfb",
-                            t8030_get_xnu_ramfb,
-                            t8030_set_xnu_ramfb);
-
-    object_property_set_description(obj, "xnu-ramfb",
-                                    "Turn on the display framebuffer");
 }
 
 static void t8030_machine_class_init(ObjectClass *klass, void *data)

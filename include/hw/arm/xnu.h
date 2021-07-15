@@ -28,8 +28,6 @@
 #include "hw/arm/boot.h"
 #include "hw/arm/xnu_mem.h"
 #include "hw/arm/xnu_dtb.h"
-#include "hw/arm/xnu_file_mmio_dev.h"
-#include "hw/arm/xnu_fb_cfg.h"
 
 // pexpert/pexpert/arm64/boot.h
 #define xnu_arm64_kBootArgsRevision2 2 /* added boot_args.bootFlags */
@@ -208,7 +206,7 @@ void macho_map_raw_file(const char *filename, AddressSpace *as, MemoryRegion *me
 
 void macho_load_raw_file(const char *filename, AddressSpace *as, MemoryRegion *mem,
                          const char *name, hwaddr file_pa, uint64_t *size);
-                         
+
 DTBNode *load_dtb_from_file(char *filename);
 
 void macho_load_dtb(DTBNode *root, AddressSpace *as, MemoryRegion *mem,

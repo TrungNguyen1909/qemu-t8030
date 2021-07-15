@@ -250,7 +250,11 @@ echo "XQAAAAT//////////wAtIHxAA8l2M4RwLYP/nVI8/XJz1smfQHsB1bYBDcXGde9gDROioaQd5i
 
 ## Boot from stock Ramdisk
 ```sh
-qemu-t8030/build/qemu-system-aarch64 -s -M t8030,kernel-filename=kernelcache.research.iphone12b,dtb-filename=Firmware/all_flash/DeviceTree.n104ap.im4p,kern-cmd-args="debug=0x8 kextlog=0xffff serial=3 -v rd=md0",ramdisk-filename=038-44087-125.dmg,xnu-ramfb=on,trustcache-filename=Firmware/038-44087-125.dmg.trustcache \
+qemu-t8030/build/qemu-system-aarch64 -s -M t8030,trustcache-filename=Firmware/038-44087-125.dmg.trustcache \
+-kernel kernelcache.research.iphone12b \
+-dtb Firmware/all_flash/DeviceTree.n104ap.im4p \
+-append "debug=0x8 kextlog=0xffff serial=3 -v rd=md0" \
+-initrd 038-44087-125.dmg \
 -cpu max -smp 1 \
 -m 4G -serial mon:stdio \
 -drive file=disk.1,format=raw,if=none,id=drive.1 \
@@ -262,7 +266,11 @@ qemu-t8030/build/qemu-system-aarch64 -s -M t8030,kernel-filename=kernelcache.res
 
 ## Boot from modified Ramdisk
 ```sh
-qemu-t8030/build/qemu-system-aarch64 -s -M t8030,kernel-filename=kernelcache.research.iphone12b,dtb-filename=Firmware/all_flash/DeviceTree.n104ap.im4p,kern-cmd-args="debug=0x8 kextlog=0xffff serial=3 -v rd=md0",ramdisk-filename=038-44087-125.dmg,xnu-ramfb=on,trustcache-filename=static_tc \
+qemu-t8030/build/qemu-system-aarch64 -s -M t8030,trustcache-filename=static_tc \
+-kernel kernelcache.research.iphone12b \
+-dtb Firmware/all_flash/DeviceTree.n104ap.im4p \
+-append "debug=0x8 kextlog=0xffff serial=3 -v rd=md0" \
+-initrd 038-44087-125.dmg \
 -cpu max -smp 1 \
 -m 4G -serial mon:stdio \
 -drive file=disk.1,format=raw,if=none,id=drive.1 \
@@ -274,7 +282,11 @@ qemu-t8030/build/qemu-system-aarch64 -s -M t8030,kernel-filename=kernelcache.res
 
 ## Boot from NAND
 ```sh
-qemu-t8030/build/qemu-system-aarch64 -s -M t8030,kernel-filename=kernelcache.research.iphone12b,dtb-filename=Firmware/all_flash/DeviceTree.n104ap.im4p,kern-cmd-args="debug=0x8 kextlog=0xffff serial=3 -v rd=disk0s1 launchd_unsecure_cache=1",ramdisk-filename=038-44087-125.dmg.out,xnu-ramfb=on,trustcache-filename=static_tc \
+qemu-t8030/build/qemu-system-aarch64 -s -M t8030,trustcache-filename=static_tc \
+-kernel kernelcache.research.iphone12b \
+-dtb Firmware/all_flash/DeviceTree.n104ap.im4p \
+-append "debug=0x8 kextlog=0xffff serial=3 -v rd=disk0s1 launchd_unsecure_cache=1" \
+-initrd 038-44087-125.dmg.out \
 -cpu max -smp 1 \
 -m 4G -serial mon:stdio \
 -drive file=disk.1,format=raw,if=none,id=drive.1 \

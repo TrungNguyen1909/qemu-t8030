@@ -44,8 +44,6 @@ arm_ss.add(when: 'TARGET_AARCH64', if_true: files(
   'translate-a64.c',
   'translate-sve.c',
   'xnu_dtb.c',
-  'xnu_fb_cfg.c',
-  'xnu_file_mmio_dev.c',
   'xnu_mem.c',
   'xnu.c',
   'xnu_pf.c',
