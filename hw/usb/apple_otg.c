@@ -107,8 +107,10 @@ DeviceState *apple_otg_create(DTBNode *node)
     *(uint32_t*)(s->phy_reg + rAUSB_USB20PHY_OTGSIG) |= (1 << 8); //cable connected
     memory_region_init_io(&s->usbctl, OBJECT(dev), &usbctl_reg_ops, s, TYPE_APPLE_OTG ".usbctl", sizeof(s->usbctl_reg));
     sysbus_init_mmio(sbd, &s->usbctl);
-    child = get_dtb_child_node_by_name(node, "usb-device");
-    prop = get_dtb_prop(child, "reg");
+    child = get_dtb_node(node, "usb-device");
+    assert(child);
+    prop = find_dtb_prop(child, "reg");
+    assert(prop);
     dwc2 = DWC2_USB(qdev_new(TYPE_DWC2_USB));
     assert(dwc2);
     memory_region_init_alias(&s->dwc2_mr, OBJECT(dev), TYPE_APPLE_OTG ".dwc2",

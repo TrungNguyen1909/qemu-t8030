@@ -471,21 +471,21 @@ SysBusDevice *apple_aic_create(uint32_t numCPU, DTBNode *node)
 
     dev = qdev_new(TYPE_APPLE_AIC);
     s = APPLE_AIC(dev);
-    prop = get_dtb_prop(node, "AAPL,phandle");
+    prop = find_dtb_prop(node, "AAPL,phandle");
     assert(prop);
     s->phandle = *(uint32_t *)prop->value;
-    prop = get_dtb_prop(node, "reg");
+    prop = find_dtb_prop(node, "reg");
     assert(prop != NULL);
     reg = (hwaddr *)prop->value;
     s->base_size = reg[1];
-    prop = get_dtb_prop(node, "ipid-mask");
+    prop = find_dtb_prop(node, "ipid-mask");
     s->numEIR = prop->length / 4;
     s->numIRQ = s->numEIR * 32;
 
     s->numCPU = numCPU;
-    overwrite_dtb_prop(node, "#main-cpus", 4, (uint8_t *)&s->numCPU);
+    set_dtb_prop(node, "#main-cpus", 4, (uint8_t *)&s->numCPU);
 
-    prop = get_dtb_prop(node, "#shared-timestamps");
+    prop = find_dtb_prop(node, "#shared-timestamps");
     assert(prop);
     assert(prop->length == 4);
 

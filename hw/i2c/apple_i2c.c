@@ -53,11 +53,11 @@ DeviceState *apple_i2c_create(DTBNode *node)
     DeviceState *dev = qdev_new(TYPE_APPLE_I2C);
     SysBusDevice *sbd = SYS_BUS_DEVICE(dev);
     AppleI2CState *s = APPLE_I2C(dev);
-    DTBProp *prop = get_dtb_prop(node, "reg");
+    DTBProp *prop = find_dtb_prop(node, "reg");
     uint64_t mmio_size = ((hwaddr *)prop->value)[1];
     char bus_name[32] = { 0 };
 
-    prop = get_dtb_prop(node, "name");
+    prop = find_dtb_prop(node, "name");
     dev->id = g_strdup((const char *)prop->value);
     memory_region_init_io(&s->iomem, OBJECT(dev), &i2c_reg_ops, s,
                           (const char *)prop->value, mmio_size);
@@ -66,10 +66,7 @@ DeviceState *apple_i2c_create(DTBNode *node)
     s->bus = i2c_init_bus(dev, (const char *)bus_name);
     sysbus_init_mmio(sbd, &s->iomem);
 
-    prop = get_dtb_prop(node, "compatible");
-    g_free(prop->value);
-    prop->value = (uint8_t *)g_strdup("iic,soft");
-    prop->length = 9;
+    set_dtb_prop(node, "compatible", 9, (uint8_t *)g_strdup("iic,soft"));
 
     qdev_init_gpio_in(dev, apple_i2c_gpio_set, 2);
     qdev_init_gpio_out(dev, &s->out, 1);

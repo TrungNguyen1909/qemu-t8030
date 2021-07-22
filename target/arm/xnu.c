@@ -114,7 +114,7 @@ static void macho_dtb_node_process(DTBNode *node, DTBNode *parent)
     int cnt;
 
     //remove by compatible property
-    prop = get_dtb_prop(node, "compatible");
+    prop = find_dtb_prop(node, "compatible");
 
     if (prop) {
         uint64_t count = sizeof(KEEP_COMP) / sizeof(KEEP_COMP[0]);
@@ -137,7 +137,7 @@ static void macho_dtb_node_process(DTBNode *node, DTBNode *parent)
     }
 
     /* remove by name property */
-    prop = get_dtb_prop(node, "name");
+    prop = find_dtb_prop(node, "name");
     if (prop) {
         uint64_t count = sizeof(REM_NAMES) / sizeof(REM_NAMES[0]);
 
@@ -154,7 +154,7 @@ static void macho_dtb_node_process(DTBNode *node, DTBNode *parent)
     }
 
     /* remove dev type properties */
-    prop = get_dtb_prop(node, "device_type");
+    prop = find_dtb_prop(node, "device_type");
     if (prop) {
         uint64_t count = sizeof(REM_DEV_TYPES) / sizeof(REM_DEV_TYPES[0]);
         for (i = 0; i < count; i++) {
@@ -171,7 +171,7 @@ static void macho_dtb_node_process(DTBNode *node, DTBNode *parent)
         uint64_t count = sizeof(REM_PROPS) / sizeof(REM_PROPS[0]);
 
         for (i = 0; i < count; i++) {
-            prop = get_dtb_prop(node, REM_PROPS[i]);
+            prop = find_dtb_prop(node, REM_PROPS[i]);
             if (prop) {
                 remove_dtb_prop(node, prop);
             }
@@ -344,149 +344,128 @@ void macho_load_dtb(DTBNode *root, AddressSpace *as, MemoryRegion *mem,
 
     // remove this prop as it is responsible for the waited for event
     // in PE that never happens
-    prop = get_dtb_prop(root, "secure-root-prefix");
-    if (NULL == prop) {
-        abort();
+    prop = find_dtb_prop(root, "secure-root-prefix");
+    if (prop) {
+        remove_dtb_prop(root, prop);
     }
-    remove_dtb_prop(root, prop);
 
-    child = get_dtb_child_node_by_name(root, "arm-io");
-    prop = get_dtb_prop(child, "chip-revision");
+    child = get_dtb_node(root, "arm-io");
+    prop = find_dtb_prop(child, "chip-revision");
     assert(prop);
     *(uint32_t *)prop->value = 0x10;
 
-    child = get_dtb_child_node_by_name(root, "chosen");
+    child = get_dtb_node(root, "chosen");
     assert(child != NULL);
-    prop = get_dtb_prop(child, "random-seed");
+    prop = find_dtb_prop(child, "random-seed");
     assert(prop != NULL);
     remove_dtb_prop(child, prop);
-    add_dtb_prop(child, "random-seed", sizeof(seed), (uint8_t *)&seed[0]);
+    set_dtb_prop(child, "random-seed", sizeof(seed), (uint8_t *)&seed[0]);
 
-    add_dtb_prop(child, "dram-base", sizeof(dram_base), (uint8_t *)&dram_base);
-    add_dtb_prop(child, "dram-size", sizeof(dram_base), (uint8_t *)&dram_size);
-    // prop = get_dtb_prop(child, "debug-enabled");
-    // *(uint32_t*)prop->value = 1;
-    prop = get_dtb_prop(child, "firmware-version");
+    set_dtb_prop(child, "dram-base", sizeof(dram_base), (uint8_t *)&dram_base);
+    set_dtb_prop(child, "dram-size", sizeof(dram_base), (uint8_t *)&dram_size);
+    prop = find_dtb_prop(child, "firmware-version");
     remove_dtb_prop(child, prop);
-    add_dtb_prop(child, "firmware-version", 11, (uint8_t *)"qemu-t8030");
-    prop = get_dtb_prop(child, "nvram-total-size");
-    if (prop) {
-        remove_dtb_prop(child, prop);
-    }
+    set_dtb_prop(child, "firmware-version", 11, (uint8_t *)"qemu-t8030");
+
     if (nvram_size > 0xFFFF * 0x10) {
         nvram_size = 0xFFFF * 0x10;
     }
-
     nvram_total_size = nvram_size;
-    add_dtb_prop(child, "nvram-total-size", 4, (uint8_t *)&nvram_total_size);
-    prop = get_dtb_prop(child, "nvram-proxy-data");
-    if (prop) {
-        remove_dtb_prop(child, prop);
-    }
-    add_dtb_prop(child, "nvram-proxy-data", nvram_size, (uint8_t *)nvram_data);
+    set_dtb_prop(child, "nvram-total-size", 4, (uint8_t *)&nvram_total_size);
+    set_dtb_prop(child, "nvram-proxy-data", nvram_size, (uint8_t *)nvram_data);
 
     data = 1;
-    add_dtb_prop(child, "research-enabled", sizeof(data), (uint8_t *)&data);
-    prop = get_dtb_prop(child, "effective-production-status-ap");
-    if (prop != NULL) {
-        //disable coresight
-        *(uint32_t *)prop->value = 1;
-    }
+    set_dtb_prop(child, "research-enabled", sizeof(data), (uint8_t *)&data);
+    prop = set_dtb_prop(child, "effective-production-status-ap", sizeof(data), (uint8_t *)&data);
 
     //update the display parameters
-    prop = get_dtb_prop(child, "display-rotation");
-    assert(prop != NULL);
-
-    remove_dtb_prop(child, prop);
-    add_dtb_prop(child, "display-rotation", sizeof(display_rotation),
+    set_dtb_prop(child, "display-rotation", sizeof(display_rotation),
                     (uint8_t *)&display_rotation);
 
-    prop = get_dtb_prop(child, "display-scale");
-    assert(prop != NULL);
-
-    remove_dtb_prop(child, prop);
-    add_dtb_prop(child, "display-scale", sizeof(display_scale),
+    set_dtb_prop(child, "display-scale", sizeof(display_scale),
                     (uint8_t *)&display_scale);
 
     //these are needed by the image4 parser module$
-    add_dtb_prop(child, "security-domain", sizeof(data), (uint8_t *)&data);
-    add_dtb_prop(child, "chip-epoch", sizeof(data), (uint8_t *)&data);
+    set_dtb_prop(child, "security-domain", sizeof(data), (uint8_t *)&data);
+    set_dtb_prop(child, "chip-epoch", sizeof(data), (uint8_t *)&data);
+    set_dtb_prop(child, "amfi-allows-trust-cache-load", sizeof(data), (uint8_t *)&data);
     data = 0xffffffff;
-    add_dtb_prop(child, "debug-enabled", sizeof(data), (uint8_t *)&data);
-    prop = get_dtb_prop(child, "amfi-allows-trust-cache-load");
-    assert(prop->length == 4);
-    *(uint32_t *)prop->value = 1;
-    child = get_dtb_child_node_by_name(child, "memory-map");
+    set_dtb_prop(child, "debug-enabled", sizeof(data), (uint8_t *)&data);
+
+    child = get_dtb_node(root, "chosen");
+    assert(child);
+    child = get_dtb_node(child, "lock-regs");
+    if (!child) {
+        child = get_dtb_node(root, "chosen");
+        child = get_dtb_node(child, "lock-regs");
+        get_dtb_node(child, "amcc");
+    }
+    child = get_dtb_node(child, "amcc");
+    assert(child);
+    data = 0;
+    set_dtb_prop(child, "aperture-count", 4, (uint8_t *)&data);
+    set_dtb_prop(child, "aperture-size", 4, (uint8_t *)&data);
+    set_dtb_prop(child, "plane-count", 4, (uint8_t *)&data);
+    set_dtb_prop(child, "aperture-phys-addr", 0, (uint8_t *)&data);
+    set_dtb_prop(child, "cache-status-reg-offset", 4, (uint8_t *)&data);
+    set_dtb_prop(child, "cache-status-reg-mask", 4, (uint8_t *)&data);
+    set_dtb_prop(child, "cache-status-reg-value", 4, (uint8_t *)&data);
+    child = get_dtb_node(child, "amcc-ctrr-a");
+    if (!child) {
+        child = get_dtb_node(child, "amcc-ctrr-a");
+    }
+
+    data = 14;
+    set_dtb_prop(child, "page-size-shift", 4, (uint8_t *)&data);
+
+    data = 0;
+    set_dtb_prop(child, "lower-limit-reg-offset", 4, (uint8_t *)&data);
+    set_dtb_prop(child, "lower-limit-reg-mask", 4, (uint8_t *)&data);
+    set_dtb_prop(child, "upper-limit-reg-offset", 4, (uint8_t *)&data);
+    set_dtb_prop(child, "upper-limit-reg-mask", 4, (uint8_t *)&data);
+    set_dtb_prop(child, "lock-reg-offset", 4, (uint8_t *)&data);
+    set_dtb_prop(child, "lock-reg-mask", 4, (uint8_t *)&data);
+    set_dtb_prop(child, "lock-reg-value", 4, (uint8_t *)&data);
+
+    child = get_dtb_node(root, "defaults");
+    assert(child);
+    prop = find_dtb_prop(child, "aes-service-publish-timeout");
+    assert(prop);
+    *(uint32_t *)prop->value = 0xffffffff;
+    child = get_dtb_node(root, "product");
+    assert(child);
+    data = 1;
+    // TODO: Workaround: AppleKeyStore SEP(?)
+    set_dtb_prop(child, "boot-ios-diagnostics", sizeof(data), (uint8_t *)&data);
+    macho_dtb_node_process(root, NULL);
+
+    child = get_dtb_node(root, "chosen");
+    assert(child != NULL);
+    child = get_dtb_node(child, "memory-map");
     assert(child != NULL);
 
     if ((ramdisk_addr) && (ramdisk_size)) {
         memmap[0] = ramdisk_addr;
         memmap[1] = ramdisk_size;
-        add_dtb_prop(child, "RAMDisk", sizeof(memmap),
-                        (uint8_t *)&memmap[0]);
+        set_dtb_prop(child, "RAMDisk", sizeof(memmap),
+                           (uint8_t *)&memmap[0]);
     }
 
     if ((trustcache_addr) && (trustcache_size)) {
         memmap[0] = trustcache_addr;
         memmap[1] = trustcache_size;
-        add_dtb_prop(child, "TrustCache", sizeof(memmap),
-                        (uint8_t *)&memmap[0]);
+        set_dtb_prop(child, "TrustCache", sizeof(memmap),
+                           (uint8_t *)&memmap[0]);
     }
 
     memmap[0] = bootargs_addr;
     memmap[1] = sizeof(struct xnu_arm64_boot_args);
-    add_dtb_prop(child, "BootArgs", sizeof(memmap), (uint8_t *)&memmap[0]);
-    add_dtb_prop(child, "DeviceTree", sizeof(memmap), (uint8_t *)&memmap[0]);
-
-    child = get_dtb_child_node_by_name(root, "chosen");
-    assert(child);
-    child = get_dtb_child_node_by_name(child, "lock-regs");
-    if (!child) {
-        child = get_dtb_child_node_by_name(root, "chosen");
-        child = add_dtb_node(child, "lock-regs");
-        add_dtb_node(child, "amcc");
-    }
-    child = get_dtb_child_node_by_name(child, "amcc");
-    assert(child);
-    data = 0;
-    add_dtb_prop(child, "aperture-count", 4, (uint8_t *)&data);
-    add_dtb_prop(child, "aperture-size", 4, (uint8_t *)&data);
-    add_dtb_prop(child, "plane-count", 4, (uint8_t *)&data);
-    add_dtb_prop(child, "aperture-phys-addr", 0, (uint8_t *)&data);
-    add_dtb_prop(child, "cache-status-reg-offset", 4, (uint8_t *)&data);
-    add_dtb_prop(child, "cache-status-reg-mask", 4, (uint8_t *)&data);
-    add_dtb_prop(child, "cache-status-reg-value", 4, (uint8_t *)&data);
-    add_dtb_node(child, "amcc-ctrr-a");
-    child = get_dtb_child_node_by_name(child, "amcc-ctrr-a");
-
-    data = 14;
-    add_dtb_prop(child, "page-size-shift", 4, (uint8_t *)&data);
-
-    data = 0;
-    add_dtb_prop(child, "lower-limit-reg-offset", 4, (uint8_t *)&data);
-    add_dtb_prop(child, "lower-limit-reg-mask", 4, (uint8_t *)&data);
-    add_dtb_prop(child, "upper-limit-reg-offset", 4, (uint8_t *)&data);
-    add_dtb_prop(child, "upper-limit-reg-mask", 4, (uint8_t *)&data);
-    add_dtb_prop(child, "lock-reg-offset", 4, (uint8_t *)&data);
-    add_dtb_prop(child, "lock-reg-mask", 4, (uint8_t *)&data);
-    add_dtb_prop(child, "lock-reg-value", 4, (uint8_t *)&data);
-
-    child = get_dtb_child_node_by_name(root, "defaults");
-    assert(child);
-    prop = get_dtb_prop(child, "aes-service-publish-timeout");
-    assert(prop);
-    *(uint32_t *)prop->value = 0xffffffff;
-    child = get_dtb_child_node_by_name(root, "product");
-    assert(child);
-    data = 1;
-    // TODO: Workaround: AppleKeyStore SEP(?)
-    add_dtb_prop(child, "boot-ios-diagnostics", sizeof(data), (uint8_t *)&data);
-    macho_dtb_node_process(root, NULL);
-
+    set_dtb_prop(child, "BootArgs", sizeof(memmap), (uint8_t *)&memmap[0]);
+    set_dtb_prop(child, "DeviceTree", sizeof(memmap), (uint8_t *)&memmap[0]);
     size_n = get_dtb_node_buffer_size(root);
-    child = get_dtb_child_node_by_name(root, "chosen");
-    child = get_dtb_child_node_by_name(child, "memory-map");
-    prop = get_dtb_prop(child, "DeviceTree");
+    child = get_dtb_node(root, "chosen");
+    child = get_dtb_node(child, "memory-map");
+    prop = find_dtb_prop(child, "DeviceTree");
     ((uint64_t *)prop->value)[0] = dtb_pa;
     ((uint64_t *)prop->value)[1] = size_n;
 
@@ -618,29 +597,6 @@ void macho_load_raw_file(const char *filename, AddressSpace *as, MemoryRegion *m
     } else {
         abort();
     }
-}
-
-void macho_tz_setup_bootargs(const char *name, AddressSpace *as,
-                             MemoryRegion *mem, hwaddr bootargs_addr,
-                             hwaddr virt_base, hwaddr phys_base,
-                             hwaddr mem_size, hwaddr kern_args,
-                             hwaddr kern_entry, hwaddr kern_phys_base)
-{
-    struct xnu_arm64_monitor_boot_args boot_args;
-    memset(&boot_args, 0, sizeof(boot_args));
-    boot_args.version = xnu_arm64_kBootArgsVersion2;
-    boot_args.virtBase = virt_base;
-    boot_args.physBase = phys_base;
-    boot_args.memSize = mem_size;
-    boot_args.kernArgs = kern_args;
-    boot_args.kernEntry = kern_entry;
-    boot_args.kernPhysBase = kern_phys_base;
-
-    boot_args.kernPhysSlide = 0;
-    boot_args.kernVirtSlide = 0;
-
-    allocate_and_copy(mem, as, name, bootargs_addr, sizeof(boot_args),
-                      &boot_args);
 }
 
 void macho_setup_bootargs(const char *name, AddressSpace *as,
