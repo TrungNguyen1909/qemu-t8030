@@ -178,14 +178,7 @@ static void sprr_perm_el0_write(CPUARMState *env, const ARMCPRegInfo *ri, uint64
 
     raw_write(env, ri, perm);
 
-    tlb_flush(env_cpu(env));
-}
-
-static void sprr_write_flush(CPUARMState *env, const ARMCPRegInfo *ri, uint64_t value)
-{
-    raw_write(env, ri, value);
-
-    tlb_flush(env_cpu(env));
+    tlb_flush_by_mmuidx(env_cpu(env), ARMMMUIdxBit_SE10_0 | ARMMMUIdxBit_E10_0);
 }
 
 static const ARMCPRegInfo t8030gxf_cp_reginfo[] = {
@@ -289,13 +282,13 @@ static const ARMCPRegInfo t8030gxf_cp_reginfo[] = {
       .cp = CP_REG_ARM64_SYSREG_CP, .state = ARM_CP_STATE_AA64,
       .opc0 = 3, .opc1 = 6, .crn = 15, .crm = 1, .opc2 = 0,
       .access = PL1_RW, .resetvalue = 0,
-      .readfn = raw_read, .writefn = sprr_write_flush,
+      .readfn = raw_read, .writefn = raw_write,
       .fieldoffset = offsetof(CPUARMState, sprr.sprr_config_el[1]) },
     { .name = "SPRR_CONFIG_EL0",
       .cp = CP_REG_ARM64_SYSREG_CP, .state = ARM_CP_STATE_AA64,
       .opc0 = 3, .opc1 = 6, .crn = 15, .crm = 1, .opc2 = 1,
       .access = PL1_RW, .resetvalue = 0,
-      .readfn = raw_read, .writefn = sprr_write_flush,
+      .readfn = raw_read, .writefn = raw_write,
       .fieldoffset = offsetof(CPUARMState, sprr.sprr_config_el[0]) },
     { .name = "SPRR_PERM_EL0",
       .cp = CP_REG_ARM64_SYSREG_CP, .state = ARM_CP_STATE_AA64,
@@ -318,7 +311,7 @@ static const ARMCPRegInfo t8030gxf_cp_reginfo[] = {
       .cp = CP_REG_ARM64_SYSREG_CP, .state = ARM_CP_STATE_AA64,
       .opc0 = 3, .opc1 = 6, .crn = 15, .crm = 3, .opc2 = 0,
       .access = PL1_RW, .resetvalue = 0,
-      .readfn = raw_read, .writefn = sprr_write_flush,
+      .readfn = raw_read, .writefn = raw_write,
       .fieldoffset = offsetof(CPUARMState, sprr.sprr_perm_el[1]) },
     { .name = "SPRR_UMASK_EL1",
       .cp = CP_REG_ARM64_SYSREG_CP, .state = ARM_CP_STATE_AA64,
