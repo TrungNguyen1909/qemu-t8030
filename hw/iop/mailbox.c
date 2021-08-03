@@ -128,7 +128,7 @@ static void iop_handle_management_msg(struct AppleIOPMailboxState *s, iop_messag
             if (msg->type == MSG_RECV_HELLO) {
                 iop_message_t m = g_new0(struct iop_message, 1);
                 m->type = MSG_TYPE_ROLLCALL;
-                m->rollcall.epMask = (1 << 0); /* Register SMCEndpoint1 */
+                m->rollcall.epMask = (1 << 0); /* Register Endpoint1 */
                 m->rollcall.epBlock = 1;
                 m->rollcall.epEnded = true;
                 iop_outbox_push(s, m);
@@ -154,7 +154,7 @@ static void iop_handle_management_msg(struct AppleIOPMailboxState *s, iop_messag
                 iop_message_t m = g_new0(struct iop_message, 1);
                 m->type = MSG_TYPE_POWERACK;
                 m->power.state = msg->power.state;
-                s->ep0_status = EP0_DONE;
+                s->ep0_status = EP0_IDLE;
                 iop_outbox_push(s, m);
             } else {
                 IOP_LOG_MSG(s, msg);
@@ -415,6 +415,9 @@ static void apple_iop_mailbox_unrealize(DeviceState *dev)
         s->stopping = true;
     }
     qemu_cond_broadcast(&s->iop_halt);
+    qemu_thread_join(&s->iop_thread);
+    qemu_mutex_destroy(&s->mutex);
+    qemu_cond_destroy(&s->iop_halt);
 }
 
 static void apple_iop_mailbox_class_init(ObjectClass *klass, void *data)
