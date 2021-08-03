@@ -273,8 +273,8 @@ static void usb_tcp_remote_realize(USBDevice *dev, Error **errp)
     struct sockaddr_un ai;
     USBTCPRemoteState *s = USB_TCP_REMOTE(dev);
 
-    dev->speed = USB_SPEED_FULL;
-    dev->speedmask = USB_SPEED_MASK_FULL;
+    dev->speed = USB_SPEED_HIGH;
+    dev->speedmask = USB_SPEED_MASK_HIGH;
     dev->auto_attach = 0;
 
     qemu_cond_init(&s->cond);
