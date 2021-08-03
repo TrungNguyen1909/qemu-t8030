@@ -17,6 +17,7 @@
 static void apple_aic_update(AppleAICState *s)
 {
     uint32_t intr = 0;
+    uint32_t potential = 0;
     int i;
 
     for (i = 0; i < s->numCPU; i++) {
@@ -33,14 +34,27 @@ static void apple_aic_update(AppleAICState *s)
     for (i = 0; i < s->numEIR; i++) {
         if (unlikely(s->eir_state[i] & (~s->eir_mask[i]))) {
             int j;
+            int dest;
             for (j = 0; j < 32; j++) {
                 if (((s->eir_mask[i] & (1 << j)) == 0)
                     && (s->eir_state[i] & (1 << j))
-                    && (s->eir_dest[AIC_EIR_TO_SRC(i, j)])
-                    && ((intr & (s->eir_dest[AIC_EIR_TO_SRC(i, j)])) == 0)) {
-                    uint32_t cpu = find_first_bit((unsigned long *)&s->eir_dest[AIC_EIR_TO_SRC(i, j)],
-                                                    s->numCPU);
-                    intr |= (1 << cpu);
+                    && (dest = s->eir_dest[AIC_EIR_TO_SRC(i, j)])) {
+                    if (((intr & dest) == 0)) {
+                        /* The interrupt doesn't have a cpu that can process it yet */
+                        uint32_t cpu = find_first_bit((unsigned long *)&s->eir_dest[AIC_EIR_TO_SRC(i, j)],
+                                                        s->numCPU);
+                        intr |= (1 << cpu);
+                        potential |= dest;
+                    } else {
+                        int k;
+                        for (k = 0; k < s->numCPU; k++) {
+                            if (((intr & (1 << k)) == 0) && (potential & (1 << k))) {
+                                /* cpu K isn't in the interrupt list and can handle some of the previous interrupts */
+                                intr |= (1 << k);
+                                break;
+                            }
+                        }
+                    }
                 }
             }
         }
