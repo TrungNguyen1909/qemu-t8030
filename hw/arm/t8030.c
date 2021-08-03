@@ -66,14 +66,14 @@
     static uint64_t t8030_cpreg_read_##name(CPUARMState *env,                      \
                                             const ARMCPRegInfo *ri)                \
     {                                                                              \
-        T8030CPUState *tcpu = t8030_cs_from_env(env);                  \
-        return tcpu->T8030_CPREG_VAR_NAME(name);                                    \
+        T8030CPUState *tcpu = t8030_cs_from_env(env);                              \
+        return tcpu->T8030_CPREG_VAR_NAME(name);                                   \
     }                                                                              \
     static void t8030_cpreg_write_##name(CPUARMState *env, const ARMCPRegInfo *ri, \
                                          uint64_t value)                           \
     {                                                                              \
-        T8030CPUState *tcpu = t8030_cs_from_env(env);                  \
-        tcpu->T8030_CPREG_VAR_NAME(name) = value;                                   \
+        T8030CPUState *tcpu = t8030_cs_from_env(env);                              \
+        tcpu->T8030_CPREG_VAR_NAME(name) = value;                                  \
         /* if (value != 0) fprintf(stderr, "T8030CPUState REG WRITE " #name " = 0x%llx at PC 0x%llx\n", value, env->pc); */ \
     }
 
@@ -83,7 +83,7 @@
         .name = #p_name, .opc0 = p_op0, .crn = p_crn, .crm = p_crm,          \
         .opc1 = p_op1, .opc2 = p_op2, .access = p_access, .type = ARM_CP_IO, \
         .state = ARM_CP_STATE_AA64, .readfn = t8030_cpreg_read_##p_name,     \
-        .writefn = t8030_cpreg_write_##p_name                                \
+        .writefn = t8030_cpreg_write_##p_name,                               \
     }
 
 static T8030CPUState *t8030_cs_from_env(CPUARMState *env);
@@ -152,7 +152,7 @@ static inline bool t8030CPU_is_sleep(T8030CPUState* tcpu)
 }
 
 // Wake up cpus, call with machine mutex unlocked
-static void t8030_wake_up_cpus(MachineState* machine, uint32_t cpu_mask)
+static void t8030_wake_up_cpus(MachineState* machine, uint64_t cpu_mask)
 {
     T8030MachineState* tms = T8030_MACHINE(machine);
 
@@ -554,10 +554,6 @@ static void t8030_memory_setup(MachineState *machine)
                                  g_phys_base, g_virt_base);
     fprintf(stderr, "g_virt_base: 0x" TARGET_FMT_lx "\ng_phys_base: 0x" TARGET_FMT_lx "\n", g_virt_base, g_phys_base);
     fprintf(stderr, "entry: 0x" TARGET_FMT_lx "\n", tms->kpc_pa);
-    macho_free(hdr);
-    hdr = NULL;
-    tms->kernel = NULL;
-    xnu_header = NULL;
 
     phys_ptr = vtop_static(align_16k_high(virt_end));
 
@@ -735,6 +731,17 @@ static const MemoryRegionOps sart_reg_ops = {
     .write = sart_reg_write,
     .read = sart_reg_read,
 };
+
+static void t8030_cluster_reset(MachineState *machine)
+{
+    T8030MachineState *tms = T8030_MACHINE(machine);
+    int i;
+
+    for (i = 0; i < MAX_CLUSTER; i++) {
+       memset(tms->clusters[i]->deferredIPI, 0, sizeof(tms->clusters[i]->deferredIPI));
+       memset(tms->clusters[i]->noWakeIPI, 0, sizeof(tms->clusters[i]->noWakeIPI));
+    }
+}
 
 static void t8030_cluster_setup(MachineState *machine)
 {
@@ -1356,8 +1363,13 @@ static void t8030_machine_reset(void* opaque)
     MachineState *machine = MACHINE(opaque);
     T8030MachineState *tms = T8030_MACHINE(opaque);
 
+    if (tms->ipicr_timer) {
+        timer_del(tms->ipicr_timer);
+        tms->ipicr_timer = NULL;
+    }
     tms->ipicr_timer = timer_new_ns(QEMU_CLOCK_VIRTUAL, t8030_machine_ipicr_tick, machine);
-    timer_mod_ns(tms->ipicr_timer, kDeferredIPITimerDefault);
+    timer_mod_ns(tms->ipicr_timer, qemu_clock_get_ns(QEMU_CLOCK_VIRTUAL) + kDeferredIPITimerDefault);
+    t8030_cluster_reset(machine);
     t8030_memory_setup(machine);
     t8030_cpu_reset(tms);
 }
