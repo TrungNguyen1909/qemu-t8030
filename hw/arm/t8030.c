@@ -437,10 +437,8 @@ static const ARMCPRegInfo t8030_cp_reginfo_tcg[] = {
     REGINFO_SENTINEL,
 };
 
-static void t8030_add_cpregs(T8030CPUState* tcpu)
+static void t8030cpu_reset(T8030CPUState* tcpu)
 {
-    ARMCPU *cpu = tcpu->cpu;
-
     tcpu->T8030_CPREG_VAR_NAME(ARM64_REG_LSU_ERR_STS) = 0;
     tcpu->T8030_CPREG_VAR_NAME(PMC0) = 0;
     tcpu->T8030_CPREG_VAR_NAME(PMC1) = 0;
@@ -449,6 +447,13 @@ static void t8030_add_cpregs(T8030CPUState* tcpu)
     tcpu->T8030_CPREG_VAR_NAME(ARM64_REG_APCTL_EL1) = 2;
     tcpu->T8030_CPREG_VAR_NAME(ARM64_REG_KERNELKEYLO_EL1) = 0;
     tcpu->T8030_CPREG_VAR_NAME(ARM64_REG_KERNELKEYHI_EL1) = 0;
+    tcpu->T8030_CPREG_VAR_NAME(AMX_STATUS_EL1) = 0;
+    tcpu->T8030_CPREG_VAR_NAME(AMX_CTL_EL1) = 0;
+}
+
+static void t8030_add_cpregs(T8030CPUState* tcpu)
+{
+    ARMCPU *cpu = tcpu->cpu;
 
     /* Note that we can't just use the T8030CPUState as an opaque pointer
      * in define_arm_cp_regs_with_opaque(), because when we're called back
@@ -874,6 +879,7 @@ static void t8030_cpu_setup(MachineState *machine)
         }
 
         qdev_realize(DEVICE(cpuobj), NULL, &error_fatal);
+        t8030_add_cpregs(tms->cpus[i]);
 
         tms->cpus[i]->nsas = cpu_get_address_space(cs, ARMASIdx_NS);
 
@@ -910,8 +916,6 @@ static void t8030_cpu_setup(MachineState *machine)
 
         qdev_connect_gpio_out(DEVICE(cpuobj), GTIMER_VIRT, qdev_get_gpio_in(fiq_or, 0));
         tms->cpus[i]->fast_ipi = qdev_get_gpio_in(fiq_or, 1);
-
-        t8030_add_cpregs(tms->cpus[i]);
     }
 }
 
@@ -1304,6 +1308,7 @@ static void t8030_cpu_reset(void *opaque)
 
     CPU_FOREACH(cpu) {
         ARM_CPU(cpu)->rvbar = tms->kpc_pa & ~0xfff;
+        t8030cpu_reset(t8030_cs_from_env(&ARM_CPU(cpu)->env));
     }
 
     cs = CPU(first_cpu);
