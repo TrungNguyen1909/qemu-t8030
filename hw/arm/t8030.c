@@ -527,6 +527,7 @@ static void t8030_memory_setup(MachineState *machine)
     uint64_t trustcache_size = 0;
     hwaddr trustcache_pa;
     void *nvram_data = NULL;
+    unsigned long nvram_size = 0;
     NvmeNamespace* nvram;
 
     //setup the memory layout:
@@ -584,8 +585,12 @@ static void t8030_memory_setup(MachineState *machine)
     nvram = NVME_NS(qdev_find_recursive(sysbus_get_default(), "nvram"));
     assert(nvram);
 
-    nvram_data = g_malloc0(T8030_NVRAM_SIZE);
-    if (blk_pread(nvram->blkconf.blk, 0, nvram_data, T8030_NVRAM_SIZE) <= 0) {
+    nvram_size = blk_getlength(nvram->blkconf.blk);
+    if (nvram_size > T8030_NVRAM_SIZE) {
+        nvram_size = T8030_NVRAM_SIZE;
+    }
+    nvram_data = g_malloc0(nvram_size);
+    if (blk_pread(nvram->blkconf.blk, 0, nvram_data, nvram_size) <= 0) {
         fprintf(stderr, "%s: Failed to read NVRAM\n", __func__);
     }
 
@@ -595,7 +600,7 @@ static void t8030_memory_setup(MachineState *machine)
                    trustcache_pa, trustcache_size,
                    kbootargs_pa,
                    tms->dram_base, tms->dram_size,
-                   nvram_data, T8030_NVRAM_SIZE);
+                   nvram_data, nvram_size);
 
     g_free(nvram_data);
     phys_ptr += align_16k_high(dtb_size);
