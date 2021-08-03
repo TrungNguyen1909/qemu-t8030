@@ -143,7 +143,6 @@ typedef struct T8030CPUState{
 #define ARM64_REG_IPI_RR_TYPE_NOWAKE    (3 << 28)
 
 typedef struct {
-    QemuMutex mutex;
     hwaddr base;
     uint8_t id;
     uint8_t type;
