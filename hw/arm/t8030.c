@@ -47,6 +47,7 @@
 #include "hw/gpio/apple_gpio.h"
 #include "hw/i2c/apple_i2c.h"
 #include "hw/usb/apple_otg.h"
+#include "hw/watchdog/apple_wdt.h"
 
 #include "hw/arm/exynos4210.h"
 #include "hw/arm/xnu_pf.h"
@@ -1303,6 +1304,62 @@ static void t8030_create_usb(MachineState *machine)
                        ((uint32_t *)find_dtb_prop(device, "interrupts")->value)[0]));
 }
 
+static void t8030_create_wdt(MachineState* machine)
+{
+    int i;
+    uint32_t *ints;
+    DTBProp *prop;
+    uint64_t *reg;
+    uint32_t value;
+    T8030MachineState *tms = T8030_MACHINE(machine);
+    SysBusDevice *wdt;
+    DTBNode *child = get_dtb_node(tms->device_tree, "arm-io");
+
+    assert(child != NULL);
+    child = get_dtb_node(child, "wdt");
+    assert(child != NULL);
+
+    wdt = apple_wdt_create(child);
+    assert(wdt);
+
+    object_property_add_child(OBJECT(machine), "wdt", OBJECT(wdt));
+    prop = find_dtb_prop(child, "reg");
+    assert(prop);
+    reg = (uint64_t*)prop->value;
+
+    /*
+    0: reg
+    1: scratch reg
+    */
+    sysbus_mmio_map(wdt, 0, tms->soc_base_pa + reg[0]);
+    sysbus_mmio_map(wdt, 1, tms->soc_base_pa + reg[2]);
+
+    prop = find_dtb_prop(child, "interrupts");
+    assert(prop);
+    assert(prop->length == 8);
+    ints = (uint32_t*)prop->value;
+
+    for(i = 0; i < prop->length / sizeof(uint32_t); i++) {
+        sysbus_connect_irq(wdt, i, qdev_get_gpio_in(DEVICE(tms->aic), ints[i]));
+    }
+
+    /* TODO: MCC */
+    prop = find_dtb_prop(child, "function-panic_flush_helper");
+    if (prop) {
+        remove_dtb_prop(child, prop);
+    }
+
+    prop = find_dtb_prop(child, "function-panic_halt_helper");
+    if (prop) {
+        remove_dtb_prop(child, prop);
+    }
+
+    value = 1;
+    set_dtb_prop(child, "no-pmu", 4, (uint8_t*)&value);
+
+    sysbus_realize_and_unref(wdt, &error_fatal);
+}
+
 static void t8030_cpu_reset(void *opaque)
 {
     MachineState *machine = MACHINE(opaque);
@@ -1442,6 +1499,8 @@ static void t8030_machine_init(MachineState *machine)
     t8030_create_i2c(machine, "smc-i2c1");
 
     t8030_create_usb(machine);
+
+    t8030_create_wdt(machine);
 
     t8030_bootargs_setup(machine);
 
