@@ -558,9 +558,11 @@
 #define DXEPCTL_TXFNUM_SHIFT		22
 #define DXEPCTL_TXFNUM_LIMIT		0xf
 #define DXEPCTL_TXFNUM(_x)		((_x) << 22)
+#define DXEPCTL_TXFNUM_GET(_x)  (((_x) >> 22) & 0xf)
 #define DXEPCTL_STALL			BIT(21)
 #define DXEPCTL_SNP			BIT(20)
 #define DXEPCTL_EPTYPE_MASK		(0x3 << 18)
+#define DXEPCTL_EPTYPE_SHIFT	(18)
 #define DXEPCTL_EPTYPE_CONTROL		(0x0 << 18)
 #define DXEPCTL_EPTYPE_ISO		(0x1 << 18)
 #define DXEPCTL_EPTYPE_BULK		(0x2 << 18)
@@ -578,6 +580,7 @@
 #define DXEPCTL_MPS_SHIFT		0
 #define DXEPCTL_MPS_LIMIT		0x7ff
 #define DXEPCTL_MPS(_x)			((_x) << 0)
+#define DXEPCTL_MPS_GET(_x)     (((_x) >> 0) & 0x7ff)
 
 #define DIEPINT(_a)			HSOTG_REG(0x908 + ((_a) * 0x20))
 #define DOEPINT(_a)			HSOTG_REG(0xB08 + ((_a) * 0x20))
