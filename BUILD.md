@@ -301,14 +301,14 @@ qemu-t8030/build/qemu-system-aarch64 -s -M t8030,trustcache-filename=static_tc \
 
 This requires another Linux VM to connect to an iOS VM.
 
-Note that the USB-over-TCP Protocol will run on port `7632` by default.
+Note that the USB-over-TCP Protocol will run on unix socket at `/tmp/usbqemu` by default.
 
 ### Run a Linux VM as USB host
 
 You can use any QEMU Linux VM. Example below uses Arch Linux installer ISO
 
 ```shell
-./qemu-system-x86_64 -cdrom archlinux-2021.06.01-x86_64.iso -boot order=d -m 1024 -vga virtio -cpu qemu64 -usb -device usb-tcp-remote,bus=usb-bus.0
+./qemu-system-x86_64 -cdrom archlinux-2021.06.01-x86_64.iso -boot order=d -m 1024 -vga virtio -cpu qemu64 -device usb-ehci,id=ehci -device usb-tcp-remote,bus=ehci.0
 ```
 
 ### Start iOS VM
