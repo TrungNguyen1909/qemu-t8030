@@ -7,76 +7,128 @@
 #include "qemu-common.h"
 #include "hw/qdev-properties.h"
 #include "qemu/main-loop.h"
+#include "qemu/coroutine.h"
+#include "io/channel.h"
+#include "io/channel-util.h"
+#include "qapi/error.h"
+#include "sysemu/iothread.h"
+#include "qemu/error-report.h"
 
 static void usb_tcp_host_closed(USBTCPHostState *s)
 {
     fprintf(stderr, "%s\n", __func__);
-    s->socket = -1;
+    if (s->ioc) {
+        qio_channel_detach_aio_context(s->ioc);
+        qio_channel_shutdown(s->ioc, QIO_CHANNEL_SHUTDOWN_BOTH, NULL);
+        qio_channel_close(s->ioc, NULL);
+        object_unref(OBJECT(s->ioc));
+        s->ioc = NULL;
+    }
     s->closed = true;
-    qemu_cond_broadcast(&s->cond);
 }
 
-static int usb_tcp_host_read(USBTCPHostState *s, void *buffer, unsigned int length)
+static ssize_t tcp_usb_read(QIOChannel *ioc, void *buf, size_t len)
 {
-    int amount_done = 0;
-    int n = 0;
+    struct iovec iov = { .iov_base = buf, .iov_len = len };
+    bool iolock = qemu_mutex_iothread_locked();
+    bool iothread = qemu_in_iothread();
+    ssize_t ret = -1;
+    Error *err = NULL;
 
-    while ((n = read(s->socket, (char *)buffer + amount_done, length - amount_done)) > 0) {
-        amount_done += n;
+    /*
+     * Dont use in IOThread out of co-routine context as
+     * it will block IOThread.
+     */
+    assert(qemu_in_coroutine() || !iothread);
+
+    if (iolock && !iothread && !qemu_in_coroutine()) {
+        qemu_mutex_unlock_iothread();
     }
 
-    return amount_done;
-}
+    ret = qio_channel_readv_full_all_eof(ioc, &iov, 1, NULL, 0, &err);
 
-static int usb_tcp_host_write(USBTCPHostState *s, void *buffer, unsigned int length)
-{
-    int amount_done = 0;
-    int n = 0;
-
-    while ((n = write(s->socket, (char *)buffer + amount_done, length - amount_done)) > 0) {
-        amount_done += n;
+    if (iolock && !iothread && !qemu_in_coroutine()) {
+        qemu_mutex_lock_iothread();
     }
 
-    return amount_done;
+    if (err) {
+        error_report_err(err);
+    }
+    return (ret <= 0) ? ret : iov.iov_len;
 }
 
-static void usb_tcp_host_respond_packet(USBTCPHostState *s, USBPacket *p)
+static bool tcp_usb_write(QIOChannel *ioc, void *buf, ssize_t len)
 {
+    struct iovec iov = { .iov_base = buf, .iov_len = len };
+    bool iolock = qemu_mutex_iothread_locked();
+    bool iothread = qemu_in_iothread();
+    bool ret = false;
+    Error *err = NULL;
+
+    /*
+     * Dont use in IOThread out of co-routine context as
+     * it will block IOThread.
+     */
+    assert(qemu_in_coroutine() || !iothread);
+
+    if (iolock && !iothread && !qemu_in_coroutine()) {
+        qemu_mutex_unlock_iothread();
+    }
+
+    if (!qio_channel_writev_full_all(ioc, &iov, 1, NULL, 0, &err)) {
+        ret = true;
+    }
+
+    if (iolock && !iothread && !qemu_in_coroutine()) {
+        qemu_mutex_lock_iothread();
+    }
+
+    if (err) {
+        error_report_err(err);
+    }
+    return ret;
+}
+
+static void coroutine_fn usb_tcp_host_respond_packet_co(void *opaque)
+{
+    USBTCPPacket *pkt = (USBTCPPacket *)opaque;
+    USBTCPHostState *s = USB_TCP_HOST(pkt->s);
+    USBPacket *p = &pkt->p;
     tcp_usb_header_t hdr = { 0 };
     tcp_usb_response_header resp = { 0 };
     g_autofree void *buffer = NULL;
 
-    if (!s->closed) {
-        hdr.type = TCP_USB_RESPONSE;
-        resp.addr = s->uport.dev->addr;
-        resp.pid = p->pid;
-        resp.ep = p->ep->nr;
-        resp.id = p->id;
-        resp.status = p->status;
-        resp.length = p->iov.size;
+    WITH_QEMU_LOCK_GUARD(&s->write_mutex) {
+        if (!s->closed) {
+            hdr.type = TCP_USB_RESPONSE;
+            resp.addr = s->uport.dev->addr;
+            resp.pid = p->pid;
+            resp.ep = p->ep->nr;
+            resp.id = p->id;
+            resp.status = p->status;
+            resp.length = p->iov.size;
 
-        if (resp.length > p->actual_length) {
-            resp.length = p->actual_length;
-        }
+            if (resp.length > p->actual_length) {
+                resp.length = p->actual_length;
+            }
 
-        if (p->pid == USB_TOKEN_IN) {
-            buffer = g_malloc(resp.length);
-            iov_to_buf(p->iov.iov, p->iov.niov, 0, buffer, resp.length);
-        }
+            if (p->pid == USB_TOKEN_IN && p->status != USB_RET_ASYNC) {
+                buffer = g_malloc(resp.length);
+                iov_to_buf(p->iov.iov, p->iov.niov, 0, buffer, resp.length);
+            }
 
-        WITH_QEMU_LOCK_GUARD(&s->write_mutex) {
-            if (usb_tcp_host_write(s, &hdr, sizeof(hdr)) < sizeof(hdr)) {
+            if (!tcp_usb_write(s->ioc, &hdr, sizeof(hdr))) {
                 usb_tcp_host_closed(s);
                 return;
             }
 
-            if (usb_tcp_host_write(s, &resp, sizeof(resp)) < sizeof(resp)) {
+            if (!tcp_usb_write(s->ioc, &resp, sizeof(resp))) {
                 usb_tcp_host_closed(s);
                 return;
             }
 
             if (buffer) {
-                if (usb_tcp_host_write(s, buffer, resp.length) < resp.length) {
+                if (!tcp_usb_write(s->ioc, buffer, resp.length)) {
                     usb_tcp_host_closed(s);
                     return;
                 }
@@ -85,113 +137,120 @@ static void usb_tcp_host_respond_packet(USBTCPHostState *s, USBPacket *p)
     }
 
     if (!usb_packet_is_inflight(p)) {
-        if (container_of(p, USBTCPPacket, p)->buffer) {
-            g_free(container_of(p, USBTCPPacket, p)->buffer);
+        if (pkt->buffer) {
+            g_free(pkt->buffer);
         }
         usb_packet_cleanup(p);
+        g_free(pkt);
     }
 }
 
-static void *usb_tcp_host_read_thread(void *opaque)
+static void usb_tcp_host_respond_packet(USBTCPHostState *s, USBTCPPacket *pkt)
+{
+    Coroutine *co = NULL;
+    co = qemu_coroutine_create(usb_tcp_host_respond_packet_co, pkt);
+    qemu_coroutine_enter(co);
+}
+
+static void coroutine_fn usb_tcp_host_msg_loop_co(void *opaque)
 {
     USBTCPHostState *s = USB_TCP_HOST(opaque);
+    QIOChannel *ioc = s->ioc;
 
-    while (!s->stopped) {
-        while (!s->closed) {
-            tcp_usb_header_t hdr = { 0 };
+    for(;;) {
+        tcp_usb_header_t hdr = { 0 };
 
-            if (usb_tcp_host_read(s, &hdr, sizeof(hdr)) < sizeof(hdr)) {
-                usb_tcp_host_closed(s);
+        if (unlikely((tcp_usb_read(ioc, &hdr, sizeof(hdr)) != sizeof(hdr)))) {
+            usb_tcp_host_closed(s);
+            return;
+        }
+
+        switch (hdr.type) {
+            case TCP_USB_REQUEST: {
+                /* fprintf(stderr, "%s: TCP_USB_REQUEST\n", __func__); */
+                tcp_usb_request_header pkt_hdr = {0};
+                g_autofree void *buffer = NULL;
+                g_autofree USBTCPPacket *pkt = (USBTCPPacket *) g_malloc0(sizeof(USBTCPPacket));
+                USBEndpoint *ep = NULL;
+
+                if (unlikely(tcp_usb_read(ioc, &pkt_hdr, sizeof(pkt_hdr)) != sizeof(pkt_hdr))) {
+                    usb_tcp_host_closed(s);
+                    return;
+                }
+
+                /* fprintf(stderr, "%s: TCP_USB_REQUEST pid: 0x%x ep: %d\n", __func__, pkt_hdr.pid, pkt_hdr.ep); */
+                ep = usb_ep_get(s->uport.dev, pkt_hdr.pid, pkt_hdr.ep);
+                if (ep == NULL) {
+                    fprintf(stderr, "%s: TCP_USB_REQUEST unknown EP\n", __func__);
+                    usb_tcp_host_closed(s);
+                    return;
+                }
+
+                usb_packet_init(&pkt->p);
+                usb_packet_setup(&pkt->p, pkt_hdr.pid, ep, pkt_hdr.stream, pkt_hdr.id, pkt_hdr.short_not_ok, pkt_hdr.int_req);
+
+                if (pkt_hdr.length > 0) {
+                    buffer = g_malloc0(pkt_hdr.length);
+
+                    if (pkt_hdr.pid != USB_TOKEN_IN) {
+                        if (unlikely(tcp_usb_read(s->ioc, buffer, pkt_hdr.length) != pkt_hdr.length)) {
+                            usb_tcp_host_closed(s);
+                            usb_packet_cleanup(&pkt->p);
+                            return;
+                        }
+                        /* qemu_hexdump(stderr, __func__, buffer, pkt_hdr.length); */
+                    }
+
+                    usb_packet_addbuf(&pkt->p, buffer, pkt_hdr.length);
+                    pkt->buffer = buffer;
+                    g_steal_pointer(&buffer);
+                }
+
+                if (pkt_hdr.addr != s->uport.dev->addr) {
+                    /*
+                     * fprintf(stderr,
+                     *         "%s: USB_RET_NODEV: pkt_hdr.addr != s->uport.dev->addr: %d != %d\n",
+                     *         __func__, pkt_hdr.addr, s->uport.dev->addr);
+                     */
+                    /* Can't enforce this check because dwc2 address transition time is slow */
+                }
+                pkt->dev = ep->dev;
+                pkt->s = s;
+                pkt->addr = pkt_hdr.addr;
+                assert(qemu_mutex_iothread_locked());
+
+                usb_handle_packet(pkt->dev, &pkt->p);
+                usb_tcp_host_respond_packet(s, pkt);
+                g_steal_pointer(&pkt);
                 break;
             }
-
-            switch (hdr.type) {
-                case TCP_USB_REQUEST: {
-                    /* fprintf(stderr, "%s: TCP_USB_REQUEST\n", __func__); */
-                    tcp_usb_request_header pkt_hdr = {0};
-                    g_autofree void *buffer = NULL;
-                    g_autofree USBTCPPacket *pkt = (USBTCPPacket *) g_malloc0(sizeof(USBTCPPacket));
-                    USBEndpoint *ep = NULL;
-
-                    if (usb_tcp_host_read(s, &pkt_hdr, sizeof(pkt_hdr)) < sizeof(pkt_hdr)) {
-                        usb_tcp_host_closed(s);
-                        break;
-                    }
-
-                    /* fprintf(stderr, "%s: TCP_USB_REQUEST pid: 0x%x ep: %d\n", __func__, pkt_hdr.pid, pkt_hdr.ep); */
-                    ep = usb_ep_get(s->uport.dev, pkt_hdr.pid, pkt_hdr.ep);
-                    if (ep == NULL) {
-                        fprintf(stderr, "%s: TCP_USB_REQUEST unknown EP\n", __func__);
-                        usb_tcp_host_closed(s);
-                        break;
-                    }
-
-                    usb_packet_init(&pkt->p);
-                    usb_packet_setup(&pkt->p, pkt_hdr.pid, ep, pkt_hdr.stream, pkt_hdr.id, pkt_hdr.short_not_ok, pkt_hdr.int_req);
-
-                    if (pkt_hdr.length > 0) {
-                        buffer = g_malloc0(pkt_hdr.length);
-
-                        if (pkt_hdr.pid != USB_TOKEN_IN) {
-                            if (usb_tcp_host_read(s, buffer, pkt_hdr.length) < pkt_hdr.length) {
-                                usb_tcp_host_closed(s);
-                                usb_packet_cleanup(&pkt->p);
-                                break;
-                            }
-                            /* qemu_hexdump(stderr, __func__, buffer, pkt_hdr.length); */
-                        }
-
-                        usb_packet_addbuf(&pkt->p, buffer, pkt_hdr.length);
-                        pkt->buffer = buffer;
-                        g_steal_pointer(&buffer);
-                    }
-
-                    if (pkt_hdr.addr != s->uport.dev->addr) {
-                        /*
-                         * fprintf(stderr,
-                         *         "%s: USB_RET_NODEV: pkt_hdr.addr != s->uport.dev->addr: %d != %d\n",
-                         *         __func__, pkt_hdr.addr, s->uport.dev->addr);
-                         */
-                        /* Can't enforce this check because dwc2 address transition time is slow */
-                    }
-                    pkt->dev = ep->dev;
-                    WITH_QEMU_LOCK_GUARD(&s->queue_mutex) {
-                        QTAILQ_INSERT_TAIL(&s->queue, pkt, queue);
-                    }
-                    qemu_bh_schedule(s->bh);
-                    g_steal_pointer(&pkt);
-                    break;
-                }
-                case TCP_USB_RESPONSE:
-                    fprintf(stderr, "%s: unexpected TCP_USB_RESPONSE\n", __func__);
-                    usb_tcp_host_closed(s);
-                    break;
-                case TCP_USB_RESET:
-                    /* fprintf(stderr, "%s: TCP_USB_RESET\n", __func__); */
-                    usb_device_reset(s->uport.dev);
-                    break;
-            }
+            case TCP_USB_RESPONSE:
+                fprintf(stderr, "%s: unexpected TCP_USB_RESPONSE\n", __func__);
+                usb_tcp_host_closed(s);
+                return;
+            case TCP_USB_RESET:
+                /* fprintf(stderr, "%s: TCP_USB_RESET\n", __func__); */
+                assert(qemu_mutex_iothread_locked());
+                usb_device_reset(s->uport.dev);
+                break;;
         }
-
-        while (s->closed) {
-            qemu_cond_wait(&s->cond, &s->mutex);
-        }
-
-        qemu_mutex_unlock(&s->mutex);
     }
 
-    return NULL;
+    return;
 }
 
 static void usb_tcp_host_attach(USBPort *uport)
 {
-    struct hostent *hostname;
-    struct sockaddr_in server_addr;
+    struct sockaddr_un server_addr;
     USBTCPHostState *s = USB_TCP_HOST(uport->opaque);
+    int sock = -1;
+    Coroutine *co = NULL;
+    QIOChannel *ioc = NULL;
     int ret;
+    Error *err = NULL;
 
     if (uport->index > 0) {
-        fprintf(stderr, "%s: attached to unused port\n", __func__);
+        error_report("%s: attached to unused port\n", __func__);
         return;
     }
 
@@ -199,61 +258,49 @@ static void usb_tcp_host_attach(USBPort *uport)
         return;
     }
 
-    s->socket = socket(AF_INET, SOCK_STREAM, 0);
-    if (s->host == NULL) {
-        s->host = g_strdup("127.0.0.1");
+    sock = socket(AF_UNIX, SOCK_STREAM, 0);
+
+    if (socket < 0) {
+        error_report("%s: cannot open socket", __func__);
     }
 
-    hostname = gethostbyname(s->host);
-
     memset(&server_addr, 0, sizeof(server_addr));
+    server_addr.sun_family = AF_UNIX;
+    strncpy(server_addr.sun_path, socket_path, sizeof(server_addr.sun_path));
+    server_addr.sun_path[sizeof(server_addr.sun_path) - 1] = '\0';
 
-    server_addr.sin_family = AF_INET;
-    server_addr.sin_port = htons(s->port);
-    memcpy(&server_addr.sin_addr.s_addr,
-           hostname->h_addr, hostname->h_length);
-
-    ret = connect(s->socket, (const struct sockaddr *) &server_addr, sizeof(server_addr));
+    ret = connect(sock, (const struct sockaddr *) &server_addr, sizeof(server_addr));
     if (ret < 0) {
-        fprintf(stderr, "%s: failed to connect to server: %d\n", __func__, ret);
-        close(s->socket);
+        error_report("%s: failed to connect to server: %d\n", __func__, ret);
+        close(sock);
         return;
     }
 
+    ioc = qio_channel_new_fd(sock, &err);
+    if (!ioc) {
+        error_report_err(err);
+        close(sock);
+        return;
+    }
+    qio_channel_set_blocking(ioc, false, NULL);
     s->closed = 0;
-    qemu_cond_broadcast(&s->cond);
+    s->ioc = ioc;
+
+    co = qemu_coroutine_create(usb_tcp_host_msg_loop_co, s);
+    qemu_coroutine_enter(co);
 }
 
 static void usb_tcp_host_detach(USBPort *uport)
 {
     USBTCPHostState *s = USB_TCP_HOST(uport->opaque);
 
-    close(s->socket);
-    s->closed = 1;
-    s->socket = -1;
-    qemu_cond_broadcast(&s->cond);
+    usb_tcp_host_closed(s);
 }
 
 static void usb_tcp_host_async_packet_complete(USBPort *port, USBPacket *p)
 {
     USBTCPHostState *s = USB_TCP_HOST(port->opaque);
-    usb_tcp_host_respond_packet(s, p);
-}
-
-static void usb_tcp_bh(void *opaque)
-{
-    USBTCPHostState *s = USB_TCP_HOST(opaque);
-    USBTCPPacket *pkt, *npkt;
-    WITH_QEMU_LOCK_GUARD(&s->queue_mutex) {
-        QTAILQ_FOREACH_SAFE(pkt, &s->queue, queue, npkt) {
-            usb_handle_packet(pkt->dev, &pkt->p);
-            usb_tcp_host_respond_packet(s, &pkt->p);
-            QTAILQ_REMOVE(&s->queue, pkt, queue);
-            if (!usb_packet_is_inflight(&pkt->p)) {
-                g_free(pkt);
-            }
-        }
-    }
+    usb_tcp_host_respond_packet(s, container_of(p, USBTCPPacket, p));
 }
 
 static USBBusOps usb_tcp_bus_ops = { };
@@ -275,46 +322,36 @@ static void usb_tcp_host_realize(DeviceState *dev, Error **errp)
             USB_SPEED_MASK_LOW | USB_SPEED_MASK_FULL |
                       USB_SPEED_MASK_HIGH);
 
-    // Unused port to avoid hub creation
+    /* Unused port to avoid hub creation */
     usb_register_port(&s->bus, &s->uport2, s, 1, &usb_tcp_host_port_ops,
             USB_SPEED_MASK_LOW | USB_SPEED_MASK_FULL |
                       USB_SPEED_MASK_HIGH);
 
-    s->socket = -1;
     s->closed = 1;
+    qemu_co_mutex_init(&s->write_mutex);
 }
 
 static void usb_tcp_host_unrealize(DeviceState *dev)
 {
     USBTCPHostState *s = USB_TCP_HOST(dev);
 
-    if (s->socket >= 0) {
-        close(s->socket);
+    if (s->ioc) {
+        qio_channel_shutdown(s->ioc, QIO_CHANNEL_SHUTDOWN_BOTH, NULL);
+        qio_channel_close(s->ioc, NULL);
+        s->ioc = NULL;
     }
 
     s->closed = 1;
     s->stopped = 1;
-    qemu_cond_broadcast(&s->cond);
 }
 
 static void usb_tcp_host_init(Object *obj)
 {
     USBTCPHostState *s = USB_TCP_HOST(obj);
-
-    s->socket = -1;
-    qemu_mutex_init(&s->mutex);
-    qemu_mutex_init(&s->write_mutex);
-    qemu_cond_init(&s->cond);
-    QTAILQ_INIT(&s->queue);
-    qemu_mutex_init(&s->queue_mutex);
-    s->bh = qemu_bh_new(usb_tcp_bh, s);
-    qemu_thread_create(&s->read_thread, TYPE_USB_TCP_HOST ".read", &usb_tcp_host_read_thread, s, QEMU_THREAD_JOINABLE);
+    s->closed = 1;
 }
 
-
 static Property usb_tcp_host_properties[] = {
-    DEFINE_PROP_STRING("host", USBTCPHostState, host),
-    DEFINE_PROP_UINT32("port", USBTCPHostState, port, 7632),
     DEFINE_PROP_END_OF_LIST(),
 };
 

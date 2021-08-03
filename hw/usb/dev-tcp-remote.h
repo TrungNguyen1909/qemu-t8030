@@ -5,6 +5,7 @@
 #include "hw/usb.h"
 #include "qom/object.h"
 #include "tcp-usb.h"
+#include "qemu/main-loop.h"
 
 typedef struct USBTCPInflightPacket {
     USBPacket *p;
@@ -34,10 +35,12 @@ typedef struct USBTCPRemoteState {
     QemuMutex request_mutex;
 
     QemuMutex queue_mutex;
-
     QTAILQ_HEAD(, USBTCPInflightPacket) queue;
 
-    uint32_t lport;
+    QemuMutex completed_queue_mutex;
+    QTAILQ_HEAD(, USBTCPCompletedPacket) completed_queue;
+    QEMUBH *completed_bh;
+
     int socket;
     int fd;
     uint8_t addr;

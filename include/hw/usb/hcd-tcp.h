@@ -5,6 +5,8 @@
 #include "hw/sysbus.h"
 #include "qom/object.h"
 #include "hw/usb.h"
+#include "io/channel.h"
+#include "qemu/coroutine.h"
 
 #define TYPE_USB_TCP_HOST "usb-tcp-host"
 OBJECT_DECLARE_SIMPLE_TYPE(USBTCPHostState, USB_TCP_HOST)
@@ -13,7 +15,8 @@ typedef struct USBTCPPacket {
     USBPacket p;
     void *buffer;
     USBDevice *dev;
-    QTAILQ_ENTRY(USBTCPPacket) queue;
+    USBTCPHostState *s;
+    uint8_t addr;
 } USBTCPPacket;
 
 struct USBTCPHostState {
@@ -22,16 +25,8 @@ struct USBTCPHostState {
     USBBus bus;
     USBPort uport;
     USBPort uport2;
-    QemuThread read_thread;
-    QemuMutex mutex;
-    QemuMutex write_mutex;
-    QemuCond cond;
-    QemuMutex queue_mutex;
-    QTAILQ_HEAD(, USBTCPPacket) queue;
-    QEMUBH *bh;
-    int socket;
-    char *host;
-    uint32_t port;
+    QIOChannel *ioc;
+    CoMutex write_mutex;
     bool closed;
     bool stopped;
 };

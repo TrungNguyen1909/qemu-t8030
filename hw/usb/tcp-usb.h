@@ -4,6 +4,8 @@
 #include "qemu/osdep.h"
 #include "hw/usb.h"
 
+static const char *socket_path = "/tmp/usbqemu";
+
 enum {
     TCP_USB_REQUEST  = (1 << 0),
     TCP_USB_RESPONSE = (1 << 1),
