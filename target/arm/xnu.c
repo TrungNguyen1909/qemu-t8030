@@ -72,17 +72,10 @@ static const char *REM_PROPS[] = {
     "function-brick_id_voltage", "function-ldcm_bypass_en"
 };
 
-/* TODO: error_handler probably needs arm-io to initialize properly */
 static void allocate_and_copy(MemoryRegion *mem, AddressSpace *as,
                               const char *name, hwaddr pa, hwaddr size,
                               void *buf)
 {
-    uint64_t memsize = size;
-
-    if (mem) {
-        allocate_ram(mem, name, pa, memsize, 1);
-    }
-
     address_space_rw(as, pa, MEMTXATTRS_UNSPECIFIED, (uint8_t *)buf, size, 1);
 }
 

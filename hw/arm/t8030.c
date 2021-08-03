@@ -611,8 +611,6 @@ static void t8030_memory_setup(MachineState *machine)
                          g_virt_base, g_phys_base, mem_size,
                          top_of_kernel_data_pa, dtb_va, dtb_size,
                          tms->video, machine->kernel_cmdline);
-
-    allocate_ram(sysmem, "RAM", T8030_DRAM_BASE, mem_size, 0);
 }
 
 static void cpu_impl_reg_write(void *opaque, hwaddr addr, uint64_t data, unsigned size)
@@ -1376,6 +1374,7 @@ static void t8030_machine_init(MachineState *machine)
 
     qemu_mutex_init(&tms->mutex);
     tms->sysmem = get_system_memory();
+    allocate_ram(tms->sysmem, "DRAM", T8030_DRAM_BASE, machine->ram_size, 0);
 
     hdr = macho_load_file(machine->kernel_filename);
     assert(hdr);
