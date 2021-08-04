@@ -421,11 +421,6 @@ void macho_load_dtb(DTBNode *root, AddressSpace *as, MemoryRegion *mem,
     set_dtb_prop(child, "lock-reg-mask", 4, (uint8_t *)&data);
     set_dtb_prop(child, "lock-reg-value", 4, (uint8_t *)&data);
 
-    child = get_dtb_node(root, "defaults");
-    assert(child);
-    prop = find_dtb_prop(child, "aes-service-publish-timeout");
-    assert(prop);
-    *(uint32_t *)prop->value = 0xffffffff;
     child = get_dtb_node(root, "product");
     assert(child);
     data = 1;
