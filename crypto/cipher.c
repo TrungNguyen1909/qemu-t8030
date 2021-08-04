@@ -214,6 +214,20 @@ int qcrypto_cipher_setiv(QCryptoCipher *cipher,
 }
 
 
+int qcrypto_cipher_getiv(QCryptoCipher *cipher,
+                         const uint8_t *iv, size_t niv,
+                         Error **errp)
+{
+    const QCryptoCipherDriver *drv = cipher->driver;
+    if (drv->cipher_getiv) {
+        return drv->cipher_getiv(cipher, iv, niv, errp);
+    } else {
+        error_setg(errp, "Get IV is not supported for cipher");
+        return -1;
+    }
+}
+
+
 void qcrypto_cipher_free(QCryptoCipher *cipher)
 {
     if (cipher) {

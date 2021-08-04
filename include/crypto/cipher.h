@@ -235,4 +235,24 @@ int qcrypto_cipher_setiv(QCryptoCipher *cipher,
                          const uint8_t *iv, size_t niv,
                          Error **errp);
 
+/**
+ * qcrypto_cipher_getiv:
+ * @cipher: the cipher object
+ * @iv: the initialization vector or counter (CTR mode) bytes
+ * @niv: the length of @iv
+ * @errpr: pointer to a NULL-initialized error object
+ *
+ * If the @cipher object is setup to use a mode that requires
+ * initialization vectors or counter, this sets the @niv
+ * bytes. The @iv data should have the same length as the
+ * cipher key used when originally constructing the cipher
+ * object. It is an error to get an initialization vector
+ * or counter if the cipher mode does not require one.
+ *
+ * Returns: 0 on success, -1 on error
+ */
+int qcrypto_cipher_getiv(QCryptoCipher *cipher,
+                         const uint8_t *iv, size_t niv,
+                         Error **errp);
+
 #endif /* QCRYPTO_CIPHER_H */
