@@ -48,6 +48,7 @@
 #include "hw/i2c/apple_i2c.h"
 #include "hw/usb/apple_otg.h"
 #include "hw/watchdog/apple_wdt.h"
+#include "hw/misc/apple_aes.h"
 
 #include "hw/arm/exynos4210.h"
 #include "hw/arm/xnu_pf.h"
@@ -1365,6 +1366,55 @@ static void t8030_create_wdt(MachineState* machine)
     sysbus_realize_and_unref(wdt, &error_fatal);
 }
 
+static void t8030_create_aes(MachineState* machine)
+{
+    uint32_t *ints;
+    DTBProp *prop;
+    uint64_t *reg;
+    T8030MachineState *tms = T8030_MACHINE(machine);
+    SysBusDevice *aes;
+    DTBNode *child = get_dtb_node(tms->device_tree, "arm-io");
+    MemoryRegion *dma_mr = NULL;
+
+    assert(child != NULL);
+    child = get_dtb_node(child, "aes");
+    assert(child != NULL);
+
+    aes = apple_aes_create(child);
+    assert(aes);
+
+    object_property_add_child(OBJECT(machine), "aes", OBJECT(aes));
+    prop = find_dtb_prop(child, "reg");
+    assert(prop);
+    reg = (uint64_t*)prop->value;
+
+    /*
+    0: aesMemoryMap
+    1: aesDisableKeyMap
+    */
+    sysbus_mmio_map(aes, 0, tms->soc_base_pa + reg[0]);
+    sysbus_mmio_map(aes, 1, tms->soc_base_pa + reg[2]);
+
+    prop = find_dtb_prop(child, "interrupts");
+    assert(prop);
+    assert(prop->length == 4);
+    ints = (uint32_t*)prop->value;
+
+    sysbus_connect_irq(aes, 0, qdev_get_gpio_in(DEVICE(tms->aic), *ints));
+
+    prop = find_dtb_prop(child, "iommu-parent");
+    if (prop) {
+        remove_dtb_prop(child, prop);
+        /* TODO: DART */
+    }
+
+    dma_mr = g_new0(MemoryRegion, 1);
+    memory_region_init_alias(dma_mr, OBJECT(aes), TYPE_APPLE_AES ".dma-mr", tms->sysmem, 0x800000000, UINT32_MAX);
+    assert(object_property_add_const_link(OBJECT(aes), "dma-mr", OBJECT(tms->sysmem)));
+
+    sysbus_realize_and_unref(aes, &error_fatal);
+}
+
 static void t8030_cpu_reset(void *opaque)
 {
     MachineState *machine = MACHINE(opaque);
@@ -1506,6 +1556,8 @@ static void t8030_machine_init(MachineState *machine)
     t8030_create_usb(machine);
 
     t8030_create_wdt(machine);
+
+    t8030_create_aes(machine);
 
     t8030_bootargs_setup(machine);
 
