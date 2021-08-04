@@ -262,3 +262,10 @@ virt_ctrl_write(void *dev, unsigned int addr, unsigned int size, uint64_t value)
 virt_ctrl_reset(void *dev) "ctrl: %p"
 virt_ctrl_realize(void *dev) "ctrl: %p"
 virt_ctrl_instance_init(void *dev) "ctrl: %p"
+
+# apple_aes.c
+apple_aes_reg_read(uint64_t addr, uint32_t val) "0x%04" PRIx64 " val 0x%08x"
+apple_aes_reg_write(uint64_t addr, uint32_t orig, uint32_t old, uint32_t result) "0x%04" PRIx64 " orig 0x%08x old 0x%08x val 0x%08x"
+apple_aes_update_irq(uint32_t level) "level %d"
+apple_aes_process_command(uint32_t op) "op 0x%x"
+
