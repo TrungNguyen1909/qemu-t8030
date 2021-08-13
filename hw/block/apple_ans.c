@@ -24,8 +24,8 @@ do { qemu_log_mask(LOG_GUEST_ERROR, "ANS2: message:" \
 #define   APPLE_BOOT_STATUS_OK  0xde71ce55
 
 typedef struct QEMU_PACKED {
-    uint32_t unk0;
-    uint32_t unk4;
+    uint32_t NSID;
+    uint32_t NSType;
     uint32_t numBlocks;
 } NVMeCreateNamespacesEntryStruct;
 
