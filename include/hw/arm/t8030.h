@@ -180,7 +180,6 @@ typedef struct
     struct mach_header_64 *kernel;
     DTBNode *device_tree;
     video_boot_args video;
-    QemuMutex mutex;
     uint32_t build_version;
 } T8030MachineState;
 

@@ -153,26 +153,23 @@ static inline bool t8030CPU_is_sleep(T8030CPUState* tcpu)
     return CPU(tcpu->cpu)->halted;
 }
 
-// Wake up cpus, call with machine mutex unlocked
 static void t8030_wake_up_cpus(MachineState* machine, uint64_t cpu_mask)
 {
     T8030MachineState* tms = T8030_MACHINE(machine);
 
-    WITH_QEMU_LOCK_GUARD(&tms->mutex) {
-        int i;
+    int i;
 
-        for(i = 0; i < machine->smp.cpus; i++) {
-            if (test_bit(i, (unsigned long*)&cpu_mask) && t8030CPU_is_sleep(tms->cpus[i])) {
-                int ret = QEMU_ARM_POWERCTL_RET_SUCCESS;
+    for(i = 0; i < machine->smp.cpus; i++) {
+        if (test_bit(i, (unsigned long*)&cpu_mask) && t8030CPU_is_sleep(tms->cpus[i])) {
+            int ret = QEMU_ARM_POWERCTL_RET_SUCCESS;
 
-                if (tms->cpus[i]->cpu->power_state != PSCI_ON) {
-                    ret = arm_set_cpu_on_and_reset(tms->cpus[i]->mpidr);
-                }
+            if (tms->cpus[i]->cpu->power_state != PSCI_ON) {
+                ret = arm_set_cpu_on_and_reset(tms->cpus[i]->mpidr);
+            }
 
-                if (ret != QEMU_ARM_POWERCTL_RET_SUCCESS) {
-                    error_report("%s: failed to bring up CPU %d: err %d",
-                            __func__, i, ret);
-                }
+            if (ret != QEMU_ARM_POWERCTL_RET_SUCCESS) {
+                error_report("%s: failed to bring up CPU %d: err %d",
+                        __func__, i, ret);
             }
         }
     }
@@ -1496,7 +1493,6 @@ static void t8030_machine_init(MachineState *machine)
     DTBProp *prop;
     hwaddr *ranges;
 
-    qemu_mutex_init(&tms->mutex);
     tms->sysmem = get_system_memory();
     allocate_ram(tms->sysmem, "DRAM", T8030_DRAM_BASE, machine->ram_size, 0);
 
