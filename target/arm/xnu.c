@@ -71,7 +71,8 @@ static const char *REM_PROPS[] = {
     "function-spi0_sclk_config", "function-spi0_mosi_config",
     "function-pmp_control", "function-mcc_ctrl", "pmp",
     "function-vbus_voltage",
-    "function-brick_id_voltage", "function-ldcm_bypass_en"
+    "function-brick_id_voltage", "function-ldcm_bypass_en",
+    "content-protect", /* We don't want encrypted data volume */
 };
 
 static void allocate_and_copy(MemoryRegion *mem, AddressSpace *as,
@@ -413,6 +414,20 @@ void macho_load_dtb(DTBNode *root, AddressSpace *as, MemoryRegion *mem,
     set_dtb_prop(child, "lock-reg-offset", 4, (uint8_t *)&data);
     set_dtb_prop(child, "lock-reg-mask", 4, (uint8_t *)&data);
     set_dtb_prop(child, "lock-reg-value", 4, (uint8_t *)&data);
+
+    child = get_dtb_node(root, "filesystems");
+    child = get_dtb_node(child, "fstab");
+
+    /* TODO: SEP xART */
+    remove_dtb_node_by_name(child, "xart-vol");
+
+    remove_dtb_node_by_name(child, "baseband-vol");
+
+    child = get_dtb_node(root, "defaults");
+    assert(child);
+    data = 1;
+    // TODO: Workaround: AppleKeyStore SEP(?)
+    set_dtb_prop(child, "no-effaceable-storage", sizeof(data), (uint8_t *)&data);
 
     child = get_dtb_node(root, "product");
     assert(child);
