@@ -316,22 +316,15 @@ DTBNode *load_dtb_from_file(char *filename)
 }
 
 void macho_load_dtb(DTBNode *root, AddressSpace *as, MemoryRegion *mem,
-                    const char *name, hwaddr dtb_pa, uint64_t *size,
-                    hwaddr ramdisk_addr, hwaddr ramdisk_size,
-                    hwaddr trustcache_addr, hwaddr trustcache_size,
-                    hwaddr bootargs_addr,
-                    hwaddr dram_base, unsigned long dram_size,
-                    void *nvram_data, unsigned long nvram_size)
+                    const char *name, macho_boot_info_t info)
 {
     DTBNode *child = NULL;
     DTBProp *prop = NULL;
-    uint32_t nvram_total_size;
     uint32_t data;
     uint32_t display_rotation = 0;
     uint32_t display_scale = 1;
     uint64_t memmap[2] = {0};
-    uint64_t size_n;
-    uint8_t *buf;
+    g_autofree uint8_t *buf = NULL;
     // need to set the random seed insread of iboot
     uint64_t seed[8] = {0xdead000d, 0xdead000d, 0xdead000d, 0xdead000d,
                         0xdead000d, 0xdead000d, 0xdead000d, 0xdead000d};
@@ -355,18 +348,17 @@ void macho_load_dtb(DTBNode *root, AddressSpace *as, MemoryRegion *mem,
     remove_dtb_prop(child, prop);
     set_dtb_prop(child, "random-seed", sizeof(seed), (uint8_t *)&seed[0]);
 
-    set_dtb_prop(child, "dram-base", sizeof(dram_base), (uint8_t *)&dram_base);
-    set_dtb_prop(child, "dram-size", sizeof(dram_base), (uint8_t *)&dram_size);
+    set_dtb_prop(child, "dram-base", 8, (uint8_t *)&info->dram_base);
+    set_dtb_prop(child, "dram-size", 8, (uint8_t *)&info->dram_size);
     prop = find_dtb_prop(child, "firmware-version");
     remove_dtb_prop(child, prop);
     set_dtb_prop(child, "firmware-version", 11, (uint8_t *)"qemu-t8030");
 
-    if (nvram_size > 0xFFFF * 0x10) {
-        nvram_size = 0xFFFF * 0x10;
+    if (info->nvram_size > XNU_MAX_NVRAM_SIZE) {
+        info->nvram_size = XNU_MAX_NVRAM_SIZE;
     }
-    nvram_total_size = nvram_size;
-    set_dtb_prop(child, "nvram-total-size", 4, (uint8_t *)&nvram_total_size);
-    set_dtb_prop(child, "nvram-proxy-data", nvram_size, (uint8_t *)nvram_data);
+    set_dtb_prop(child, "nvram-total-size", 4, (uint8_t *)&info->nvram_size);
+    set_dtb_prop(child, "nvram-proxy-data", info->nvram_size, info->nvram_data);
 
     data = 1;
     set_dtb_prop(child, "research-enabled", sizeof(data), (uint8_t *)&data);
@@ -433,37 +425,35 @@ void macho_load_dtb(DTBNode *root, AddressSpace *as, MemoryRegion *mem,
     child = get_dtb_node(child, "memory-map");
     assert(child != NULL);
 
-    if ((ramdisk_addr) && (ramdisk_size)) {
-        memmap[0] = ramdisk_addr;
-        memmap[1] = ramdisk_size;
+    if ((info->ramdisk_pa) && (info->ramdisk_size)) {
+        memmap[0] = info->ramdisk_pa;
+        memmap[1] = info->ramdisk_size;
         set_dtb_prop(child, "RAMDisk", sizeof(memmap),
                            (uint8_t *)&memmap[0]);
     }
 
-    if ((trustcache_addr) && (trustcache_size)) {
-        memmap[0] = trustcache_addr;
-        memmap[1] = trustcache_size;
+    if ((info->trustcache_pa) && (info->trustcache_size)) {
+        memmap[0] = info->trustcache_pa;
+        memmap[1] = info->trustcache_size;
         set_dtb_prop(child, "TrustCache", sizeof(memmap),
                            (uint8_t *)&memmap[0]);
     }
 
-    memmap[0] = bootargs_addr;
+    memmap[0] = info->bootargs_pa;
     memmap[1] = sizeof(struct xnu_arm64_boot_args);
     set_dtb_prop(child, "BootArgs", sizeof(memmap), (uint8_t *)&memmap[0]);
     set_dtb_prop(child, "DeviceTree", sizeof(memmap), (uint8_t *)&memmap[0]);
-    size_n = get_dtb_node_buffer_size(root);
+
+    info->dtb_size = get_dtb_node_buffer_size(root);
     child = get_dtb_node(root, "chosen");
     child = get_dtb_node(child, "memory-map");
     prop = find_dtb_prop(child, "DeviceTree");
-    ((uint64_t *)prop->value)[0] = dtb_pa;
-    ((uint64_t *)prop->value)[1] = size_n;
+    ((uint64_t *)prop->value)[0] = info->dtb_pa;
+    ((uint64_t *)prop->value)[1] = info->dtb_size;
 
-    buf = g_malloc0(size_n);
+    buf = g_malloc0(info->dtb_size);
     save_dtb(buf, root);
-    allocate_and_copy(mem, as, name, dtb_pa, size_n, buf);
-    g_free(buf);
-
-    *size = size_n;
+    allocate_and_copy(mem, as, name, info->dtb_pa, info->dtb_size, buf);
 }
 
 void macho_load_trustcache(const char *filename, AddressSpace *as, MemoryRegion *mem,

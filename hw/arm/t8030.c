@@ -49,6 +49,7 @@
 #include "hw/usb/apple_otg.h"
 #include "hw/watchdog/apple_wdt.h"
 #include "hw/misc/apple_aes.h"
+#include "hw/nvram/apple_nvram.h"
 
 #include "hw/arm/exynos4210.h"
 #include "hw/arm/xnu_pf.h"
@@ -56,7 +57,6 @@
 #define T8030_DRAM_BASE 0x800000000
 #define CPU_IMPL_REG_BASE 0x210050000
 #define CPM_IMPL_REG_BASE 0x210e40000
-#define T8030_NVRAM_SIZE 0x2000
 #define T8030_USB_OTG_BASE 0x39000000
 #define NOP_INST 0xd503201f
 #define MOV_W0_01_INST 0x52800020
@@ -510,23 +510,16 @@ static void t8030_memory_setup(MachineState *machine)
 {
     struct mach_header_64 *hdr;
     hwaddr virt_end;
-    hwaddr dtb_pa;
     hwaddr dtb_va;
-    uint64_t dtb_size;
-    hwaddr ramdisk_pa;
-    hwaddr ramdisk_size;
-    hwaddr kbootargs_pa;
     hwaddr top_of_kernel_data_pa;
     hwaddr mem_size;
     hwaddr phys_ptr;
     T8030MachineState *tms = T8030_MACHINE(machine);
-    MemoryRegion* sysmem = tms->sysmem;
-    AddressSpace* nsas = tms->cpus[0]->nsas;
-    uint64_t trustcache_size = 0;
-    hwaddr trustcache_pa;
-    void *nvram_data = NULL;
-    unsigned long nvram_size = 0;
-    NvmeNamespace* nvram;
+    MemoryRegion *sysmem = tms->sysmem;
+    AddressSpace *nsas = tms->cpus[0]->nsas;
+    AppleNvramState *nvram = NULL;
+    macho_boot_info_t info = &tms->bootinfo;
+    g_autofree char *cmdline = NULL;
 
     //setup the memory layout:
 
@@ -545,72 +538,116 @@ static void t8030_memory_setup(MachineState *machine)
 
     // //now account for the trustcache
     phys_ptr += align_16k_high(0x2000000);
-    trustcache_pa = phys_ptr;
-    macho_load_trustcache(tms->trustcache_filename, nsas, sysmem, trustcache_pa, &trustcache_size);
-    phys_ptr += align_16k_high(trustcache_size);
+    info->trustcache_pa = phys_ptr;
+    macho_load_trustcache(tms->trustcache_filename, nsas, sysmem, info->trustcache_pa, &info->trustcache_size);
+    phys_ptr += align_16k_high(info->trustcache_size);
 
     //now account for the loaded kernel
-    tms->kpc_pa = arm_load_macho(hdr, nsas, sysmem, "Kernel",
-                                 g_phys_base, g_virt_base);
-    fprintf(stderr, "g_virt_base: 0x" TARGET_FMT_lx "\ng_phys_base: 0x" TARGET_FMT_lx "\n", g_virt_base, g_phys_base);
-    fprintf(stderr, "entry: 0x" TARGET_FMT_lx "\n", tms->kpc_pa);
+    info->entry = arm_load_macho(hdr, nsas, sysmem, "Kernel", g_phys_base, g_virt_base);
+    fprintf(stderr, "g_virt_base: 0x" TARGET_FMT_lx "\n"
+                    "g_phys_base: 0x" TARGET_FMT_lx "\n",
+                    g_virt_base, g_phys_base);
+    fprintf(stderr, "entry: 0x" TARGET_FMT_lx "\n", info->entry);
 
     phys_ptr = vtop_static(align_16k_high(virt_end));
 
     //now account for the ramdisk
-    ramdisk_pa = 0;
 
     if (machine->initrd_filename) {
-        ramdisk_pa = phys_ptr;
-        macho_load_ramdisk(machine->initrd_filename, nsas, sysmem, phys_ptr, &ramdisk_size);
-        ramdisk_size = align_16k_high(ramdisk_size);
-        phys_ptr += ramdisk_size;
+        info->ramdisk_pa = phys_ptr;
+        macho_load_ramdisk(machine->initrd_filename, nsas, sysmem, info->ramdisk_pa, &info->ramdisk_size);
+        info->ramdisk_size = align_16k_high(info->ramdisk_size);
+        phys_ptr += info->ramdisk_size;
     }
 
     //now account for kernel boot args
-    kbootargs_pa = phys_ptr;
-    tms->kbootargs_pa = kbootargs_pa;
+    info->bootargs_pa = phys_ptr;
     phys_ptr += align_16k_high(0x4000);
-    tms->extra_data_pa = phys_ptr;
 
     //now account for device tree
-    tms->dram_base = T8030_DRAM_BASE;
-    tms->dram_size = machine->ram_size;
-    dtb_pa = phys_ptr;
+    info->dram_base = T8030_DRAM_BASE;
+    info->dram_size = machine->ram_size;
+    info->dtb_pa = phys_ptr;
 
-    dtb_va = ptov_static(phys_ptr);
+    dtb_va = ptov_static(info->dtb_pa);
 
-    nvram = NVME_NS(qdev_find_recursive(sysbus_get_default(), "nvram"));
-    assert(nvram);
+    nvram = APPLE_NVRAM(qdev_find_recursive(sysbus_get_default(), "nvram"));
+    if (!nvram) {
+        error_setg(&error_abort, "%s: Failed to find nvram device", __func__);
+        return;
+    };
 
-    nvram_size = blk_getlength(nvram->blkconf.blk);
-    if (nvram_size > T8030_NVRAM_SIZE) {
-        nvram_size = T8030_NVRAM_SIZE;
+    fprintf(stderr, "boot_mode: %u\n", tms->boot_mode);
+    switch (tms->boot_mode) {
+    case kBootModeEnterRecovery:
+        env_set(nvram, "auto-boot", "false", 0);
+        tms->boot_mode = kBootModeAuto;
+        break;
+    case kBootModeExitRecovery:
+        env_set(nvram, "auto-boot", "true", 0);
+        tms->boot_mode = kBootModeAuto;
+        break;
+    default:
+        break;
     }
-    nvram_data = g_malloc0(nvram_size);
-    if (blk_pread(nvram->blkconf.blk, 0, nvram_data, nvram_size) <= 0) {
-        fprintf(stderr, "%s: Failed to read NVRAM\n", __func__);
+
+    fprintf(stderr, "auto-boot=%s\n", env_get_bool(nvram, "auto-boot", false) ? "true" : "false");
+    switch (tms->boot_mode) {
+    case kBootModeAuto:
+        if (!env_get_bool(nvram, "auto-boot", false)) {
+            asprintf(&cmdline, "-restore rd=md0 nand-enable-reformat=1 -progress %s", machine->kernel_cmdline);
+            break;
+        }
+        QEMU_FALLTHROUGH;
+    default:
+        asprintf(&cmdline, "%s", machine->kernel_cmdline);
     }
 
-    macho_load_dtb(tms->device_tree, nsas, sysmem, "DeviceTree",
-                   dtb_pa, &dtb_size,
-                   ramdisk_pa, ramdisk_size,
-                   trustcache_pa, trustcache_size,
-                   kbootargs_pa,
-                   tms->dram_base, tms->dram_size,
-                   nvram_data, nvram_size);
+    apple_nvram_save(nvram);
 
-    g_free(nvram_data);
-    phys_ptr += align_16k_high(dtb_size);
+    info->nvram_size = nvram->len;
+
+    if (info->nvram_size > XNU_MAX_NVRAM_SIZE) {
+        info->nvram_size = XNU_MAX_NVRAM_SIZE;
+    }
+    if (apple_nvram_serialize(nvram, info->nvram_data, sizeof(info->nvram_data)) < 0) {
+        error_report("%s: Failed to read NVRAM", __func__);
+    }
+
+    if (tms->ticket_filename) {
+        if (!g_file_get_contents(tms->ticket_filename, &info->ticket_data, (gsize *)&info->ticket_length, NULL)) {
+            error_report("%s: Failed to read ticket from file %s", __func__, tms->ticket_filename);
+        }
+    }
+
+    if (xnu_contains_boot_arg(cmdline, "-restore", false)) {
+        /* HACK: Use DEV Hardware model to restore without FDR errors */
+        set_dtb_prop(tms->device_tree, "compatible", 28, (uint8_t *)"N104DEV\0iPhone12,1\0AppleARM\0$");
+    } else {
+        set_dtb_prop(tms->device_tree, "compatible", 27, (uint8_t *)"N104AP\0iPhone12,1\0AppleARM\0$");
+    }
+
+    if (!xnu_contains_boot_arg(cmdline, "rd=", true)) {
+        DTBNode *chosen = find_dtb_node(tms->device_tree, "chosen");
+        DTBProp *prop = find_dtb_prop(chosen, "root-matching");
+
+        if (prop) {
+            snprintf((char *)prop->value, prop->length, "<dict><key>IOProviderClass</key><string>IOMedia</string><key>IOPropertyMatch</key><dict><key>Partition ID</key><integer>1</integer></dict></dict>");
+        }
+    }
+
+    macho_load_dtb(tms->device_tree, nsas, sysmem, "DeviceTree", info);
+
+    phys_ptr += align_16k_high(info->dtb_size);
 
     top_of_kernel_data_pa = (align_16k_high(phys_ptr) + 0x3000ull) & ~0x3fffull;
 
     mem_size = machine->ram_size;
-
-    macho_setup_bootargs("BootArgs", nsas, sysmem, kbootargs_pa,
+    fprintf(stderr, "cmdline: [%s]\n", cmdline);
+    macho_setup_bootargs("BootArgs", nsas, sysmem, info->bootargs_pa,
                          g_virt_base, g_phys_base, mem_size,
-                         top_of_kernel_data_pa, dtb_va, dtb_size,
-                         tms->video, machine->kernel_cmdline);
+                         top_of_kernel_data_pa, dtb_va, info->dtb_size,
+                         tms->video, cmdline);
 }
 
 static void cpu_impl_reg_write(void *opaque, hwaddr addr, uint64_t data, unsigned size)
@@ -926,12 +963,6 @@ static void t8030_cpu_setup(MachineState *machine)
         qdev_connect_gpio_out(DEVICE(cpuobj), GTIMER_VIRT, qdev_get_gpio_in(fiq_or, 0));
         tms->cpus[i]->fast_ipi = qdev_get_gpio_in(fiq_or, 1);
     }
-}
-
-static void t8030_bootargs_setup(MachineState *machine)
-{
-    T8030MachineState *tms = T8030_MACHINE(machine);
-    tms->bootinfo.firmware_loaded = true;
 }
 
 static void t8030_create_aic(MachineState *machine)
@@ -1421,15 +1452,15 @@ static void t8030_cpu_reset(void *opaque)
     CPUARMState *env;
 
     CPU_FOREACH(cpu) {
-        ARM_CPU(cpu)->rvbar = tms->kpc_pa & ~0xfff;
+        ARM_CPU(cpu)->rvbar = tms->bootinfo.entry & ~0xfff;
         t8030cpu_reset(t8030_cs_from_env(&ARM_CPU(cpu)->env));
     }
 
     cs = CPU(first_cpu);
     env = &ARM_CPU(cs)->env;
     cpu_reset(cs);
-    env->xregs[0] = tms->kbootargs_pa;
-    env->pc = tms->kpc_pa;
+    env->xregs[0] = tms->bootinfo.bootargs_pa;
+    env->pc = tms->bootinfo.entry;
 }
 
 static void t8030_cluster_tick(cluster* c)
@@ -1554,8 +1585,6 @@ static void t8030_machine_init(MachineState *machine)
     t8030_create_wdt(machine);
 
     t8030_create_aes(machine);
-
-    t8030_bootargs_setup(machine);
 
     qemu_register_reset(t8030_machine_reset, tms);
 }

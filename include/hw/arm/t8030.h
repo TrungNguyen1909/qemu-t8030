@@ -166,12 +166,9 @@ typedef enum BootMode {
 typedef struct
 {
     MachineState parent;
-    hwaddr extra_data_pa;
-    hwaddr kpc_pa;
-    hwaddr kbootargs_pa;
     hwaddr soc_base_pa;
     hwaddr soc_size;
-    hwaddr dram_base;
+
     unsigned long dram_size;
     T8030CPUState *cpus[MAX_CPU];
     cluster *clusters[MAX_CLUSTER];
@@ -182,9 +179,9 @@ typedef struct
     bool pendingWakeup[MAX_CPU];
     SysBusDevice *aic;
     MemoryRegion *sysmem;
-    struct arm_boot_info bootinfo;
     struct mach_header_64 *kernel;
     DTBNode *device_tree;
+    struct macho_boot_info bootinfo;
     video_boot_args video;
     char *trustcache_filename;
     char *ticket_filename;

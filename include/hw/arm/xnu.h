@@ -148,6 +148,25 @@ struct xnu_arm64_boot_args {
     uint64_t           memSizeActual;                              /* Actual size of memory */
 };
 
+#define XNU_MAX_NVRAM_SIZE  (0xFFFF * 0x10)
+
+typedef struct macho_boot_info {
+    hwaddr entry;
+    hwaddr dtb_pa;
+    uint64_t dtb_size;
+    hwaddr ramdisk_pa;
+    uint64_t ramdisk_size;
+    hwaddr trustcache_pa;
+    uint64_t trustcache_size;
+    hwaddr bootargs_pa;
+    hwaddr dram_base;
+    uint64_t dram_size;
+    uint8_t nvram_data[XNU_MAX_NVRAM_SIZE];
+    uint64_t nvram_size;
+    char *ticket_data;
+    uint64_t ticket_length;
+} *macho_boot_info_t;
+
 #define kCacheableView 0x400000000ULL
 
 struct mach_header_64 *macho_load_file(const char *filename);
@@ -206,12 +225,7 @@ void macho_load_raw_file(const char *filename, AddressSpace *as, MemoryRegion *m
 DTBNode *load_dtb_from_file(char *filename);
 
 void macho_load_dtb(DTBNode *root, AddressSpace *as, MemoryRegion *mem,
-                    const char *name, hwaddr dtb_pa, uint64_t *size,
-                    hwaddr ramdisk_addr, hwaddr ramdisk_size,
-                    hwaddr trustcache_addr, hwaddr trustcache_size,
-                    hwaddr bootargs_addr,
-                    hwaddr dram_base, unsigned long dram_size,
-                    void* nvram_data, unsigned long nvram_size);
+                    const char *name, macho_boot_info_t info);
 
 void macho_load_trustcache(const char *filename, AddressSpace *as, MemoryRegion *mem,
                             hwaddr pa, uint64_t *size);
