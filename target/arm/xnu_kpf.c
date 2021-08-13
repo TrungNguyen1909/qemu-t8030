@@ -321,6 +321,61 @@ static void kpf_mac_mount_patch(xnu_pf_patchset_t *xnu_text_exec_patchset)
                      false, (void *)kpf_mac_mount_callback);
 }
 
+static bool kpf_aksuc_handle(struct xnu_pf_patch *patch, uint32_t *opcode_stream)
+{
+    uint32_t *frame = NULL;
+    uint32_t *start = NULL;
+    bool pac = false;
+
+    // Most reliable marker of a stack frame seems to be "add x29, sp, 0x...".
+    frame = find_prev_insn(opcode_stream, 200, 0x910003fd, 0xff8003ff);
+    if(!frame) return false;
+
+    // Now find the insn that decrements sp. This can be either
+    // "stp ..., ..., [sp, -0x...]!" or "sub sp, sp, 0x...".
+    // Match top bit of imm on purpose, since we only want negative offsets.
+    start = find_prev_insn(frame, 10, 0xa9a003e0, 0xffe003e0);
+    if(!start) start = find_prev_insn(frame, 10, 0xd10003ff, 0xff8003ff);
+    if(!start) return false;
+
+    pac = find_prev_insn(start, 5, PACIBSP, 0xffffffff) != NULL;
+
+   start[0] = 0x52800000; /* MOV W0, 0 */
+   start[1] = (pac ? RETAB : RET);
+
+   fprintf(stderr, "KPF: Found AppleKeyStoreUserClient::handleUserClientCommandGated\n");
+   return true;
+}
+
+static void kpf_aks_kext_patches(xnu_pf_patchset_t *patchset)
+{
+    /* TODO: SEP
+     * AppleKeyStoreUserClient::handleUserClientCommandGated:
+     * Example from iPhone 11, iOS 14.0b5 (18A5351d)
+     * 0xfffffff008f6f83c      57588052       mov w23, 0x2c2
+     * 0xfffffff008f6f840      1700bc72       movk w23, 0xe000, lsl 16
+     * 0xfffffff008f6f844      1fae01f1       cmp x16, 0x6b
+     * 0xfffffff008f6f848      10929f9a       csel x16, x16, xzr, ls
+     * 0xfffffff008f6f84c      b1ac0210       adr x17, 0xfffffff008f74de0
+     */
+    uint64_t i_matches[] = {
+            0x52805840, /* mov x*, 0x2c2 */
+            0x72bc0000, /* movk w*, 0xe000, lsl 16 */
+            0xf100001f, /* cmp x*, #* */
+            0x9a809000, /* csel x*, x*, x*, LS */
+            0x10000000, /* adr x*, * */
+    };
+    uint64_t i_masks[] = {
+            0xffffffe0,
+            0xffffffe0,
+            0xffc0001f,
+            0xffe0fc00,
+            0xff000000,
+    };
+    xnu_pf_maskmatch(patchset, "AKSUC_handle", i_matches, i_masks,
+                     sizeof(i_matches)/sizeof(uint64_t), true, (void *)kpf_aksuc_handle);
+}
+
 void kpf(void)
 {
     struct mach_header_64 *hdr = xnu_header;
@@ -337,6 +392,10 @@ void kpf(void)
     struct mach_header_64 *amfi_header;
     xnu_pf_patchset_t *amfi_patchset;
     g_autofree xnu_pf_range_t *amfi_text_exec_range;
+
+    struct mach_header_64 *aks_header;
+    xnu_pf_patchset_t *aks_patchset;
+    g_autofree xnu_pf_range_t *aks_text_exec_range;
 
     if (first_kext) {
         g_autofree xnu_pf_range_t *first_kext_text_exec_range = xnu_pf_section(first_kext, "__TEXT_EXEC", "__text");
@@ -378,4 +437,11 @@ void kpf(void)
     kpf_amfi_patch(xnu_ppl_text_patchset);
     xnu_pf_apply(ppltext_exec_range, xnu_ppl_text_patchset);
     xnu_pf_patchset_destroy(xnu_ppl_text_patchset);
+
+    aks_patchset = xnu_pf_patchset_create(XNU_PF_ACCESS_32BIT);
+    aks_header = xnu_pf_get_kext_header(hdr, "com.apple.driver.AppleSEPKeyStore");
+    aks_text_exec_range = xnu_pf_section(aks_header, "__TEXT_EXEC", "__text");
+    kpf_aks_kext_patches(aks_patchset);
+    xnu_pf_apply(aks_text_exec_range, aks_patchset);
+    xnu_pf_patchset_destroy(aks_patchset);
 }
