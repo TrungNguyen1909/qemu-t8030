@@ -105,6 +105,155 @@ static void kpf_apfs_patches(xnu_pf_patchset_t *patchset)
                      (void *)kpf_apfs_vfsop_mount);
 }
 
+static bool kpf_amfi_callback(struct xnu_pf_patch *patch, uint32_t *opcode_stream)
+{
+    /* possibly AMFI patch
+     * this is here to patch out the trustcache checks
+     *  so that AMFI thinks that everything is in trustcache
+     * there are two different versions of the trustcache function
+     *  either it's just a leaf that's branched to or it's a function with a real prolog
+     * the first portion of this function here will try to detect the prolog
+     *  and if it fails has_frame will be false
+     * if that's the case it will just make it return null
+     *  otherwise it has to respect the epilog so it will search for all the movs
+     *  that move into x0 and then turn them into a movz x0, 1
+     */
+    char has_frame = 0;
+    for (int x = 0; x < 128; x++) {
+        uint32_t opcde = opcode_stream[-x];
+        if (opcde == RET || opcde == RETAB
+            /* unconditional branch */
+            || (opcde & 0xfc000000) == 0x14000000
+            || (opcde & 0xfc000000) == 0x94000000) {
+            break;
+        }
+        if (opcde == PACIBSP
+            /*ldp/stp???*/
+            || (opcde & 0x3e000000) == 0x28000000
+            || (opcde & 0x3e000000) == 0x2c000000) {
+            has_frame = 1;
+            break;
+        }
+    }
+    if (!has_frame) {
+        puts("KPF: Found AMFI (Leaf)");
+        opcode_stream[0] = 0xd2800020;
+        opcode_stream[1] = RET;
+    } else {
+        bool found_something = false;
+        uint32_t *patchpoint = NULL;
+        uint32_t *retpoint = find_next_insn(&opcode_stream[0], 0x180, RETAB, 0xffffffff);
+
+        if (retpoint == NULL) {
+            retpoint = find_next_insn(&opcode_stream[0], 0x180, RET, 0xffffffff);
+        }
+        if (retpoint == NULL) {
+            puts("kpf_amfi_callback: failed to find retpoint");
+            return false;
+        }
+
+        patchpoint = find_next_insn(retpoint, 0x40, 0x32000000, 0xff80001f);
+        /* __PPLTEXT:__text:0xfffffff0097eded4      00010032       orr w0, w8, 1 */
+        if (patchpoint != NULL) {
+            patchpoint[0] = 0xd2800020;
+            found_something = true;
+        }
+
+        patchpoint = find_prev_insn(retpoint, 0x40, 0xAA0003E0, 0xffe0ffff);
+        /* __TEXT_EXEC:__text:FFFFFFF007CDDFDC      E00313AA       MOV X0, X19 */
+        if (patchpoint != NULL) {
+            patchpoint[0] = 0xd2800020;
+            found_something = true;
+        }
+
+        patchpoint = find_prev_insn(retpoint, 0x40, 0x52800000, 0xffffffff);
+        /* __PPLTEXT:__text:0xfffffff0097edeac      00008052       mov w0, 0 */
+        if (patchpoint != NULL) {
+            patchpoint[0] = 0xd2800020;
+            found_something = true;
+        }
+
+        if (!found_something) {
+            puts("kpf_amfi_callback: failed to find anything");
+            return false;
+        }
+        puts("KPF: Found AMFI (Routine)");
+    }
+    return true;
+}
+
+static void kpf_amfi_patch(xnu_pf_patchset_t *xnu_text_exec_patchset)
+{
+    /* This patch leads to AMFI believing that everything is in trustcache
+     * this is done by searching for the sequence below (example from an iPhone 7, 13.3):
+     * 0xfffffff0072382b0      29610091       add x9, x9, 0x18
+     * 0xfffffff0072382b4      ca028052       movz w10, 0x16
+     * 0xfffffff0072382b8      0bfd41d3       lsr x11, x8, 1
+     * 0xfffffff0072382bc      6c250a9b       madd x12, x11, x10, x9
+     * then the callback checks if this is just a leaf instead of a full routinue
+     * if it's a leave it will just replace the above with a movz x0,1;ret
+     * if it isn't a leaf it searches for all the places where a return happens
+     *  and patches them to return true
+     * To find the patch in r2 use:
+     * /x 0000009100028052000000d30000009b:000000FF00FFFFFF000000FF000000FF
+     */
+    uint64_t matches[] = {
+            0x91000000, // add x*
+            0x52800200, // mov w*, 0x16
+            0xd3000000, // lsr *
+            0x9b000000  // madd *
+    };
+    uint64_t masks[] = {
+            0xFF000000,
+            0xFFFFFF00,
+            0xFF000000,
+            0xFF000000
+    };
+    xnu_pf_maskmatch(xnu_text_exec_patchset, "amfi_patch", matches, masks,
+                     sizeof(matches)/sizeof(uint64_t), true, (void *)kpf_amfi_callback);
+}
+
+static bool kpf_amfi_sha1(struct xnu_pf_patch *patch, uint32_t *opcode_stream)
+{
+    uint32_t* cmp = find_next_insn(opcode_stream, 0x10, 0x7100081f, 0xFFFFFFFF); /* cmp w0, 2 */
+    if (!cmp) {
+        puts("kpf_amfi_sha1: failed to find cmp");
+        return false;
+    }
+    puts("KPF: Found AMFI hashtype check");
+    xnu_pf_disable_patch(patch);
+    *cmp = 0x6b00001f; /* cmp w0, w0 */
+    return true;
+}
+
+static void kpf_amfi_kext_patches(xnu_pf_patchset_t *patchset)
+{
+    /* this patch allows us to run binaries with SHA1 signatures
+     * this is done by searching for the sequence below
+     *  and then finding the cmp w0, 2 (hashtype) and turning that into a cmp w0, w0
+     * Example from i7 13.3:
+     * 0xfffffff005f36b30      2201d036       tbz w2, 0x1a, 0xfffffff005f36b54
+     * 0xfffffff005f36b34      f30305aa       mov x19, x5
+     * 0xfffffff005f36b38      f40304aa       mov x20, x4
+     * 0xfffffff005f36b3c      f50303aa       mov x21, x3
+     * 0xfffffff005f36b40      f60300aa       mov x22, x0
+     * 0xfffffff005f36b44      e00301aa       mov x0, x1
+     * 0xfffffff005f36b48      a1010094       bl sym.stub._csblob_get_hashtype
+     * 0xfffffff005f36b4c      1f080071       cmp w0, 2
+     * 0xfffffff005f36b50      61000054       b.ne 0xfffffff005f36b5c
+     * to find this in r2 run (make sure to check if the address is aligned):
+     * /x 0200d036:1f00f8ff
+     */
+    uint64_t i_matches[] = {
+            0x36d00002, // tbz w2, 0x1a, *
+    };
+    uint64_t i_masks[] = {
+            0xfff8001f,
+    };
+    xnu_pf_maskmatch(patchset, "amfi_sha1", i_matches, i_masks,
+                     sizeof(i_matches)/sizeof(uint64_t), true, (void *)kpf_amfi_sha1);
+}
+
 bool kpf_has_done_mac_mount;
 static bool kpf_mac_mount_callback(struct xnu_pf_patch *patch, uint32_t *opcode_stream)
 {
@@ -177,10 +326,17 @@ void kpf(void)
     struct mach_header_64 *hdr = xnu_header;
     xnu_pf_patchset_t *xnu_text_exec_patchset = xnu_pf_patchset_create(XNU_PF_ACCESS_32BIT);
     g_autofree xnu_pf_range_t *text_exec_range = xnu_pf_section(hdr, "__TEXT_EXEC", "__text");
+    xnu_pf_patchset_t *xnu_ppl_text_patchset = xnu_pf_patchset_create(XNU_PF_ACCESS_32BIT);
+    g_autofree xnu_pf_range_t *ppltext_exec_range = xnu_pf_section(hdr, "__PPLTEXT", "__text");
     struct mach_header_64 *first_kext = xnu_pf_get_first_kext(hdr);
+
     xnu_pf_patchset_t *apfs_patchset;
     struct mach_header_64 *apfs_header;
     g_autofree xnu_pf_range_t *apfs_text_exec_range;
+
+    struct mach_header_64 *amfi_header;
+    xnu_pf_patchset_t *amfi_patchset;
+    g_autofree xnu_pf_range_t *amfi_text_exec_range;
 
     if (first_kext) {
         g_autofree xnu_pf_range_t *first_kext_text_exec_range = xnu_pf_section(first_kext, "__TEXT_EXEC", "__text");
@@ -207,7 +363,19 @@ void kpf(void)
     xnu_pf_apply(apfs_text_exec_range, apfs_patchset);
     xnu_pf_patchset_destroy(apfs_patchset);
 
+    amfi_patchset = xnu_pf_patchset_create(XNU_PF_ACCESS_32BIT);
+    amfi_header = xnu_pf_get_kext_header(hdr, "com.apple.driver.AppleMobileFileIntegrity");
+    amfi_text_exec_range = xnu_pf_section(amfi_header, "__TEXT_EXEC", "__text");
+    kpf_amfi_kext_patches(amfi_patchset);
+    xnu_pf_apply(amfi_text_exec_range, amfi_patchset);
+    xnu_pf_patchset_destroy(amfi_patchset);
+
+    kpf_amfi_patch(xnu_text_exec_patchset);
     kpf_mac_mount_patch(xnu_text_exec_patchset);
     xnu_pf_apply(text_exec_range, xnu_text_exec_patchset);
     xnu_pf_patchset_destroy(xnu_text_exec_patchset);
+
+    kpf_amfi_patch(xnu_ppl_text_patchset);
+    xnu_pf_apply(ppltext_exec_range, xnu_ppl_text_patchset);
+    xnu_pf_patchset_destroy(xnu_ppl_text_patchset);
 }
