@@ -1564,7 +1564,8 @@ static void t8030_set_trustcache_filename(Object *obj, const char *value, Error 
 {
     T8030MachineState *tms = T8030_MACHINE(obj);
 
-    g_strlcpy(tms->trustcache_filename, value, sizeof(tms->trustcache_filename));
+    g_free(tms->trustcache_filename);
+    tms->trustcache_filename = g_strdup(value);
 }
 
 static char *t8030_get_trustcache_filename(Object *obj, Error **errp)
@@ -1574,11 +1575,67 @@ static char *t8030_get_trustcache_filename(Object *obj, Error **errp)
     return g_strdup(tms->trustcache_filename);
 }
 
+static void t8030_set_ticket_filename(Object *obj, const char *value, Error **errp)
+{
+    T8030MachineState *tms = T8030_MACHINE(obj);
+
+    g_free(tms->ticket_filename);
+    tms->ticket_filename = g_strdup(value);
+}
+
+static char *t8030_get_ticket_filename(Object *obj, Error **errp)
+{
+    T8030MachineState *tms = T8030_MACHINE(obj);
+
+    return g_strdup(tms->ticket_filename);
+}
+
+static void t8030_set_boot_mode(Object *obj, const char *value, Error **errp)
+{
+    T8030MachineState *tms = T8030_MACHINE(obj);
+
+    if (g_str_equal(value, "auto")) {
+        tms->boot_mode = kBootModeAuto;
+    } else if (g_str_equal(value, "manual")) {
+        tms->boot_mode = kBootModeManual;
+    } else if (g_str_equal(value, "enter_recovery")) {
+        tms->boot_mode = kBootModeEnterRecovery;
+    } else if (g_str_equal(value, "exit_recovery")) {
+        tms->boot_mode = kBootModeExitRecovery;
+    } else {
+        tms->boot_mode = kBootModeAuto;
+        error_setg(errp, "Invalid boot mode: %s", value);
+    }
+}
+
+static char *t8030_get_boot_mode(Object *obj, Error **errp)
+{
+    T8030MachineState *tms = T8030_MACHINE(obj);
+
+    switch (tms->boot_mode) {
+    case kBootModeManual:
+        return g_strdup("manual");
+    case kBootModeEnterRecovery:
+        return g_strdup("enter_recovery");
+    case kBootModeExitRecovery:
+        return g_strdup("exit_recovery");
+    default:
+    case kBootModeAuto:
+        return g_strdup("auto");
+    }
+}
+
 static void t8030_instance_init(Object *obj)
 {
     object_property_add_str(obj, "trustcache-filename", t8030_get_trustcache_filename, t8030_set_trustcache_filename);
     object_property_set_description(obj, "trustcache-filename",
                                     "Set the trustcache filename to be loaded");
+    object_property_add_str(obj, "ticket-filename", t8030_get_ticket_filename, t8030_set_ticket_filename);
+    object_property_set_description(obj, "ticket-filename",
+                                    "Set the APTicket filename to be loaded");
+    object_property_add_str(obj, "boot-mode", t8030_get_boot_mode, t8030_set_boot_mode);
+    object_property_set_description(obj, "boot-mode",
+                                    "Set boot mode of the machine");
 }
 
 static void t8030_machine_class_init(ObjectClass *klass, void *data)

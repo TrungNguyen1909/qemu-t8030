@@ -156,6 +156,13 @@ typedef struct {
 
 #define kDeferredIPITimerDefault 64000
 
+typedef enum BootMode {
+    kBootModeAuto = 0,
+    kBootModeManual,
+    kBootModeEnterRecovery,
+    kBootModeExitRecovery,
+} BootMode;
+
 typedef struct
 {
     MachineState parent;
@@ -176,10 +183,12 @@ typedef struct
     SysBusDevice *aic;
     MemoryRegion *sysmem;
     struct arm_boot_info bootinfo;
-    char trustcache_filename[1024];
     struct mach_header_64 *kernel;
     DTBNode *device_tree;
     video_boot_args video;
+    char *trustcache_filename;
+    char *ticket_filename;
+    BootMode boot_mode;
     uint32_t build_version;
 } T8030MachineState;
 
