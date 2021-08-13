@@ -107,7 +107,7 @@ static DTBNode *read_dtb_node(uint8_t **dtb_blob)
     return node;
 }
 
-void delete_dtb_node(DTBNode *node)
+static void delete_dtb_node(DTBNode *node)
 {
     if (!node) {
         return;
@@ -180,7 +180,7 @@ void remove_dtb_node(DTBNode *parent, DTBNode *node)
     parent->child_node_count--;
 }
 
-bool remove_dtb_node_by_name(DTBNode *parent, char *name)
+bool remove_dtb_node_by_name(DTBNode *parent, const char *name)
 {
     DTBNode *node = find_dtb_node(parent, name);
     
