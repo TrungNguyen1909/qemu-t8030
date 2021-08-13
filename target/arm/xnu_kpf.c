@@ -3,6 +3,8 @@
 
 #define NOP 0xd503201f
 #define RET 0xd65f03c0
+#define RETAB 0xd65f0fff
+#define PACIBSP 0xd503237f
 
 static uint32_t *find_next_insn(uint32_t *from, uint32_t num, uint32_t insn, uint32_t mask)
 {
@@ -14,7 +16,7 @@ static uint32_t *find_next_insn(uint32_t *from, uint32_t num, uint32_t insn, uin
         num--;
     }
 
-    // not found
+    /* not found */
     return NULL;
 }
 
@@ -28,14 +30,14 @@ static uint32_t *find_prev_insn(uint32_t *from, uint32_t num, uint32_t insn, uin
         num--;
     }
 
-    // not found
+    /* not found */
     return NULL;
 }
 
 static bool kpf_apfs_rootauth(struct xnu_pf_patch *patch, uint32_t *opcode_stream)
 {
     opcode_stream[0] = NOP;
-    opcode_stream[1] = 0x52800000; // mov w0, 0
+    opcode_stream[1] = 0x52800000; /* mov w0, 0 */
 
     puts("KPF: found handle_eval_rootauth");
     return true;
@@ -43,7 +45,7 @@ static bool kpf_apfs_rootauth(struct xnu_pf_patch *patch, uint32_t *opcode_strea
 
 static bool kpf_apfs_vfsop_mount(struct xnu_pf_patch *patch, uint32_t *opcode_stream)
 {
-    opcode_stream[0] = 0x52800000; // mov w0, 0
+    opcode_stream[0] = 0x52800000; /* mov w0, 0 */
     puts("KPF: found apfs_vfsop_mount");
     return true;
 }
@@ -108,8 +110,9 @@ static bool kpf_mac_mount_callback(struct xnu_pf_patch *patch, uint32_t *opcode_
 {
     puts("KPF: Found mac_mount");
     uint32_t *mac_mount = &opcode_stream[0];
-    // search for tbnz w*, 5, *
-    // and nop it (enable MNT_UNION mounts)
+    /* search for tbnz w*, 5, *
+     * and nop it (enable MNT_UNION mounts)
+     */
     uint32_t *mac_mount_1 = find_prev_insn(mac_mount, 0x40, 0x37280000, 0xfffe0000);
 
     if (!mac_mount_1) {
