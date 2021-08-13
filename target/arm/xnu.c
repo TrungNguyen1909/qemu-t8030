@@ -588,6 +588,28 @@ void macho_load_raw_file(const char *filename, AddressSpace *as, MemoryRegion *m
     }
 }
 
+bool xnu_contains_boot_arg(const char *bootArgs, const char *arg, bool prefixmatch)
+{
+    g_autofree char *args = g_strdup(bootArgs);
+    char *pos = args;
+    char *token;
+    size_t arglen = strlen(arg);
+
+    if (args == NULL) {
+    	return false;
+    }
+
+    while ((token = strsep(&pos, " ")) != NULL) {
+    	if (prefixmatch && strncmp(token, arg, arglen) == 0) {
+    		return true;
+    	} else if (strcmp(token, arg) == 0) {
+    		return true;
+    	}
+    }
+
+    return false;
+}
+
 void macho_setup_bootargs(const char *name, AddressSpace *as,
                           MemoryRegion *mem, hwaddr bootargs_pa,
                           hwaddr virt_base, hwaddr phys_base, hwaddr mem_size,

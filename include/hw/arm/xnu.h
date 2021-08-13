@@ -185,11 +185,7 @@ uint64_t xnu_rebase_va(uint64_t va);
 
 uint64_t kext_rebase_va(uint64_t va);
 
-void macho_tz_setup_bootargs(const char *name, AddressSpace *as,
-                             MemoryRegion *mem, hwaddr bootargs_addr,
-                             hwaddr virt_base, hwaddr phys_base,
-                             hwaddr mem_size, hwaddr kern_args,
-                             hwaddr kern_entry, hwaddr kern_phys_base);
+bool xnu_contains_boot_arg(const char *bootArgs, const char *arg, bool prefixmatch);
 
 void macho_setup_bootargs(const char *name, AddressSpace *as,
                           MemoryRegion *mem, hwaddr bootargs_pa,
