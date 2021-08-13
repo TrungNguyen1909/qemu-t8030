@@ -331,13 +331,6 @@ void macho_load_dtb(DTBNode *root, AddressSpace *as, MemoryRegion *mem,
     uint64_t seed[8] = {0xdead000d, 0xdead000d, 0xdead000d, 0xdead000d,
                         0xdead000d, 0xdead000d, 0xdead000d, 0xdead000d};
 
-    // remove this prop as it is responsible for the waited for event
-    // in PE that never happens
-    prop = find_dtb_prop(root, "secure-root-prefix");
-    if (prop) {
-        remove_dtb_prop(root, prop);
-    }
-
     child = get_dtb_node(root, "arm-io");
     prop = find_dtb_prop(child, "chip-revision");
     assert(prop);
