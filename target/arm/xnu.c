@@ -28,6 +28,7 @@
 #include "hw/arm/boot.h"
 #include "sysemu/sysemu.h"
 #include "qemu/error-report.h"
+#include "crypto/hash.h"
 #include "hw/arm/xnu.h"
 #include "hw/loader.h"
 #include "img4.h"
@@ -418,6 +419,56 @@ void macho_load_dtb(DTBNode *root, AddressSpace *as, MemoryRegion *mem,
     data = 1;
     // TODO: Workaround: AppleKeyStore SEP(?)
     set_dtb_prop(child, "boot-ios-diagnostics", sizeof(data), (uint8_t *)&data);
+
+    uint8_t buffer[0x40] = { 0 };
+
+    memset(buffer, 0, sizeof(buffer));
+    memcpy(buffer, "MWCH2", 5);
+    set_dtb_prop(root, "model-number", 32, buffer);
+    memset(buffer, 0, sizeof(buffer));
+    memcpy(buffer, "LL/A", 4);
+    set_dtb_prop(root, "region-info", 32, buffer);
+    memset(buffer, 0, sizeof(buffer));
+    set_dtb_prop(root, "config-number", 0x40, buffer);
+    memset(buffer, 0, sizeof(buffer));
+    memcpy(buffer, "C39ZRMDEN72J", 12);
+    set_dtb_prop(root, "serial-number", 32, buffer);
+    memset(buffer, 0, sizeof(buffer));
+    memcpy(buffer, "C39948108J9N72J1F", 17);
+    set_dtb_prop(root, "mlb-serial-number", 32, buffer);
+    memset(buffer, 0, sizeof(buffer));
+    memcpy(buffer, "A2160", 5);
+    set_dtb_prop(root, "regulatory-model-number", 32, buffer);
+
+    child = get_dtb_node(root, "chosen");
+    data = 0x8030;
+    set_dtb_prop(child, "chip-id", 4, (uint8_t *)&data);
+    data = 0x4;
+    set_dtb_prop(child, "board-id", 4, (uint8_t *)&data);
+
+    uint64_t ecid = 0x1122334455667788;
+    set_dtb_prop(child, "unique-chip-id", 8, (uint8_t *)&ecid);
+
+    if (info->ticket_data && info->ticket_length) {
+        QCryptoHashAlgorithm alg = QCRYPTO_HASH_ALG_SHA1;
+        g_autofree uint8_t *hash = NULL;
+        size_t hash_len = 0;
+        g_autofree Error *err = NULL;
+        prop = find_dtb_prop(child, "crypto-hash-method");
+
+        if (prop) {
+            if (strcmp((char *)prop->value, "sha2-384") == 0) {
+                alg = QCRYPTO_HASH_ALG_SHA384;
+            }
+        }
+
+        if (qcrypto_hash_bytes(alg, info->ticket_data, info->ticket_length, &hash, &hash_len, &err) >= 0) {
+            set_dtb_prop(child, "boot-manifest-hash", hash_len, hash);
+        } else {
+            error_report_err(err);
+        }
+    }
+
     macho_dtb_node_process(root, NULL);
 
     child = get_dtb_node(root, "chosen");
