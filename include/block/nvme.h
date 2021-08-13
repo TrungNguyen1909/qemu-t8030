@@ -571,6 +571,7 @@ enum NvmeAdminCommands {
     NVME_ADM_CMD_FORMAT_NVM     = 0x80,
     NVME_ADM_CMD_SECURITY_SEND  = 0x81,
     NVME_ADM_CMD_SECURITY_RECV  = 0x82,
+    NVME_ADM_CMD_CREATE_NS      = 0xc6,
 };
 
 enum NvmeIoCommands {
@@ -1177,6 +1178,9 @@ enum NvmeFeatureIds {
     NVME_TIMESTAMP                  = 0xe,
     NVME_COMMAND_SET_PROFILE        = 0x19,
     NVME_SOFTWARE_PROGRESS_MARKER   = 0x80,
+    NVME_NAND_INFO_LOW              = 0xc0,
+    NVME_NAND_INFO_HIGH             = 0xc1,
+    NVME_MSP_TYPE                   = 0xc2,
     NVME_FID_MAX                    = 0x100,
 };
 
