@@ -174,9 +174,6 @@ typedef struct
     cluster *clusters[MAX_CLUSTER];
     QEMUTimer *ipicr_timer;
     uint64_t ipi_cr;
-    //store the pending IPI_SR value
-    uint64_t pendingIPI[MAX_CPU];
-    bool pendingWakeup[MAX_CPU];
     SysBusDevice *aic;
     MemoryRegion *sysmem;
     struct mach_header_64 *kernel;
