@@ -1498,10 +1498,9 @@ static void t8030_machine_ipicr_tick(void* opaque)
     timer_mod_ns(tms->ipicr_timer, qemu_clock_get_ns(QEMU_CLOCK_VIRTUAL) + tms->ipi_cr);
 }
 
-static void t8030_machine_reset(void* opaque)
+static void t8030_machine_reset(MachineState* machine)
 {
-    MachineState *machine = MACHINE(opaque);
-    T8030MachineState *tms = T8030_MACHINE(opaque);
+    T8030MachineState *tms = T8030_MACHINE(machine);
 
     if (tms->ipicr_timer) {
         timer_del(tms->ipicr_timer);
@@ -1510,6 +1509,7 @@ static void t8030_machine_reset(void* opaque)
     tms->ipicr_timer = timer_new_ns(QEMU_CLOCK_VIRTUAL, t8030_machine_ipicr_tick, machine);
     timer_mod_ns(tms->ipicr_timer, qemu_clock_get_ns(QEMU_CLOCK_VIRTUAL) + kDeferredIPITimerDefault);
     t8030_cluster_reset(machine);
+    qemu_devices_reset();
     t8030_memory_setup(machine);
     t8030_cpu_reset(tms);
 }
@@ -1585,8 +1585,6 @@ static void t8030_machine_init(MachineState *machine)
     t8030_create_wdt(machine);
 
     t8030_create_aes(machine);
-
-    qemu_register_reset(t8030_machine_reset, tms);
 }
 
 static void t8030_set_trustcache_filename(Object *obj, const char *value, Error **errp)
@@ -1673,6 +1671,7 @@ static void t8030_machine_class_init(ObjectClass *klass, void *data)
 
     mc->desc = "T8030";
     mc->init = t8030_machine_init;
+    mc->reset = t8030_machine_reset;
     mc->max_cpus = MAX_CPU;
     // this disables the error message "Failed to query for block devices!"
     // when starting qemu - must keep at least one device
