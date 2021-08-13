@@ -84,6 +84,11 @@ static void usb_tcp_remote_closed(USBTCPRemoteState *s)
 {
     bool iothread = qemu_in_iothread();
     bool iolock = qemu_mutex_iothread_locked();
+
+    if (s->fd == -1) {
+        return;
+    }
+
     fprintf(stderr, "%s\n", __func__);
     close(s->fd);
 
