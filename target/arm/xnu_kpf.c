@@ -176,14 +176,14 @@ void kpf(void)
 {
     struct mach_header_64 *hdr = xnu_header;
     xnu_pf_patchset_t *xnu_text_exec_patchset = xnu_pf_patchset_create(XNU_PF_ACCESS_32BIT);
-    xnu_pf_range_t *text_exec_range = xnu_pf_section(hdr, "__TEXT_EXEC", "__text");
+    g_autofree xnu_pf_range_t *text_exec_range = xnu_pf_section(hdr, "__TEXT_EXEC", "__text");
     struct mach_header_64 *first_kext = xnu_pf_get_first_kext(hdr);
     xnu_pf_patchset_t *apfs_patchset;
     struct mach_header_64 *apfs_header;
-    xnu_pf_range_t *apfs_text_exec_range;
+    g_autofree xnu_pf_range_t *apfs_text_exec_range;
 
     if (first_kext) {
-        xnu_pf_range_t *first_kext_text_exec_range = xnu_pf_section(first_kext, "__TEXT_EXEC", "__text");
+        g_autofree xnu_pf_range_t *first_kext_text_exec_range = xnu_pf_section(first_kext, "__TEXT_EXEC", "__text");
 
         if (first_kext_text_exec_range) {
             uint64_t text_exec_end_real;
