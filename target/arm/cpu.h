@@ -250,7 +250,7 @@ typedef struct ARMPACKey {
 
 #define SPRR_EXTRACT_IDX_ATTR(_sprr_value, _idx) \
 	(((_sprr_value) >> SPRR_SHIFT_FOR_IDX(_idx)) & SPRR_ATTR_MASK)
-    
+
 #define SPRR_MASK_SHIFT_FOR_IDX(x) \
 	((x) << 1ULL)
 
@@ -2757,6 +2757,12 @@ static inline int arm_current_el(CPUARMState *env)
 static inline bool arm_is_guarded(CPUARMState *env)
 {
     return env->gxf.gxf_status_el[arm_current_el(env)] & 1;
+}
+
+/* Return true if the processor has SPRR enabled */
+static inline bool arm_is_sprr_enabled(CPUARMState *env)
+{
+    return env->sprr.sprr_config_el[arm_current_el(env)] & 1;
 }
 
 
