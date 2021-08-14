@@ -10770,19 +10770,19 @@ simple_ap_to_rw_prot(CPUARMState *env, ARMMMUIdx mmu_idx, int ap)
  * @ap:      The 2-bit simple AP (AP[2:1])
  * @xn:      XN (execute-never) bits
  * @pxn:     PXN (privileged-execute-never) bits
+ * @guarded: TRUE if accessing from GXF
  */
 static inline int
-pte_to_sprr_prot(CPUARMState *env, int ap, int xn, int pxn)
+pte_to_sprr_prot_is_guarded(CPUARMState *env, int ap, int xn, int pxn, bool guarded)
 {
     int sprr_idx = ((ap << 2) | (xn << 1) | pxn) & 0xf;
-    int cur_el = arm_current_el(env);
-    uint64_t sprr_perm = env->sprr.sprr_perm_el[cur_el];
+    uint64_t sprr_perm = env->sprr.sprr_perm_el[arm_current_el(env)];
 
-    if (env->sprr.sprr_config_el[cur_el] & 1) {
+    if (arm_is_sprr_enabled(env)) {
         int attr = SPRR_EXTRACT_IDX_ATTR(sprr_perm, sprr_idx);
         int prot = 0;
 
-        if (arm_is_guarded(env)) {
+        if (guarded) {
             switch (attr >> 2) {
             case 0:
                 prot = 0;
@@ -10829,6 +10829,20 @@ pte_to_sprr_prot(CPUARMState *env, int ap, int xn, int pxn)
         return prot;
     }
     return PAGE_READ | PAGE_WRITE | PAGE_EXEC;
+}
+
+/* Translate section/page attributes to page
+ * R/W/X protection flags.
+ *
+ * @env:     CPUARMState
+ * @ap:      The 2-bit simple AP (AP[2:1])
+ * @xn:      XN (execute-never) bits
+ * @pxn:     PXN (privileged-execute-never) bits
+ */
+static inline int
+pte_to_sprr_prot(CPUARMState *env, int ap, int xn, int pxn)
+{
+    return pte_to_sprr_prot_is_guarded(env, ap, xn, pxn, arm_is_guarded(env));
 }
 
 /* Translate S2 section/page access permissions to protection flags
