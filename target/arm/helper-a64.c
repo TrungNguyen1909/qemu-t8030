@@ -1081,7 +1081,6 @@ void HELPER(gexit)(CPUARMState *env)
 {
     int cur_el = arm_current_el(env);
     uint32_t spsr = env->gxf.spsr_gl[cur_el];
-    //TODO: Illegal gexit?
 
     aarch64_save_sp(env, cur_el);
 

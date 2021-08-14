@@ -10411,7 +10411,6 @@ static void arm_cpu_do_interrupt_aarch64(CPUState *cs)
     env->gxf.gxf_status_el[new_el] |= genter;
     env->aarch64 = 1;
     aarch64_restore_sp(env, new_el);
-    //TODO: MMU in GXF?
 
     helper_rebuild_hflags_a64(env, new_el);
 
@@ -10916,13 +10915,21 @@ static int get_S1prot(CPUARMState *env, ARMMMUIdx mmu_idx, bool is_aa64,
 
     user_rw = simple_ap_to_rw_prot_is_user(ap, true);
     if (is_user) {
-        prot_rw = user_rw;
+        if (arm_is_sprr_enabled(env)) {
+            prot_rw = pte_to_sprr_prot(env, ap, xn, pxn);
+        } else {
+            prot_rw = user_rw;
+        }
     } else {
         if (user_rw && regime_is_pan(env, mmu_idx)) {
             /* PAN forbids data accesses but doesn't affect insn fetch */
             prot_rw = 0;
         } else {
-            prot_rw = simple_ap_to_rw_prot_is_user(ap, false);
+            if (arm_is_sprr_enabled(env)) {
+                prot_rw = pte_to_sprr_prot(env, ap, xn, pxn);
+            } else {
+                prot_rw = simple_ap_to_rw_prot_is_user(ap, false);
+            }
         }
     }
 
@@ -10939,6 +10946,10 @@ static int get_S1prot(CPUARMState *env, ARMMMUIdx mmu_idx, bool is_aa64,
 
     if (have_wxn) {
         wxn = regime_sctlr(env, mmu_idx) & SCTLR_WXN;
+    }
+
+    if (arm_is_sprr_enabled(env)) {
+        xn = pxn = !(pte_to_sprr_prot(env, ap, xn, pxn) & PAGE_EXEC);
     }
 
     if (is_aa64) {
@@ -11913,6 +11924,7 @@ static bool get_phys_addr_lpae(CPUARMState *env, uint64_t address,
         *prot = get_S1prot(env, mmu_idx, aarch64, ap, ns, xn, pxn);
     }
 
+    //TODO: GXF aborts when EL jumps to GL code
     fault_type = ARMFault_Permission;
     if (!(*prot & (1 << access_type))) {
         goto do_fault;
