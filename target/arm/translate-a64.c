@@ -14591,7 +14591,7 @@ static void disas_gxf_insn(DisasContext *s, uint32_t insn)
             }
             gen_a64_set_pc_im(s->pc_curr);
             gen_ss_advance(s);
-            gen_exception_insn(s, s->base.pc_next, EXCP_GENTER, syn_uncategorized(), s->current_el);
+            gen_exception_insn(s, s->base.pc_next, EXCP_GENTER, syn_aa64_genter(), s->current_el);
             break;
 
         case 0x00201400: /* GEXIT */

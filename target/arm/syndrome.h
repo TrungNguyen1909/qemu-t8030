@@ -65,6 +65,7 @@ enum arm_exception_class {
     EC_AA32_BKPT              = 0x38,
     EC_VECTORCATCH            = 0x3a,
     EC_AA64_BKPT              = 0x3c,
+    EC_AA64_APPLE             = 0x3f,
 };
 
 #define ARM_EL_EC_SHIFT 26
@@ -106,6 +107,11 @@ static inline uint32_t syn_aa64_hvc(uint32_t imm16)
 static inline uint32_t syn_aa64_smc(uint32_t imm16)
 {
     return (EC_AA64_SMC << ARM_EL_EC_SHIFT) | ARM_EL_IL | (imm16 & 0xffff);
+}
+
+static inline uint32_t syn_aa64_genter()
+{
+    return (EC_AA64_APPLE << ARM_EL_EC_SHIFT) | ARM_EL_IL | (1 << 16);
 }
 
 static inline uint32_t syn_aa32_svc(uint32_t imm16, bool is_16bit)
