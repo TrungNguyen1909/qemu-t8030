@@ -221,6 +221,8 @@ SysBusDevice *apple_ans_create(DTBNode *node, uint32_t build_version)
                              true, &error_fatal);
     object_property_set_uint(OBJECT(&s->nvme), "max_ioqpairs", 8, &error_fatal);
     object_property_set_uint(OBJECT(&s->nvme), "mdts", 8, &error_fatal);
+    object_property_set_uint(OBJECT(&s->nvme), "logical_block_size", 4096, &error_fatal);
+    object_property_set_uint(OBJECT(&s->nvme), "physical_block_size", 4096, &error_fatal);
 
     pcie_host_mmcfg_init(pex, PCIE_MMCFG_SIZE_MAX);
     memory_region_init(&s->io_mmio, OBJECT(s), "ans_pci_mmio", UINT64_MAX);
