@@ -4001,14 +4001,6 @@ static void vmsa_tcr_el12_write(CPUARMState *env, const ARMCPRegInfo *ri,
     tlb_flush(CPU(cpu));
     tcr->raw_tcr = value;
 }
-static void vmsa_tcr_el1_write(CPUARMState *env, const ARMCPRegInfo *ri,
-                               uint64_t value)
-{
-    if (!arm_is_guarded(env) && env->cp15.vmsa_lock_el1 & VMSA_LOCK_TCR_EL1) {
-        return;
-    }
-    vmsa_tcr_el12_write(env, ri, value);
-}
 
 static void vmsa_ttbr_write(CPUARMState *env, const ARMCPRegInfo *ri,
                             uint64_t value)
@@ -4020,24 +4012,6 @@ static void vmsa_ttbr_write(CPUARMState *env, const ARMCPRegInfo *ri,
         tlb_flush(CPU(cpu));
     }
     raw_write(env, ri, value);
-}
-static void vmsa_ttbr0_el1_write(CPUARMState *env, const ARMCPRegInfo *ri,
-                            uint64_t value)
-{
-    if (!arm_is_guarded(env) && env->cp15.vmsa_lock_el1 & VMSA_LOCK_TTBR0_EL1) {
-        return;
-    }
-
-    vmsa_ttbr_write(env, ri, value);
-}
-static void vmsa_ttbr1_el1_write(CPUARMState *env, const ARMCPRegInfo *ri,
-                            uint64_t value)
-{
-    if (!arm_is_guarded(env) && env->cp15.vmsa_lock_el1 & VMSA_LOCK_TTBR1_EL1) {
-        return;
-    }
-
-    vmsa_ttbr_write(env, ri, value);
 }
 
 static void vmsa_tcr_ttbr_el2_write(CPUARMState *env, const ARMCPRegInfo *ri,
@@ -4117,19 +4091,19 @@ static const ARMCPRegInfo vmsa_cp_reginfo[] = {
     { .name = "TTBR0_EL1", .state = ARM_CP_STATE_BOTH,
       .opc0 = 3, .opc1 = 0, .crn = 2, .crm = 0, .opc2 = 0,
       .access = PL1_RW, .accessfn = access_tvm_trvm,
-      .writefn = vmsa_ttbr0_el1_write, .resetvalue = 0,
+      .writefn = vmsa_ttbr_write, .resetvalue = 0,
       .bank_fieldoffsets = { offsetof(CPUARMState, cp15.ttbr0_s),
                              offsetof(CPUARMState, cp15.ttbr0_ns) } },
     { .name = "TTBR1_EL1", .state = ARM_CP_STATE_BOTH,
       .opc0 = 3, .opc1 = 0, .crn = 2, .crm = 0, .opc2 = 1,
       .access = PL1_RW, .accessfn = access_tvm_trvm,
-      .writefn = vmsa_ttbr1_el1_write, .resetvalue = 0,
+      .writefn = vmsa_ttbr_write, .resetvalue = 0,
       .bank_fieldoffsets = { offsetof(CPUARMState, cp15.ttbr1_s),
                              offsetof(CPUARMState, cp15.ttbr1_ns) } },
     { .name = "TCR_EL1", .state = ARM_CP_STATE_AA64,
       .opc0 = 3, .crn = 2, .crm = 0, .opc1 = 0, .opc2 = 2,
       .access = PL1_RW, .accessfn = access_tvm_trvm,
-      .writefn = vmsa_tcr_el1_write,
+      .writefn = vmsa_tcr_el12_write,
       .resetfn = vmsa_ttbcr_reset, .raw_writefn = raw_write,
       .fieldoffset = offsetof(CPUARMState, cp15.tcr_el[1]) },
     { .name = "TTBCR", .cp = 15, .crn = 2, .crm = 0, .opc1 = 0, .opc2 = 2,
