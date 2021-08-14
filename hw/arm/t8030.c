@@ -1452,13 +1452,13 @@ static void t8030_cpu_reset(void *opaque)
     CPUARMState *env;
 
     CPU_FOREACH(cpu) {
+        cpu_reset(cpu);
         ARM_CPU(cpu)->rvbar = tms->bootinfo.entry & ~0xfff;
         t8030cpu_reset(t8030_cs_from_env(&ARM_CPU(cpu)->env));
     }
 
     cs = CPU(first_cpu);
     env = &ARM_CPU(cs)->env;
-    cpu_reset(cs);
     env->xregs[0] = tms->bootinfo.bootargs_pa;
     env->pc = tms->bootinfo.entry;
 }
