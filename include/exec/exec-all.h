@@ -263,27 +263,29 @@ void tlb_flush_page_bits_by_mmuidx_all_cpus_synced
     (CPUState *cpu, target_ulong addr, uint16_t idxmap, unsigned bits);
 
 /**
- * tlb_ranged_flush_page_bits_by_mmuidx
+ * tlb_flush_range_by_mmuidx
  * @cpu: CPU whose TLB should be flushed
- * @addr: virtual address of page to be flushed
+ * @addr: virtual address of the start of the range to be flushed
+ * @len: length of range to be flushed
  * @idxmap: bitmap of mmu indexes to flush
  * @bits: number of significant bits in address
- * @npages: number of pages to be flushed
- * @granule: translation granule
  *
- * Similar to tlb_flush_page_bits_by_mmuidx, but with range support.
+ * For each mmuidx in @idxmap, flush all pages within [@addr,@addr+@len),
+ * comparing only the low @bits worth of each virtual page.
  */
-void tlb_ranged_flush_page_bits_by_mmuidx(CPUState *cpu, target_ulong addr,
-                                          uint16_t idxmap, unsigned bits,
-                                          uint16_t npages, uint16_t granule);
+void tlb_flush_range_by_mmuidx(CPUState *cpu, target_ulong addr,
+                               target_ulong len, uint16_t idxmap,
+                               unsigned bits);
 
-/* Similarly, with broadcast, syncing. */
-void tlb_ranged_flush_page_bits_by_mmuidx_all_cpus
-    (CPUState *cpu, target_ulong addr, uint16_t idxmap, unsigned bits,
-     uint16_t npages, uint16_t granule);
-void tlb_ranged_flush_page_bits_by_mmuidx_all_cpus_synced
-    (CPUState *cpu, target_ulong addr, uint16_t idxmap, unsigned bits,
-     uint16_t npages, uint16_t granule);
+/* Similarly, with broadcast and syncing. */
+void tlb_flush_range_by_mmuidx_all_cpus(CPUState *cpu, target_ulong addr,
+                                        target_ulong len, uint16_t idxmap,
+                                        unsigned bits);
+void tlb_flush_range_by_mmuidx_all_cpus_synced(CPUState *cpu,
+                                               target_ulong addr,
+                                               target_ulong len,
+                                               uint16_t idxmap,
+                                               unsigned bits);
 
 /**
  * tlb_set_page_with_attrs:
@@ -388,25 +390,23 @@ tlb_flush_page_bits_by_mmuidx_all_cpus_synced(CPUState *cpu, target_ulong addr,
                                               uint16_t idxmap, unsigned bits)
 {
 }
-
-static inline void tlb_ranged_flush_page_bits_by_mmuidx(CPUState *cpu,
-                                                        target_ulong addr,
-                                                        uint16_t idxmap,
-                                                        unsigned bits,
-                                                        uint16_t npages,
-                                                        uint16_t granule)
+static inline void tlb_flush_range_by_mmuidx(CPUState *cpu, target_ulong addr,
+                                             target_ulong len, uint16_t idxmap,
+                                             unsigned bits)
 {
 }
-static inline void
-tlb_ranged_flush_page_bits_by_mmuidx_all_cpus(CPUState *cpu, target_ulong addr,
-                                              uint16_t idxmap, unsigned bits,
-                                              uint16_t npages, uint16_t granule)
+static inline void tlb_flush_range_by_mmuidx_all_cpus(CPUState *cpu,
+                                                      target_ulong addr,
+                                                      target_ulong len,
+                                                      uint16_t idxmap,
+                                                      unsigned bits)
 {
 }
-static inline void
-tlb_ranged_flush_page_bits_by_mmuidx_all_cpus_synced(CPUState *cpu, target_ulong addr,
-                                                     uint16_t idxmap, unsigned bits,
-                                                     uint16_t npages, uint16_t granule)
+static inline void tlb_flush_range_by_mmuidx_all_cpus_synced(CPUState *cpu,
+                                                             target_ulong addr,
+                                                             target_long len,
+                                                             uint16_t idxmap,
+                                                             unsigned bits)
 {
 }
 #endif

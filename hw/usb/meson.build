@@ -14,6 +14,9 @@ softmmu_ss.add(when: 'CONFIG_USB', if_true: files(
   'desc-msos.c',
 ))
 
+specific_ss.add(when: ['CONFIG_SOFTMMU', 'TARGET_AARCH64'], if_true: files('apple_otg.c'))
+specific_ss.add(when: ['CONFIG_SOFTMMU'], if_true: files('dev-tcp-remote.c', 'hcd-tcp.c'))
+
 # usb host adapters
 softmmu_ss.add(when: 'CONFIG_USB_UHCI', if_true: files('hcd-uhci.c'))
 softmmu_ss.add(when: 'CONFIG_USB_OHCI', if_true: files('hcd-ohci.c'))

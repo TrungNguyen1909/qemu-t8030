@@ -185,6 +185,9 @@ static const bool nvme_feature_support[NVME_FID_MAX] = {
     [NVME_WRITE_ATOMICITY]          = true,
     [NVME_ASYNCHRONOUS_EVENT_CONF]  = true,
     [NVME_TIMESTAMP]                = true,
+    [NVME_NAND_INFO_LOW]            = true,
+    [NVME_NAND_INFO_HIGH]           = true,
+    [NVME_MSP_TYPE]                 = true,
 };
 
 static const uint32_t nvme_feature_cap[NVME_FID_MAX] = {
@@ -209,6 +212,7 @@ static const uint32_t nvme_cse_acs[256] = {
     [NVME_ADM_CMD_ASYNC_EV_REQ]     = NVME_CMD_EFF_CSUPP,
     [NVME_ADM_CMD_NS_ATTACHMENT]    = NVME_CMD_EFF_CSUPP | NVME_CMD_EFF_NIC,
     [NVME_ADM_CMD_FORMAT_NVM]       = NVME_CMD_EFF_CSUPP | NVME_CMD_EFF_LBCC,
+    [NVME_ADM_CMD_CREATE_NS]        = NVME_CMD_EFF_CSUPP | NVME_CMD_EFF_LBCC,
     [NVME_ADM_CMD_TUNNEL]           = NVME_CMD_EFF_CSUPP,
 };
 
@@ -4675,6 +4679,15 @@ static uint16_t nvme_get_feature(NvmeCtrl *n, NvmeRequest *req)
         goto out;
     case NVME_TIMESTAMP:
         return nvme_get_feature_timestamp(n, req);
+    case NVME_NAND_INFO_LOW:
+        result = 0xffffff;
+        goto out;
+    case NVME_NAND_INFO_HIGH:
+        result = 0;
+        goto out;
+    case NVME_MSP_TYPE:
+        result = 2;
+        goto out;
     default:
         break;
     }
@@ -5125,6 +5138,44 @@ static uint16_t nvme_format(NvmeCtrl *n, NvmeRequest *req)
     return req->status;
 }
 
+static uint16_t nvme_create_ns(NvmeCtrl *n, NvmeRequest *req)
+{
+    NvmeCmd *cmd = &req->cmd;
+    NvmeNamespace *ns;
+    uint32_t dw10 = le32_to_cpu(cmd->cdw10);
+    uintptr_t *num_formats = (uintptr_t *)&req->opaque;
+    uint16_t status;
+    int i;
+    bool format = (dw10 == 0);
+    uint8_t buffer[4096] = { 0 };
+
+    nvme_h2c(n, buffer, sizeof(buffer), req);
+    if (!format) {
+        return NVME_SUCCESS;
+    }
+    /* 1-initialize; see the comment in nvme_dsm */
+    *num_formats = 1;
+    for (i = 1; i <= n->num_namespaces; i++) {
+        ns = nvme_ns(n, i);
+        if (!ns || ns->params.nstype != 1) {
+            continue;
+        }
+
+        status = nvme_format_ns(n, ns, NVME_ID_NS_FLBAS_INDEX(ns->id_ns.flbas), ns->params.mset, ns->params.pi, ns->params.pil, req);
+        if (status && status != NVME_NO_COMPLETE) {
+            req->status = status;
+            break;
+        }
+    }
+
+    /* account for the 1-initialization */
+    if (--(*num_formats)) {
+        return NVME_NO_COMPLETE;
+    }
+
+    return req->status;
+}
+
 static uint16_t nvme_tunnel(NvmeCtrl *n, NvmeRequest *req)
 {
     return NVME_SUCCESS;
@@ -5172,6 +5223,8 @@ static uint16_t nvme_admin_cmd(NvmeCtrl *n, NvmeRequest *req)
         return nvme_ns_attachment(n, req);
     case NVME_ADM_CMD_FORMAT_NVM:
         return nvme_format(n, req);
+    case NVME_ADM_CMD_CREATE_NS:
+        return nvme_create_ns(n, req);
     default:
         assert(false);
     }

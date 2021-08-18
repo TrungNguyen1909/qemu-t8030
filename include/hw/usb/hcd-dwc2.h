@@ -28,10 +28,12 @@
 
 #define DWC2_MMIO_SIZE      0x11000
 
-#define DWC2_NB_CHAN        8       /* Number of host channels */
-#define DWC2_MAX_XFER_SIZE  65536   /* Max transfer size expected in HCTSIZ */
+#define DWC2_NB_CHAN        16      /* Number of host channels */
+#define DWC2_MAX_XFER_SIZE  0x1000  /* Max transfer size expected in HCTSIZ */
+#define DWC2_NB_EP          16      /* Number of device endpoints */
 
 typedef struct DWC2Packet DWC2Packet;
+typedef struct DWC2DeviceState DWC2DeviceState;
 typedef struct DWC2State DWC2State;
 typedef struct DWC2Class DWC2Class;
 
@@ -57,12 +59,19 @@ struct DWC2Packet {
     bool needs_service;
 };
 
+struct DWC2DeviceState {
+    USBDevice parent_obj;
+    DWC2State *dwc2;
+};
+
 struct DWC2State {
     /*< private >*/
     SysBusDevice parent_obj;
 
     /*< public >*/
     USBBus bus;
+    /* This device in device mode */
+    DWC2DeviceState *device;
     qemu_irq irq;
     MemoryRegion *dma_mr;
     AddressSpace dma_as;
@@ -112,6 +121,13 @@ struct DWC2State {
             uint32_t hptxfsiz;      /* 100 */
         };
     };
+    union {
+#define DWC2_DFSZREG_SIZE    0x3c
+        uint32_t dfszreg[DWC2_DFSZREG_SIZE / sizeof(uint32_t)];
+        struct {
+            uint32_t dptxfsiz[DWC2_NB_EP];      /* 104 */
+        };
+    };
 
     union {
 #define DWC2_HREG0_SIZE     0x44
@@ -142,6 +158,44 @@ struct DWC2State {
 #define hcdmab(_ch)     hreg1[((_ch) << 3) + 7] /* 51c, 53c, ... */
 
     union {
+#define DWC2_DREG_SIZE  0x38
+        uint32_t dreg[DWC2_DREG_SIZE / sizeof(uint32_t)];
+        struct {
+            uint32_t dcfg;          /* 800 */
+            uint32_t dctl;          /* 804 */
+            uint32_t dsts;          /* 808 */
+            uint32_t rsvd2;         /* 80c */
+            uint32_t diepmsk;       /* 810 */
+            uint32_t doepmsk;       /* 814 */
+            uint32_t daint;         /* 818 */
+            uint32_t daintmsk;      /* 81c */
+            uint32_t dtknqr1;       /* 820 */
+            uint32_t dtknqr2;       /* 824 */
+            uint32_t dvbusdis;      /* 828 */
+            uint32_t dvbuspulse;    /* 82c */
+            uint32_t dtknqr3;       /* 830 */
+            uint32_t dtknqr4;       /* 834 */
+        };
+    };
+
+#define DWC2_DIEPREG_SIZE   (0x20 * DWC2_NB_EP)
+uint32_t diepreg[DWC2_DIEPREG_SIZE / sizeof(uint32_t)];
+
+#define diepctl(_ch)    diepreg[((_ch) << 3) + 0]     /* 900, 920, ... */
+#define diepint(_ch)    diepreg[((_ch) << 3) + 2]     /* 908, 928, ... */
+#define dieptsiz(_ch)   diepreg[((_ch) << 3) + 4]     /* 910, 930, ... */
+#define diepdma(_ch)    diepreg[((_ch) << 3) + 5]     /* 914, 934, ... */
+#define dtxfsts(_ch)    diepreg[((_ch) << 3) + 6]     /* 918, 938, ... */
+
+#define DWC2_DOEPREG_SIZE   (0x20 * DWC2_NB_EP)
+    uint32_t doepreg[DWC2_DIEPREG_SIZE / sizeof(uint32_t)];
+
+#define doepctl(_ch)    doepreg[((_ch) << 3) + 0]     /* b00, b20, ... */
+#define doepint(_ch)    doepreg[((_ch) << 3) + 2]     /* b08, b28, ... */
+#define doeptsiz(_ch)   doepreg[((_ch) << 3) + 4]     /* b10, b30, ... */
+#define doepdma(_ch)    doepreg[((_ch) << 3) + 5]     /* b14, b34, ... */
+
+    union {
 #define DWC2_PCGREG_SIZE    0x08
         uint32_t pcgreg[DWC2_PCGREG_SIZE / sizeof(uint32_t)];
         struct {
@@ -152,7 +206,6 @@ struct DWC2State {
 
     /* TODO - implement FIFO registers for slave mode */
 #define DWC2_HFIFO_SIZE     (0x1000 * DWC2_NB_CHAN)
-
     /*
      *  Internal state
      */
@@ -169,7 +222,10 @@ struct DWC2State {
     bool working;
     USBPort uport;
     DWC2Packet packet[DWC2_NB_CHAN];                   /* one packet per chan */
-    uint8_t usb_buf[DWC2_NB_CHAN][DWC2_MAX_XFER_SIZE]; /* one buffer per chan */
+    union {
+        uint8_t usb_buf[DWC2_NB_CHAN][DWC2_MAX_XFER_SIZE]; /* one buffer per chan */
+        uint8_t fifos_buf[DWC2_HFIFO_SIZE];
+    };
 };
 
 struct DWC2Class {
@@ -179,6 +235,9 @@ struct DWC2Class {
 
     /*< public >*/
 };
+
+#define TYPE_DWC2_USB_DEVICE   "dwc2-usb-device"
+OBJECT_DECLARE_TYPE(DWC2DeviceState, USBDeviceClass, DWC2_USB_DEVICE)
 
 #define TYPE_DWC2_USB   "dwc2-usb"
 OBJECT_DECLARE_TYPE(DWC2State, DWC2Class, DWC2_USB)

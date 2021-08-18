@@ -89,14 +89,14 @@ uint8_t get_highest_different_bit_index(hwaddr addr1, hwaddr addr2)
     return 64 - __builtin_clzll(addr1 ^ addr2);
 }
 
-hwaddr align_64k_low(hwaddr addr)
+hwaddr align_16k_low(hwaddr addr)
 {
-    return addr & ~0xffffull;
+    return addr & ~0x3fffull;
 }
 
-hwaddr align_64k_high(hwaddr addr)
+hwaddr align_16k_high(hwaddr addr)
 {
-    return (addr + 0xffffull) & ~0xffffull;
+    return (addr + 0x3fffull) & ~0x3fffull;
 }
 
 uint8_t get_lowest_non_zero_bit_index(hwaddr addr)
@@ -118,9 +118,9 @@ hwaddr get_low_bits_mask_for_bit_index(uint8_t bit_index)
 }
 
 void allocate_ram(MemoryRegion *top, const char *name, hwaddr addr,
-                  hwaddr size)
+                  hwaddr size, int priority)
 {
     MemoryRegion *sec = g_new(MemoryRegion, 1);
     memory_region_init_ram(sec, NULL, name, size, &error_fatal);
-    memory_region_add_subregion(top, addr, sec);
+    memory_region_add_subregion_overlap(top, addr, sec, priority);
 }

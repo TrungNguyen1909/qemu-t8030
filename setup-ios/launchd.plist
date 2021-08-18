@@ -15971,7 +15971,7 @@
 			<string>Interactive</string>
 			<key>ProgramArguments</key>
 			<array>
-				<string>/binpack64/bin/bash</string>
+				<string>/bin/bash</string>
 			</array>
 			<key>RunAtLoad</key>
 			<true/>

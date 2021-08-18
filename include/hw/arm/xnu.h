@@ -28,8 +28,6 @@
 #include "hw/arm/boot.h"
 #include "hw/arm/xnu_mem.h"
 #include "hw/arm/xnu_dtb.h"
-#include "hw/arm/xnu_file_mmio_dev.h"
-#include "hw/arm/xnu_fb_cfg.h"
 
 // pexpert/pexpert/arm64/boot.h
 #define xnu_arm64_kBootArgsRevision2 2 /* added boot_args.bootFlags */
@@ -150,6 +148,25 @@ struct xnu_arm64_boot_args {
     uint64_t           memSizeActual;                              /* Actual size of memory */
 };
 
+#define XNU_MAX_NVRAM_SIZE  (0xFFFF * 0x10)
+
+typedef struct macho_boot_info {
+    hwaddr entry;
+    hwaddr dtb_pa;
+    uint64_t dtb_size;
+    hwaddr ramdisk_pa;
+    uint64_t ramdisk_size;
+    hwaddr trustcache_pa;
+    uint64_t trustcache_size;
+    hwaddr bootargs_pa;
+    hwaddr dram_base;
+    uint64_t dram_size;
+    uint8_t nvram_data[XNU_MAX_NVRAM_SIZE];
+    uint64_t nvram_size;
+    char *ticket_data;
+    uint64_t ticket_length;
+} *macho_boot_info_t;
+
 #define kCacheableView 0x400000000ULL
 
 struct mach_header_64 *macho_load_file(const char *filename);
@@ -187,11 +204,7 @@ uint64_t xnu_rebase_va(uint64_t va);
 
 uint64_t kext_rebase_va(uint64_t va);
 
-void macho_tz_setup_bootargs(const char *name, AddressSpace *as,
-                             MemoryRegion *mem, hwaddr bootargs_addr,
-                             hwaddr virt_base, hwaddr phys_base,
-                             hwaddr mem_size, hwaddr kern_args,
-                             hwaddr kern_entry, hwaddr kern_phys_base);
+bool xnu_contains_boot_arg(const char *bootArgs, const char *arg, bool prefixmatch);
 
 void macho_setup_bootargs(const char *name, AddressSpace *as,
                           MemoryRegion *mem, hwaddr bootargs_pa,
@@ -208,16 +221,11 @@ void macho_map_raw_file(const char *filename, AddressSpace *as, MemoryRegion *me
 
 void macho_load_raw_file(const char *filename, AddressSpace *as, MemoryRegion *mem,
                          const char *name, hwaddr file_pa, uint64_t *size);
-                         
+
 DTBNode *load_dtb_from_file(char *filename);
 
 void macho_load_dtb(DTBNode *root, AddressSpace *as, MemoryRegion *mem,
-                    const char *name, hwaddr dtb_pa, uint64_t *size,
-                    hwaddr ramdisk_addr, hwaddr ramdisk_size,
-                    hwaddr trustcache_addr, hwaddr trustcache_size,
-                    hwaddr bootargs_addr,
-                    hwaddr dram_base, unsigned long dram_size,
-                    void* nvram_data, unsigned long nvram_size);
+                    const char *name, macho_boot_info_t info);
 
 void macho_load_trustcache(const char *filename, AddressSpace *as, MemoryRegion *mem,
                             hwaddr pa, uint64_t *size);

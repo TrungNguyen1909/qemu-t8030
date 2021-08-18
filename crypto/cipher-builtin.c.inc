@@ -61,6 +61,14 @@ static int qcrypto_cipher_no_setiv(QCryptoCipher *cipher,
     return -1;
 }
 
+static int qcrypto_cipher_no_getiv(QCryptoCipher *cipher,
+                                   const uint8_t *iv, size_t niv,
+                                   Error **errp)
+{
+    error_setg(errp, "Getting IV is not supported");
+    return -1;
+}
+
 static void do_aes_encrypt_ecb(const void *vctx,
                                size_t len,
                                uint8_t *out,
@@ -243,10 +251,27 @@ static int qcrypto_cipher_aes_setiv(QCryptoCipher *cipher, const uint8_t *iv,
     return 0;
 }
 
+static int qcrypto_cipher_aes_getiv(QCryptoCipher *cipher, const uint8_t *iv,
+                                    size_t niv, Error **errp)
+{
+    QCryptoCipherBuiltinAES *ctx
+            = container_of(cipher, QCryptoCipherBuiltinAES, base);
+
+    if (niv != AES_BLOCK_SIZE) {
+        error_setg(errp, "IV must be %d bytes not %zu",
+                   AES_BLOCK_SIZE, niv);
+        return -1;
+    }
+
+    memcpy(iv, ctx->iv, AES_BLOCK_SIZE);
+    return 0;
+}
+
 static const struct QCryptoCipherDriver qcrypto_cipher_aes_driver_ecb = {
     .cipher_encrypt = qcrypto_cipher_aes_encrypt_ecb,
     .cipher_decrypt = qcrypto_cipher_aes_decrypt_ecb,
     .cipher_setiv = qcrypto_cipher_no_setiv,
+    .cipher_getiv = qcrypto_cipher_no_getiv,
     .cipher_free = qcrypto_cipher_ctx_free,
 };
 
@@ -254,6 +279,7 @@ static const struct QCryptoCipherDriver qcrypto_cipher_aes_driver_cbc = {
     .cipher_encrypt = qcrypto_cipher_aes_encrypt_cbc,
     .cipher_decrypt = qcrypto_cipher_aes_decrypt_cbc,
     .cipher_setiv = qcrypto_cipher_aes_setiv,
+    .cipher_getiv = qcrypto_cipher_aes_getiv,
     .cipher_free = qcrypto_cipher_ctx_free,
 };
 
@@ -261,6 +287,7 @@ static const struct QCryptoCipherDriver qcrypto_cipher_aes_driver_xts = {
     .cipher_encrypt = qcrypto_cipher_aes_encrypt_xts,
     .cipher_decrypt = qcrypto_cipher_aes_decrypt_xts,
     .cipher_setiv = qcrypto_cipher_aes_setiv,
+    .cipher_getiv = qcrypto_cipher_aes_getiv,
     .cipher_free = qcrypto_cipher_ctx_free,
 };
 
@@ -319,6 +346,7 @@ static const struct QCryptoCipherDriver qcrypto_cipher_des_rfb_driver = {
     .cipher_encrypt = qcrypto_cipher_encrypt_des_rfb,
     .cipher_decrypt = qcrypto_cipher_decrypt_des_rfb,
     .cipher_setiv = qcrypto_cipher_no_setiv,
+    .cipher_getiv = qcrypto_cipher_no_getiv,
     .cipher_free = qcrypto_cipher_ctx_free,
 };
 

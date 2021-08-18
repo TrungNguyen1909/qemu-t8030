@@ -158,6 +158,13 @@
 #define USB_DT_CS_ENDPOINT              0x25
 #define USB_DT_ENDPOINT_COMPANION       0x30
 
+#define USB_DT_DEVICE_SIZE		18
+#define USB_DT_CONFIGURATION_SIZE      	9
+#define USB_DT_INTERFACE_SIZE   	9
+#define USB_DT_ENDPOINT_SIZE    	7
+#define USB_DT_DEVICE_QUALIFIER_SIZE    10
+#define USB_DT_STRING_SIZE		6
+
 #define USB_DEV_CAP_WIRELESS            0x01
 #define USB_DEV_CAP_USB2_EXT            0x02
 #define USB_DEV_CAP_SUPERSPEED          0x03
@@ -174,6 +181,15 @@
 #define USB_ENDPOINT_XFER_INVALID     255
 
 #define USB_INTERFACE_INVALID         255
+
+/* binary representation */
+struct usb_control_packet {
+    uint8_t  bmRequestType;
+    uint8_t  bRequest;
+    uint16_t wValue;
+    uint16_t wIndex;
+    uint16_t wLength;
+} QEMU_PACKED;
 
 typedef struct USBBusOps USBBusOps;
 typedef struct USBPort USBPort;
@@ -294,6 +310,11 @@ struct USBDeviceClass {
     void (*handle_attach)(USBDevice *dev);
 
     /*
+     * Detach the device
+     */
+    void (*handle_detach)(USBDevice *dev);
+
+    /*
      * Reset the device
      */
     void (*handle_reset)(USBDevice *dev);
@@ -316,6 +337,17 @@ struct USBDeviceClass {
      * then the number of bytes transferred is stored in p->actual_length
      */
     void (*handle_data)(USBDevice *dev, USBPacket *p);
+
+    /*
+     * Process packets.
+     * Called from handle_packet().
+     *
+     * If not null, all packets will be redirected here instead of
+     * handle_control and handle_data
+     * Status gets stored in p->status, and if p->status == USB_RET_SUCCESS
+     * then the number of bytes transferred is stored in p->actual_length
+     */
+    void (*handle_packet)(USBDevice *dev, USBPacket *p);
 
     void (*set_interface)(USBDevice *dev, int interface,
                           int alt_old, int alt_new);
@@ -539,12 +571,18 @@ void usb_device_cancel_packet(USBDevice *dev, USBPacket *p);
 
 void usb_device_handle_attach(USBDevice *dev);
 
+void usb_device_handle_detach(USBDevice *dev);
+
 void usb_device_handle_reset(USBDevice *dev);
 
 void usb_device_handle_control(USBDevice *dev, USBPacket *p, int request,
                                int val, int index, int length, uint8_t *data);
 
 void usb_device_handle_data(USBDevice *dev, USBPacket *p);
+
+bool usb_device_can_handle_packet(USBDevice *dev);
+
+void usb_device_handle_packet(USBDevice *dev, USBPacket *p);
 
 void usb_device_set_interface(USBDevice *dev, int interface,
                               int alt_old, int alt_new);

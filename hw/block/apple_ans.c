@@ -24,8 +24,8 @@ do { qemu_log_mask(LOG_GUEST_ERROR, "ANS2: message:" \
 #define   APPLE_BOOT_STATUS_OK  0xde71ce55
 
 typedef struct QEMU_PACKED {
-    uint32_t unk0;
-    uint32_t unk4;
+    uint32_t NSID;
+    uint32_t NSType;
     uint32_t numBlocks;
 } NVMeCreateNamespacesEntryStruct;
 
@@ -153,7 +153,7 @@ SysBusDevice *apple_ans_create(DTBNode *node, uint32_t build_version)
         default:
             break;
     }
-    prop = get_dtb_prop(node, "reg");
+    prop = find_dtb_prop(node, "reg");
     assert(prop);
 
     reg = (uint64_t *)prop->value;
@@ -181,20 +181,20 @@ SysBusDevice *apple_ans_create(DTBNode *node, uint32_t build_version)
         sysbus_init_irq(sbd, &s->irqs[i]);
     }
 
-    child = get_dtb_child_node_by_name(node, "iop-ans-nub");
+    child = get_dtb_node(node, "iop-ans-nub");
     assert(child);
 
     data = 1;
-    add_dtb_prop(child, "pre-loaded", 4, (uint8_t *)&data);
-    add_dtb_prop(child, "running", 4, (uint8_t *)&data);
+    set_dtb_prop(child, "pre-loaded", 4, (uint8_t *)&data);
+    set_dtb_prop(child, "running", 4, (uint8_t *)&data);
 
-    prop = get_dtb_prop(child, "region-base");
+    prop = find_dtb_prop(child, "region-base");
     *(uint64_t *)prop->value = 0x8fc400000;
 
-    prop = get_dtb_prop(child, "region-size");
+    prop = find_dtb_prop(child, "region-size");
     *(uint64_t *)prop->value = 0x3c00000;
 
-    add_dtb_prop(child, "segment-names", 14, (uint8_t *)"__TEXT;__DATA");
+    set_dtb_prop(child, "segment-names", 14, (uint8_t *)"__TEXT;__DATA");
 
     segrange[0].phys = 0x800024000;
     segrange[0].virt = 0x0;
@@ -207,9 +207,9 @@ SysBusDevice *apple_ans_create(DTBNode *node, uint32_t build_version)
     segrange[1].remap = 0x8fc400000;
     segrange[1].size = 0x3c00000;
     segrange[1].flag = 0x0;
-    add_dtb_prop(child, "segment-ranges", 64, (uint8_t *)segrange);
+    set_dtb_prop(child, "segment-ranges", 64, (uint8_t *)segrange);
 
-    prop = get_dtb_prop(node, "nvme-interrupt-idx");
+    prop = find_dtb_prop(node, "nvme-interrupt-idx");
     assert(prop);
 
     s->nvme_interrupt_idx = *(uint32_t *)prop->value - 3;
@@ -221,6 +221,8 @@ SysBusDevice *apple_ans_create(DTBNode *node, uint32_t build_version)
                              true, &error_fatal);
     object_property_set_uint(OBJECT(&s->nvme), "max_ioqpairs", 8, &error_fatal);
     object_property_set_uint(OBJECT(&s->nvme), "mdts", 8, &error_fatal);
+    object_property_set_uint(OBJECT(&s->nvme), "logical_block_size", 4096, &error_fatal);
+    object_property_set_uint(OBJECT(&s->nvme), "physical_block_size", 4096, &error_fatal);
 
     pcie_host_mmcfg_init(pex, PCIE_MMCFG_SIZE_MAX);
     memory_region_init(&s->io_mmio, OBJECT(s), "ans_pci_mmio", UINT64_MAX);

@@ -37,8 +37,8 @@ hwaddr vtop_static(hwaddr va);
 hwaddr ptov_static(hwaddr pa);
 hwaddr vtop_mmu(hwaddr va, CPUState *cs);
 
-hwaddr align_64k_low(hwaddr addr);
-hwaddr align_64k_high(hwaddr addr);
+hwaddr align_16k_low(hwaddr addr);
+hwaddr align_16k_high(hwaddr addr);
 
 hwaddr vtop_bases(hwaddr va, hwaddr phys_base, hwaddr virt_base);
 hwaddr ptov_bases(hwaddr pa, hwaddr phys_base, hwaddr virt_base);
@@ -48,5 +48,5 @@ uint8_t get_lowest_non_zero_bit_index(hwaddr addr);
 hwaddr get_low_bits_mask_for_bit_index(uint8_t bit_index);
 
 void allocate_ram(MemoryRegion *top, const char *name, hwaddr addr,
-                  hwaddr size);
+                  hwaddr size, int priority);
 #endif

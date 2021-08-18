@@ -17,6 +17,7 @@
 static void apple_aic_update(AppleAICState *s)
 {
     uint32_t intr = 0;
+    uint32_t potential = 0;
     int i;
 
     for (i = 0; i < s->numCPU; i++) {
@@ -33,14 +34,27 @@ static void apple_aic_update(AppleAICState *s)
     for (i = 0; i < s->numEIR; i++) {
         if (unlikely(s->eir_state[i] & (~s->eir_mask[i]))) {
             int j;
+            int dest;
             for (j = 0; j < 32; j++) {
                 if (((s->eir_mask[i] & (1 << j)) == 0)
                     && (s->eir_state[i] & (1 << j))
-                    && (s->eir_dest[AIC_EIR_TO_SRC(i, j)])
-                    && ((intr & (s->eir_dest[AIC_EIR_TO_SRC(i, j)])) == 0)) {
-                    uint32_t cpu = find_first_bit((unsigned long *)&s->eir_dest[AIC_EIR_TO_SRC(i, j)],
-                                                    s->numCPU);
-                    intr |= (1 << cpu);
+                    && (dest = s->eir_dest[AIC_EIR_TO_SRC(i, j)])) {
+                    if (((intr & dest) == 0)) {
+                        /* The interrupt doesn't have a cpu that can process it yet */
+                        uint32_t cpu = find_first_bit((unsigned long *)&s->eir_dest[AIC_EIR_TO_SRC(i, j)],
+                                                        s->numCPU);
+                        intr |= (1 << cpu);
+                        potential |= dest;
+                    } else {
+                        int k;
+                        for (k = 0; k < s->numCPU; k++) {
+                            if (((intr & (1 << k)) == 0) && (potential & (1 << k))) {
+                                /* cpu K isn't in the interrupt list and can handle some of the previous interrupts */
+                                intr |= (1 << k);
+                                break;
+                            }
+                        }
+                    }
                 }
             }
         }
@@ -85,6 +99,11 @@ static void apple_aic_reset(DeviceState *dev)
 
     /* mask all IRQs */
     memset(s->eir_mask, 0xffff, sizeof(uint32_t) * s->numEIR);
+
+#ifdef AIC_DEBUG_NEW_IRQ
+    memset(s->eir_mask_once, 0xffff, sizeof(uint32_t) * s->numEIR);
+#endif
+
     /* dest default to 0 */
     memset(s->eir_dest, 0, sizeof(uint32_t) * s->numIRQ);
 
@@ -236,10 +255,23 @@ static void apple_aic_write(void *opaque,
         case rAIC_EIR_MASK_CLR(0) ... rAIC_EIR_MASK_CLR(kAIC_NUM_EIRS):
             {
                 uint32_t eir = (addr - rAIC_EIR_MASK_CLR(0)) / 4;
+
                 if (unlikely(eir >= s->numEIR)) {
                     break;
                 }
+
                 s->eir_mask[eir] &= ~val;
+
+#ifdef AIC_DEBUG_NEW_IRQ
+                if ((s->eir_mask[eir] | s->eir_mask_once[eir]) != s->eir_mask[eir]) {
+                    for (int i = 0; i < 32; i++) {
+                        if ((s->eir_mask[eir] & (1 << i)) == 0 && (s->eir_mask_once[eir] & (1 << i)) != 0) {
+                            trace_aic_new_irq(AIC_EIR_TO_SRC(eir, i));
+                        }
+                    }
+                }
+                s->eir_mask_once[eir] = s->eir_mask[eir];
+#endif
             }
             break;
 
@@ -422,11 +454,16 @@ static void apple_aic_init(Object *obj)
     }
 
     qdev_init_gpio_in(DEVICE(obj), apple_aic_set_irq, s->numIRQ);
+
     assert(s->numCPU > 0);
 
     s->eir_mask = g_malloc0(sizeof(uint32_t) * s->numEIR);
     s->eir_dest = g_malloc0(sizeof(uint32_t) * s->numIRQ);
     s->eir_state = g_malloc0(sizeof(bool) * s->numIRQ);
+
+#ifdef AIC_DEBUG_NEW_IRQ
+    s->eir_mask_once = g_malloc0(sizeof(uint32_t) * s->numEIR);
+#endif
 }
 
 static void apple_aic_realize(DeviceState *dev, Error **errp)
@@ -448,18 +485,21 @@ SysBusDevice *apple_aic_create(uint32_t numCPU, DTBNode *node)
 
     dev = qdev_new(TYPE_APPLE_AIC);
     s = APPLE_AIC(dev);
-    prop = get_dtb_prop(node, "reg");
+    prop = find_dtb_prop(node, "AAPL,phandle");
+    assert(prop);
+    s->phandle = *(uint32_t *)prop->value;
+    prop = find_dtb_prop(node, "reg");
     assert(prop != NULL);
     reg = (hwaddr *)prop->value;
     s->base_size = reg[1];
-    prop = get_dtb_prop(node, "ipid-mask");
+    prop = find_dtb_prop(node, "ipid-mask");
     s->numEIR = prop->length / 4;
     s->numIRQ = s->numEIR * 32;
 
     s->numCPU = numCPU;
-    overwrite_dtb_prop(node, "#main-cpus", 4, (uint8_t *)&s->numCPU);
+    set_dtb_prop(node, "#main-cpus", 4, (uint8_t *)&s->numCPU);
 
-    prop = get_dtb_prop(node, "#shared-timestamps");
+    prop = find_dtb_prop(node, "#shared-timestamps");
     assert(prop);
     assert(prop->length == 4);
 

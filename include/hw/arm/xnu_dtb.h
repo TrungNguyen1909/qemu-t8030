@@ -26,13 +26,16 @@
 
 #include "qemu-common.h"
 
-#define DT_PROP_FLAG_PLACEHOLDER (0x80000000)
+#define DT_PROP_FLAG_PLACEHOLDER (1 << 31)
+#define DT_PROP_FLAGS_MASK		(0xf0000000)
+#define DT_PROP_SIZE_MASK		(~DT_PROP_FLAGS_MASK)
 
 #define DTB_PROP_NAME_LEN (32)
 
 typedef struct {
     uint8_t name[DTB_PROP_NAME_LEN];
     uint32_t length;
+    uint32_t flags;
     uint8_t *value;
 } DTBProp;
 
@@ -44,17 +47,16 @@ typedef struct {
 } DTBNode;
 
 DTBNode *load_dtb(uint8_t *dtb_blob);
-void delete_dtb_node(DTBNode *node);
 void save_dtb(uint8_t *buf, DTBNode *root);
+bool remove_dtb_node_by_name(DTBNode *parent, const char *name);
 void remove_dtb_node(DTBNode *node, DTBNode *child);
 void remove_dtb_prop(DTBNode *node, DTBProp *prop);
-DTBProp *add_dtb_prop(DTBNode *n, const char *name, uint32_t size, uint8_t *val);
-DTBNode *add_dtb_node(DTBNode *n, const char *name);
+DTBProp *set_dtb_prop(DTBNode *n, const char *name, uint32_t size, uint8_t *val);
+DTBNode *find_dtb_node(DTBNode *n, const char *name);
+DTBNode *get_dtb_node(DTBNode *n, const char *name);
 uint64_t get_dtb_node_buffer_size(DTBNode *node);
-DTBProp *get_dtb_prop(DTBNode *node, const char *name);
-DTBNode *get_dtb_child_node_by_name(DTBNode *node, const char *name);
+DTBProp *find_dtb_prop(DTBNode *node, const char *name);
 void overwrite_dtb_prop_val(DTBProp *prop, uint8_t chr);
 void overwrite_dtb_prop_name(DTBProp *prop, uint8_t chr);
-void overwrite_dtb_prop(DTBNode *n, const char *name, uint32_t size, uint8_t *val);
 
 #endif
