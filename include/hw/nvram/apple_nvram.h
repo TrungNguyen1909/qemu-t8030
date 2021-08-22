@@ -12,7 +12,7 @@
 #include "hw/nvram/chrp_nvram.h"
 
 #define TYPE_APPLE_NVRAM "apple-nvram"
-OBJECT_DECLARE_SIMPLE_TYPE(AppleNvramState, APPLE_NVRAM)
+OBJECT_DECLARE_TYPE(AppleNvramState, AppleNvramClass, APPLE_NVRAM)
 
 #pragma pack(push, 1)
 typedef struct {
@@ -59,6 +59,16 @@ typedef struct AppleNvramState {
    QTAILQ_HEAD(, env_var) env;
    size_t len;
 } AppleNvramState;
+
+struct AppleNvramClass {
+    /*< private >*/
+    DeviceClass base_class;
+    /*< public >*/
+
+    DeviceRealize parent_realize;
+    DeviceUnrealize parent_unrealize;
+    DeviceReset   parent_reset;
+};
 
 NvramPartition *nvram_find_part(NvramBank *bank, const char *name);
 NvramBank *nvram_parse(void *buf, size_t len);

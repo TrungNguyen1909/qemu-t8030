@@ -413,9 +413,12 @@ void apple_nvram_save(AppleNvramState *s)
 static void apple_nvram_reset(DeviceState *dev)
 {
     AppleNvramState *s = APPLE_NVRAM(dev);
+    AppleNvramClass *anc = APPLE_NVRAM_GET_CLASS(dev);
     NvmeNamespace *ns = NVME_NS(dev);
     g_autofree void *buffer = NULL;
     size_t len = blk_getlength(ns->blkconf.blk);
+
+    anc->parent_reset(dev);
 
     if (len > 0x2000) {
         len = 0x2000;
@@ -452,15 +455,23 @@ static void apple_nvram_reset(DeviceState *dev)
 
 static void apple_nvram_realize(DeviceState *dev, Error **errp)
 {
-    DeviceClass *superclass = DEVICE_CLASS(object_class_get_parent(object_get_class(OBJECT(dev))));
+    AppleNvramClass *anc = APPLE_NVRAM_GET_CLASS(dev);
+    Error *local_err = NULL;
 
-    superclass->realize(dev, errp);
+    anc->parent_realize(dev, &local_err);
+    if (local_err) {
+        error_propagate(errp, local_err);
+        return;
+    }
     apple_nvram_reset(dev);
 }
 
 static void apple_nvram_unrealize(DeviceState *dev)
 {
     AppleNvramState *s = APPLE_NVRAM(dev);
+    AppleNvramClass *anc = APPLE_NVRAM_GET_CLASS(dev);
+
+    anc->parent_unrealize(dev);
     env_var *v = QTAILQ_FIRST(&s->env);
 
     if (s->bank) {
@@ -476,15 +487,16 @@ static void apple_nvram_unrealize(DeviceState *dev)
     }
 }
 
-static void apple_nvram_class_init(ObjectClass *oc, void *data)
+static void apple_nvram_class_init(ObjectClass *klass, void *data)
 {
-    DeviceClass *dc = DEVICE_CLASS(oc);
+    DeviceClass *dc = DEVICE_CLASS(klass);
+    AppleNvramClass *anc = APPLE_NVRAM_CLASS(klass);
 
     set_bit(DEVICE_CATEGORY_STORAGE, dc->categories);
 
-    dc->realize = apple_nvram_realize;
-    dc->unrealize = apple_nvram_unrealize;
-    dc->reset = apple_nvram_reset;
+    device_class_set_parent_realize(dc, apple_nvram_realize, &anc->parent_realize);
+    device_class_set_parent_reset(dc, apple_nvram_reset, &anc->parent_reset);
+    device_class_set_parent_unrealize(dc, apple_nvram_unrealize, &anc->parent_unrealize);
     dc->desc = "Apple NVRAM";
 }
 
@@ -495,6 +507,7 @@ static void apple_nvram_instance_init(Object *obj)
 static const TypeInfo apple_nvram_info = {
     .name = TYPE_APPLE_NVRAM,
     .parent = TYPE_NVME_NS,
+    .class_size = sizeof(AppleNvramClass),
     .class_init = apple_nvram_class_init,
     .instance_size = sizeof(AppleNvramState),
     .instance_init = apple_nvram_instance_init,
