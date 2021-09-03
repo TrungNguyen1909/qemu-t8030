@@ -615,14 +615,8 @@ int cpu_cwp_inc(CPUSPARCState *env1, int cwp);
 int cpu_cwp_dec(CPUSPARCState *env1, int cwp);
 void cpu_set_cwp(CPUSPARCState *env1, int new_cwp);
 
-/* int_helper.c */
-void leon3_irq_manager(CPUSPARCState *env, void *irq_manager, int intno);
-
 /* sun4m.c, sun4u.c */
 void cpu_check_irqs(CPUSPARCState *env);
-
-/* leon3.c */
-void leon3_irq_ack(void *irq_manager, int intno);
 
 #if defined (TARGET_SPARC64)
 
@@ -773,7 +767,7 @@ trap_state* cpu_tsptr(CPUSPARCState* env);
 #define TB_FLAG_ASI_SHIFT    24
 
 static inline void cpu_get_tb_cpu_state(CPUSPARCState *env, target_ulong *pc,
-                                        target_ulong *cs_base, uint64_t *pflags)
+                                        target_ulong *cs_base, uint32_t *pflags)
 {
     uint32_t flags;
     *pc = env->pc;

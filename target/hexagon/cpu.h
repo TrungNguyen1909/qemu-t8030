@@ -127,18 +127,13 @@ typedef struct HexagonCPU {
     target_ulong lldb_stack_adjust;
 } HexagonCPU;
 
-static inline HexagonCPU *hexagon_env_get_cpu(CPUHexagonState *env)
-{
-    return container_of(env, HexagonCPU, env);
-}
-
 #include "cpu_bits.h"
 
 #define cpu_signal_handler cpu_hexagon_signal_handler
 int cpu_hexagon_signal_handler(int host_signum, void *pinfo, void *puc);
 
 static inline void cpu_get_tb_cpu_state(CPUHexagonState *env, target_ulong *pc,
-                                        target_ulong *cs_base, uint64_t *flags)
+                                        target_ulong *cs_base, uint32_t *flags)
 {
     *pc = env->gpr[HEX_REG_PC];
     *cs_base = 0;

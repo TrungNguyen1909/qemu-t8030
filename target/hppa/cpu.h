@@ -22,7 +22,6 @@
 
 #include "cpu-qom.h"
 #include "exec/cpu-defs.h"
-#include "exec/memory.h"
 
 /* PA-RISC 1.x processors have a strong memory model.  */
 /* ??? While we do not yet implement PA-RISC 2.0, those processors have
@@ -269,7 +268,7 @@ static inline target_ulong hppa_form_gva(CPUHPPAState *env, uint64_t spc,
 
 static inline void cpu_get_tb_cpu_state(CPUHPPAState *env, target_ulong *pc,
                                         target_ulong *cs_base,
-                                        uint64_t *pflags)
+                                        uint32_t *pflags)
 {
     uint32_t flags = env->psw_n * PSW_N;
 

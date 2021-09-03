@@ -11,7 +11,7 @@
 #include "hw/pci/msi.h"
 #include "hw/pci/msix.h"
 #include "sysemu/dma.h"
-#include "hw/block/nvme.h"
+#include "hw/nvme/nvme.h"
 
 SysBusDevice *apple_ans_create(DTBNode* node, uint32_t build_version);
 

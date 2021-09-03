@@ -162,6 +162,7 @@ hwaddr avr_cpu_get_phys_page_debug(CPUState *cpu, vaddr addr);
 int avr_cpu_gdb_read_register(CPUState *cpu, GByteArray *buf, int reg);
 int avr_cpu_gdb_write_register(CPUState *cpu, uint8_t *buf, int reg);
 int avr_print_insn(bfd_vma addr, disassemble_info *info);
+vaddr avr_cpu_gdb_adjust_breakpoint(CPUState *cpu, vaddr addr);
 
 static inline int avr_feature(CPUAVRState *env, AVRFeature feature)
 {
@@ -196,9 +197,9 @@ enum {
 };
 
 static inline void cpu_get_tb_cpu_state(CPUAVRState *env, target_ulong *pc,
-                                        target_ulong *cs_base, uint64_t *pflags)
+                                        target_ulong *cs_base, uint32_t *pflags)
 {
-    uint64_t flags = 0;
+    uint32_t flags = 0;
 
     *pc = env->pc_w * 2;
     *cs_base = 0;

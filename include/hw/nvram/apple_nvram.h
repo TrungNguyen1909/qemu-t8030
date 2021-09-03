@@ -7,8 +7,7 @@
 #include "block/block.h"
 #include "hw/block/block.h"
 #include "block/nvme.h"
-#include "hw/block/nvme.h"
-#include "hw/block/nvme-ns.h"
+#include "hw/nvme/nvme.h"
 #include "hw/nvram/chrp_nvram.h"
 
 #define TYPE_APPLE_NVRAM "apple-nvram"
