@@ -62,7 +62,7 @@ static int qcrypto_cipher_no_setiv(QCryptoCipher *cipher,
 }
 
 static int qcrypto_cipher_no_getiv(QCryptoCipher *cipher,
-                                   const uint8_t *iv, size_t niv,
+                                   uint8_t *iv, size_t niv,
                                    Error **errp)
 {
     error_setg(errp, "Getting IV is not supported");
@@ -251,7 +251,7 @@ static int qcrypto_cipher_aes_setiv(QCryptoCipher *cipher, const uint8_t *iv,
     return 0;
 }
 
-static int qcrypto_cipher_aes_getiv(QCryptoCipher *cipher, const uint8_t *iv,
+static int qcrypto_cipher_aes_getiv(QCryptoCipher *cipher, uint8_t *iv,
                                     size_t niv, Error **errp)
 {
     QCryptoCipherBuiltinAES *ctx

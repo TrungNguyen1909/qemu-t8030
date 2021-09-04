@@ -35,7 +35,7 @@ struct QCryptoCipherDriver {
                         Error **errp);
 
     int (*cipher_getiv)(QCryptoCipher *cipher,
-                        const uint8_t *iv, size_t niv,
+                        uint8_t *iv, size_t niv,
                         Error **errp);
 
     void (*cipher_free)(QCryptoCipher *cipher);

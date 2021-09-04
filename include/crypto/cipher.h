@@ -252,7 +252,7 @@ int qcrypto_cipher_setiv(QCryptoCipher *cipher,
  * Returns: 0 on success, -1 on error
  */
 int qcrypto_cipher_getiv(QCryptoCipher *cipher,
-                         const uint8_t *iv, size_t niv,
+                         uint8_t *iv, size_t niv,
                          Error **errp);
 
 #endif /* QCRYPTO_CIPHER_H */
