@@ -22,7 +22,7 @@ OBJECT_DECLARE_SIMPLE_TYPE(AppleAESState, APPLE_AES)
 
 typedef struct AESCommand {
     uint32_t command;
-    void *data;
+    uint32_t *data;
     uint32_t data_len;
     QTAILQ_ENTRY(AESCommand) entry;
 } AESCommand;
