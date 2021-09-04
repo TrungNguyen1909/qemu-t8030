@@ -74,6 +74,29 @@ static int NAME##_setiv(QCryptoCipher *cipher, const uint8_t *iv,       \
 }
 
 
+static int qcrypto_cipher_no_getiv(QCryptoCipher *cipher,
+                                   uint8_t *iv, size_t niv,
+                                   Error **errp)
+{
+    error_setg(errp, "Getting IV is not supported");
+    return -1;
+}
+
+
+#define DEFINE_GETIV(NAME, TYPE, BLEN)                                  \
+static int NAME##_getiv(QCryptoCipher *cipher, uint8_t *iv,             \
+                        size_t niv, Error **errp)                       \
+{                                                                       \
+    TYPE *ctx = container_of(cipher, TYPE, base);                       \
+    if (niv != BLEN) {                                                  \
+        error_setg(errp, "Expected IV size %d not %zu", BLEN, niv);     \
+        return -1;                                                      \
+    }                                                                   \
+    memcpy(iv, ctx->iv, niv);                                           \
+    return 0;                                                           \
+}
+
+
 #define DEFINE_ECB(NAME, TYPE, BLEN, ENCRYPT, DECRYPT)                  \
 static int NAME##_encrypt_ecb(QCryptoCipher *cipher, const void *in,    \
                               void *out, size_t len, Error **errp)      \
@@ -99,6 +122,7 @@ static const struct QCryptoCipherDriver NAME##_driver_ecb = {           \
     .cipher_encrypt = NAME##_encrypt_ecb,                               \
     .cipher_decrypt = NAME##_decrypt_ecb,                               \
     .cipher_setiv = qcrypto_cipher_no_setiv,                            \
+    .cipher_getiv = qcrypto_cipher_no_getiv,                            \
     .cipher_free = qcrypto_cipher_ctx_free,                             \
 };
 
@@ -128,6 +152,7 @@ static const struct QCryptoCipherDriver NAME##_driver_cbc = {           \
     .cipher_encrypt = NAME##_encrypt_cbc,                               \
     .cipher_decrypt = NAME##_decrypt_cbc,                               \
     .cipher_setiv = NAME##_setiv,                                       \
+    .cipher_getiv = NAME##_getiv,                                       \
     .cipher_free = qcrypto_cipher_ctx_free,                             \
 };
 
@@ -147,6 +172,7 @@ static const struct QCryptoCipherDriver NAME##_driver_ctr = {           \
     .cipher_encrypt = NAME##_encrypt_ctr,                               \
     .cipher_decrypt = NAME##_encrypt_ctr,                               \
     .cipher_setiv = NAME##_setiv,                                       \
+    .cipher_getiv = NAME##_getiv,                                       \
     .cipher_free = qcrypto_cipher_ctx_free,                             \
 };
 
@@ -220,12 +246,14 @@ static const struct QCryptoCipherDriver NAME##_driver_xts = {   \
     .cipher_encrypt = NAME##_encrypt_xts,                       \
     .cipher_decrypt = NAME##_decrypt_xts,                       \
     .cipher_setiv = NAME##_setiv,                               \
+    .cipher_getiv = NAME##_getiv,                               \
     .cipher_free = qcrypto_cipher_ctx_free,                     \
 };
 
 
 #define DEFINE_ECB_CBC_CTR(NAME, TYPE, BLEN, ENCRYPT, DECRYPT)  \
     DEFINE_SETIV(NAME, TYPE, BLEN)                              \
+    DEFINE_GETIV(NAME, TYPE, BLEN)                              \
     DEFINE_ECB(NAME, TYPE, BLEN, ENCRYPT, DECRYPT)              \
     DEFINE_CBC(NAME, TYPE, BLEN, ENCRYPT, DECRYPT)              \
     DEFINE_CTR(NAME, TYPE, BLEN, ENCRYPT)
