@@ -199,7 +199,7 @@ int qcrypto_cipher_setiv(QCryptoCipher *cipher,
 
 
 int qcrypto_cipher_getiv(QCryptoCipher *cipher,
-                         const uint8_t *iv, size_t niv,
+                         uint8_t *iv, size_t niv,
                          Error **errp)
 {
     const QCryptoCipherDriver *drv = cipher->driver;
