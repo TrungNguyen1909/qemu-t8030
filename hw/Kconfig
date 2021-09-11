@@ -33,6 +33,7 @@ source rtc/Kconfig
 source scsi/Kconfig
 source sd/Kconfig
 source smbios/Kconfig
+source spmi/Kconfig
 source ssi/Kconfig
 source timer/Kconfig
 source tpm/Kconfig
