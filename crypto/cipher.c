@@ -132,12 +132,8 @@ qcrypto_cipher_validate_key_length(QCryptoCipherAlgorithm alg,
     return true;
 }
 
-#ifdef CONFIG_GCRYPT
-#include "cipher-gcrypt.c.inc"
-#elif defined CONFIG_NETTLE
+#ifdef CONFIG_NETTLE
 #include "cipher-nettle.c.inc"
-#elif defined CONFIG_GNUTLS_CRYPTO
-#include "cipher-gnutls.c.inc"
 #else
 #include "cipher-builtin.c.inc"
 #endif
