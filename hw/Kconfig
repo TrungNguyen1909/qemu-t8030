@@ -35,6 +35,7 @@ source scsi/Kconfig
 source sd/Kconfig
 source sensor/Kconfig
 source smbios/Kconfig
+source spmi/Kconfig
 source ssi/Kconfig
 source timer/Kconfig
 source tpm/Kconfig

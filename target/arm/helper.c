@@ -4001,14 +4001,6 @@ static void vmsa_tcr_el12_write(CPUARMState *env, const ARMCPRegInfo *ri,
     tlb_flush(CPU(cpu));
     tcr->raw_tcr = value;
 }
-static void vmsa_tcr_el1_write(CPUARMState *env, const ARMCPRegInfo *ri,
-                               uint64_t value)
-{
-    if (!env->gxf.guarded && env->cp15.vmsa_lock_el1 & VMSA_LOCK_TCR_EL1) {
-        return;
-    }
-    vmsa_tcr_el12_write(env, ri, value);
-}
 
 static void vmsa_ttbr_write(CPUARMState *env, const ARMCPRegInfo *ri,
                             uint64_t value)
@@ -4020,24 +4012,6 @@ static void vmsa_ttbr_write(CPUARMState *env, const ARMCPRegInfo *ri,
         tlb_flush(CPU(cpu));
     }
     raw_write(env, ri, value);
-}
-static void vmsa_ttbr0_el1_write(CPUARMState *env, const ARMCPRegInfo *ri,
-                            uint64_t value)
-{
-    if (!env->gxf.guarded && env->cp15.vmsa_lock_el1 & VMSA_LOCK_TTBR0_EL1) {
-        return;
-    }
-
-    vmsa_ttbr_write(env, ri, value);
-}
-static void vmsa_ttbr1_el1_write(CPUARMState *env, const ARMCPRegInfo *ri,
-                            uint64_t value)
-{
-    if (!env->gxf.guarded && env->cp15.vmsa_lock_el1 & VMSA_LOCK_TTBR1_EL1) {
-        return;
-    }
-
-    vmsa_ttbr_write(env, ri, value);
 }
 
 static void vmsa_tcr_ttbr_el2_write(CPUARMState *env, const ARMCPRegInfo *ri,
@@ -4117,19 +4091,19 @@ static const ARMCPRegInfo vmsa_cp_reginfo[] = {
     { .name = "TTBR0_EL1", .state = ARM_CP_STATE_BOTH,
       .opc0 = 3, .opc1 = 0, .crn = 2, .crm = 0, .opc2 = 0,
       .access = PL1_RW, .accessfn = access_tvm_trvm,
-      .writefn = vmsa_ttbr0_el1_write, .resetvalue = 0,
+      .writefn = vmsa_ttbr_write, .resetvalue = 0,
       .bank_fieldoffsets = { offsetof(CPUARMState, cp15.ttbr0_s),
                              offsetof(CPUARMState, cp15.ttbr0_ns) } },
     { .name = "TTBR1_EL1", .state = ARM_CP_STATE_BOTH,
       .opc0 = 3, .opc1 = 0, .crn = 2, .crm = 0, .opc2 = 1,
       .access = PL1_RW, .accessfn = access_tvm_trvm,
-      .writefn = vmsa_ttbr1_el1_write, .resetvalue = 0,
+      .writefn = vmsa_ttbr_write, .resetvalue = 0,
       .bank_fieldoffsets = { offsetof(CPUARMState, cp15.ttbr1_s),
                              offsetof(CPUARMState, cp15.ttbr1_ns) } },
     { .name = "TCR_EL1", .state = ARM_CP_STATE_AA64,
       .opc0 = 3, .crn = 2, .crm = 0, .opc1 = 0, .opc2 = 2,
       .access = PL1_RW, .accessfn = access_tvm_trvm,
-      .writefn = vmsa_tcr_el1_write,
+      .writefn = vmsa_tcr_el12_write,
       .resetfn = vmsa_ttbcr_reset, .raw_writefn = raw_write,
       .fieldoffset = offsetof(CPUARMState, cp15.tcr_el[1]) },
     { .name = "TTBCR", .cp = 15, .crn = 2, .crm = 0, .opc1 = 0, .opc2 = 2,
@@ -5066,11 +5040,11 @@ static void sctlr_write(CPUARMState *env, const ARMCPRegInfo *ri,
 static void sctlr_el1_write(CPUARMState *env, const ARMCPRegInfo *ri,
                         uint64_t value)
 {
-    if (!env->gxf.guarded && env->cp15.vmsa_lock_el1 & VMSA_LOCK_SCTLR_EL1) {
+    if (!arm_is_guarded(env) && env->cp15.vmsa_lock_el1 & VMSA_LOCK_SCTLR_EL1) {
         return;
     }
 
-    if (!env->gxf.guarded && env->cp15.vmsa_lock_el1 & VMSA_LOCK_SCTLR_M_BIT) {
+    if (!arm_is_guarded(env) && env->cp15.vmsa_lock_el1 & VMSA_LOCK_SCTLR_M_BIT) {
         value = (value & ~(SCTLR_M)) | (raw_read(env, ri) & SCTLR_M);
     }
 
@@ -9069,7 +9043,7 @@ void define_one_arm_cp_reg_with_opaque(ARMCPU *cpu,
             break;
         case 6:
             /* min_EL EL3 */
-            mask = PL1_RW;
+            mask = PL0_RW;
             break;
         case 7:
             /* min_EL EL1, secure mode only (we don't check the latter) */
@@ -10254,7 +10228,7 @@ static void arm_cpu_do_interrupt_aarch64(CPUState *cs)
     unsigned int new_mode, old_mode, cur_el;
     int rt;
 
-    if (env->gxf.guarded) {
+    if (arm_is_guarded(env)) {
         addr = env->gxf.vbar_gl[new_el];
     } else {
         addr = env->cp15.vbar_el[new_el];
@@ -10306,7 +10280,7 @@ static void arm_cpu_do_interrupt_aarch64(CPUState *cs)
     switch (cs->exception_index) {
     case EXCP_PREFETCH_ABORT:
     case EXCP_DATA_ABORT:
-        if (env->gxf.guarded) {
+        if (arm_is_guarded(env)) {
             env->gxf.far_gl[new_el] = env->exception.vaddress;
             qemu_log_mask(CPU_LOG_INT, "...with FAR 0x%" PRIx64 "\n",
                         env->gxf.far_gl[new_el]);
@@ -10361,7 +10335,7 @@ static void arm_cpu_do_interrupt_aarch64(CPUState *cs)
             break;
         }
 
-        if (env->gxf.guarded) {
+        if (arm_is_guarded(env)) {
             env->gxf.esr_gl[new_el] = env->exception.syndrome;
         } else {
             env->cp15.esr_el[new_el] = env->exception.syndrome;
@@ -10387,7 +10361,7 @@ static void arm_cpu_do_interrupt_aarch64(CPUState *cs)
         old_mode = pstate_read(env);
         aarch64_save_sp(env, arm_current_el(env));
 
-        if (genter || env->gxf.guarded) {
+        if (genter || arm_is_guarded(env)) {
             env->gxf.elr_gl[new_el] = env->pc;
         } else {
             env->elr_el[new_el] = env->pc;
@@ -10401,13 +10375,13 @@ static void arm_cpu_do_interrupt_aarch64(CPUState *cs)
         env->condexec_bits = 0;
     }
 
-    if (genter || env->gxf.guarded) {
+    if (genter || arm_is_guarded(env)) {
         env->gxf.spsr_gl[new_el] = old_mode;
     } else {
         env->banked_spsr[aarch64_banked_spsr_index(new_el)] = old_mode;
     }
 
-    if (genter || env->gxf.guarded) {
+    if (genter || arm_is_guarded(env)) {
         qemu_log_mask(CPU_LOG_INT, "...with ELR 0x%" PRIx64 "\n",
                     env->gxf.elr_gl[new_el]);
     } else {
@@ -10448,10 +10422,9 @@ static void arm_cpu_do_interrupt_aarch64(CPUState *cs)
     }
 
     pstate_write(env, PSTATE_DAIF | new_mode);
-    env->gxf.guarded |= genter;
+    env->gxf.gxf_status_el[new_el] |= genter;
     env->aarch64 = 1;
     aarch64_restore_sp(env, new_el);
-    //TODO: MMU in GXF?
 
     helper_rebuild_hflags_a64(env, new_el);
 
@@ -10803,6 +10776,88 @@ simple_ap_to_rw_prot(CPUARMState *env, ARMMMUIdx mmu_idx, int ap)
     return simple_ap_to_rw_prot_is_user(ap, regime_is_user(env, mmu_idx));
 }
 
+/* Translate section/page attributes to page
+ * R/W/X protection flags.
+ *
+ * @env:     CPUARMState
+ * @ap:      The 2-bit simple AP (AP[2:1])
+ * @xn:      XN (execute-never) bits
+ * @pxn:     PXN (privileged-execute-never) bits
+ * @guarded: TRUE if accessing from GXF
+ */
+static inline int
+pte_to_sprr_prot_is_guarded(CPUARMState *env, int ap, int xn, int pxn, bool guarded)
+{
+    int sprr_idx = ((ap << 2) | (xn << 1) | pxn) & 0xf;
+    uint64_t sprr_perm = env->sprr.sprr_perm_el[arm_current_el(env)];
+
+    if (arm_is_sprr_enabled(env)) {
+        int attr = SPRR_EXTRACT_IDX_ATTR(sprr_perm, sprr_idx);
+        int prot = 0;
+
+        if (guarded) {
+            switch (attr >> 2) {
+            case 0:
+                prot = 0;
+                break;
+            case 1:
+                prot = PAGE_READ | PAGE_EXEC;
+                break;
+            case 2:
+                prot = PAGE_READ;
+                break;
+            case 3:
+                prot = PAGE_READ | PAGE_WRITE;
+                break;
+            default:
+                g_assert_not_reached();
+                break;
+            }
+        } else {
+            switch (attr & 3) {
+            case 0:
+                prot = 0;
+                break;
+            case 1:
+                prot = PAGE_READ | PAGE_EXEC;
+                if ((attr >> 2) == 2) {
+                    prot = PAGE_EXEC;
+                }
+                break;
+            case 2:
+                prot = PAGE_READ;
+                break;
+            case 3:
+                prot = PAGE_READ | PAGE_WRITE;
+                if ((attr >> 2) == 1) {
+                    /* No R/W in EL if RX in GXF */
+                    prot = 0;
+                }
+                break;
+            default:
+                g_assert_not_reached();
+                break;
+            }
+        }
+        return prot;
+    }
+    return PAGE_READ | PAGE_WRITE | PAGE_EXEC;
+}
+
+/* Translate section/page attributes to page
+ * R/W/X protection flags.
+ *
+ * @env:     CPUARMState
+ * @ap:      The 2-bit simple AP (AP[2:1])
+ * @xn:      XN (execute-never) bits
+ * @pxn:     PXN (privileged-execute-never) bits
+ */
+static inline int
+pte_to_sprr_prot(CPUARMState *env, int ap, int xn, int pxn)
+{
+    return pte_to_sprr_prot_is_guarded(env, ap, xn, pxn, arm_is_guarded(env));
+}
+
 /* Translate S2 section/page access permissions to protection flags
  *
  * @env:     CPUARMState
@@ -10874,13 +10929,21 @@ static int get_S1prot(CPUARMState *env, ARMMMUIdx mmu_idx, bool is_aa64,
 
     user_rw = simple_ap_to_rw_prot_is_user(ap, true);
     if (is_user) {
-        prot_rw = user_rw;
+        if (arm_is_sprr_enabled(env)) {
+            prot_rw = pte_to_sprr_prot(env, ap, xn, pxn);
+        } else {
+            prot_rw = user_rw;
+        }
     } else {
         if (user_rw && regime_is_pan(env, mmu_idx)) {
             /* PAN forbids data accesses but doesn't affect insn fetch */
             prot_rw = 0;
         } else {
-            prot_rw = simple_ap_to_rw_prot_is_user(ap, false);
+            if (arm_is_sprr_enabled(env)) {
+                prot_rw = pte_to_sprr_prot(env, ap, xn, pxn);
+            } else {
+                prot_rw = simple_ap_to_rw_prot_is_user(ap, false);
+            }
         }
     }
 
@@ -10897,6 +10960,10 @@ static int get_S1prot(CPUARMState *env, ARMMMUIdx mmu_idx, bool is_aa64,
 
     if (have_wxn) {
         wxn = regime_sctlr(env, mmu_idx) & SCTLR_WXN;
+    }
+
+    if (arm_is_sprr_enabled(env)) {
+        xn = pxn = !(pte_to_sprr_prot(env, ap, xn, pxn) & PAGE_EXEC);
     }
 
     if (is_aa64) {
@@ -11871,6 +11938,7 @@ static bool get_phys_addr_lpae(CPUARMState *env, uint64_t address,
         *prot = get_S1prot(env, mmu_idx, aarch64, ap, ns, xn, pxn);
     }
 
+    //TODO: GXF aborts when EL jumps to GL code
     fault_type = ARMFault_Permission;
     if (!(*prot & (1 << access_type))) {
         goto do_fault;
@@ -13570,7 +13638,7 @@ static CPUARMTBFlags rebuild_hflags_a64(CPUARMState *env, int el, int fp_el,
         }
     }
 
-    if (env->gxf.guarded) {
+    if (arm_is_guarded(env)) {
         DP_TBFLAG_A64(flags, GUARDED, 1);
     }
 

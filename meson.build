@@ -2141,6 +2141,7 @@ if have_system
     'hw/sd',
     'hw/sparc',
     'hw/sparc64',
+    'hw/spmi',
     'hw/ssi',
     'hw/timer',
     'hw/tpm',

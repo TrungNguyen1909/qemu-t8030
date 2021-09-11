@@ -1,0 +1,8 @@
+# See docs/devel/tracing.txt for syntax documentation.
+
+# core.c
+
+spmi_command(uint8_t sid, uint8_t opcode, uint16_t address) "command(sid:0x%02x) opcode:0x%02x address:0x%02x"
+spmi_send(uint8_t sid, uint8_t len) "send(sid:0x%02x) len:0x%02x"
+spmi_recv(uint8_t sid, uint8_t len) "recv(sid:0x%02x) len:0x%02x"
+spmi_finish(uint8_t sid) "finish(sid:0x%02x)"

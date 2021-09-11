@@ -232,6 +232,37 @@ typedef struct CPUARMTBFlags {
     target_ulong flags2;
 } CPUARMTBFlags;
 
+#define APRR_ATTR_X (1ULL)
+#define APRR_ATTR_W (2ULL)
+#define APRR_ATTR_R (4ULL)
+
+#define APRR_ATTR_WX  (APRR_ATTR_W | APRR_ATTR_X)
+#define APRR_ATTR_RX  (APRR_ATTR_R | APRR_ATTR_X)
+#define APRR_ATTR_RWX (APRR_ATTR_R | APRR_ATTR_W | APRR_ATTR_X)
+
+#define APRR_ATTR_NONE (0ULL)
+#define APRR_ATTR_MASK (APRR_ATTR_RWX)
+
+#define SPRR_ATTR_MASK (15ULL)
+
+#define APRR_SHIFT_FOR_IDX(x) \
+	((x) << 2ULL)
+
+#define APRR_EXTRACT_IDX_ATTR(_aprr_value, _idx) \
+	(((_aprr_value) >> APRR_SHIFT_FOR_IDX(_idx)) & APRR_ATTR_MASK)
+
+#define SPRR_SHIFT_FOR_IDX(x) \
+	((x) << 2ULL)
+
+#define SPRR_EXTRACT_IDX_ATTR(_sprr_value, _idx) \
+	(((_sprr_value) >> SPRR_SHIFT_FOR_IDX(_idx)) & SPRR_ATTR_MASK)
+
+#define SPRR_MASK_SHIFT_FOR_IDX(x) \
+	((x) << 1ULL)
+
+#define SPRR_MASK_EXTRACT_IDX_ATTR(_sprr_mask_value, _idx) \
+	(((_sprr_mask_value) >> SPRR_MASK_SHIFT_FOR_IDX(_idx)) & APRR_ATTR_MASK)
+
 typedef struct CPUARMState {
     /* Regs for current mode.  */
     uint32_t regs[16];
@@ -525,8 +556,10 @@ typedef struct CPUARMState {
     } cp15;
 
     struct {
-        uint64_t gxf_enter_el[3];
         uint64_t gxf_config_el[3];
+        uint64_t gxf_enter_el[3];
+        uint64_t gxf_status_el[3];
+        uint64_t gxf_abort_el[3];
         uint64_t sp_gl[3];
         uint64_t tpidr_gl[3];
         uint64_t vbar_gl[3];
@@ -535,8 +568,14 @@ typedef struct CPUARMState {
         uint64_t esr_gl[3];
         uint64_t elr_gl[3];
         uint64_t far_gl[3];
-        bool guarded;
     } gxf;
+
+    struct {
+        uint64_t sprr_perm_el[3];
+        uint64_t sprr_config_el[3];
+        uint64_t sprr_unk_el[3];
+        uint32_t sprr_umask;
+    } sprr;
 
     struct {
         /* M profile has up to 4 stack pointers:
@@ -2744,6 +2783,19 @@ static inline int arm_current_el(CPUARMState *env)
         return 1;
     }
 }
+
+/* Return true if the processor is in GXF state */
+static inline bool arm_is_guarded(CPUARMState *env)
+{
+    return env->gxf.gxf_status_el[arm_current_el(env)] & 1;
+}
+
+/* Return true if the processor has SPRR enabled */
+static inline bool arm_is_sprr_enabled(CPUARMState *env)
+{
+    return env->sprr.sprr_config_el[arm_current_el(env)] & 1;
+}
+
 
 typedef struct ARMCPRegInfo ARMCPRegInfo;
 
