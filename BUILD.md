@@ -65,7 +65,7 @@ unzip ../iPhone11,8,iPhone12,1_14.0_18A5351d_Restore.ipsw
 # Getting precompiled system binaries
 
 ```shell
-export STRAP_URL=$(curl https://assets.checkra.in/loader/config.json | jq ".core_bootstrap_tar" | cut -d '"' -f 2)
+export STRAP_URL=$(curl https://assets.checkra.in/loader/config.json | jq -r ".core_bootstrap_tar")
 wget $STRAP_URL
 mkdir strap
 tar xf strap.tar.lzma -C strap

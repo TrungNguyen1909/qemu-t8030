@@ -142,7 +142,7 @@ static void wdt_reg_write(void *opaque, hwaddr addr,
                           unsigned size)
 {
     AppleWDTState *s = APPLE_WDT(opaque);
-    uint32_t orig = data;
+    uint32_t __unused orig = data;
     uint32_t index = addr >> 2;
     uint32_t *mmio;
     uint32_t old;

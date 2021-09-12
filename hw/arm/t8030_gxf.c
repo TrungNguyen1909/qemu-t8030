@@ -160,10 +160,10 @@ static void sprr_perm_el0_write(CPUARMState *env, const ARMCPRegInfo *ri, uint64
         raw_write(env, ri, value);
         return;
     }
-    
+
     for (int i = 0; i < 16; i++) {
         uint32_t umask = SPRR_MASK_EXTRACT_IDX_ATTR(mask, i);
-        uint64_t requested_perm = APRR_EXTRACT_IDX_ATTR(value, i); 
+        uint64_t requested_perm = APRR_EXTRACT_IDX_ATTR(value, i);
         uint64_t orig_perm = APRR_EXTRACT_IDX_ATTR(perm, i);
         uint64_t changed_perm = ((requested_perm ^ orig_perm) & umask);
         uint64_t result_perm = orig_perm;
@@ -171,7 +171,7 @@ static void sprr_perm_el0_write(CPUARMState *env, const ARMCPRegInfo *ri, uint64
 
         result_perm &= ~changed_perm;
         result_perm |= requested_perm & changed_perm;
-        
+
         perm &= ~(APRR_ATTR_MASK << APRR_SHIFT_FOR_IDX(i));
         perm |= result_perm << APRR_SHIFT_FOR_IDX(i);
     }
