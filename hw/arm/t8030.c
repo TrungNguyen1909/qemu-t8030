@@ -454,11 +454,11 @@ static void t8030_create_s3c_uart(const T8030MachineState *tms, Chardev *chr)
     int vector;
     DTBProp *prop;
     hwaddr *uart_offset;
-    DTBNode *child = get_dtb_node(tms->device_tree, "arm-io");
+    DTBNode *child = find_dtb_node(tms->device_tree, "arm-io");
 
     assert(child != NULL);
 
-    child = get_dtb_node(child, "uart0");
+    child = find_dtb_node(child, "uart0");
     assert(child != NULL);
 
     //make sure this node has the boot-console prop
@@ -797,7 +797,8 @@ static void t8030_cpu_setup(MachineState *machine)
 
     t8030_cluster_setup(machine);
 
-    root = get_dtb_node(tms->device_tree, "cpus");
+    root = find_dtb_node(tms->device_tree, "cpus");
+    assert(root);
 
     for(i = 0; i<MAX_CPU; i++) {
         char cpu_name[8];
@@ -951,10 +952,10 @@ static void t8030_create_aic(MachineState *machine)
     hwaddr *reg;
     DTBProp *prop;
     T8030MachineState *tms = T8030_MACHINE(machine);
-    DTBNode *child = get_dtb_node(tms->device_tree, "arm-io");
+    DTBNode *child = find_dtb_node(tms->device_tree, "arm-io");
 
     assert(child != NULL);
-    child = get_dtb_node(child, "aic");
+    child = find_dtb_node(child, "aic");
     assert(child != NULL);
 
     tms->aic = apple_aic_create(machine->smp.cpus, child);
@@ -981,10 +982,10 @@ static void t8030_pmgr_setup(MachineState* machine)
     char name[32];
     DTBProp *prop;
     T8030MachineState *tms = T8030_MACHINE(machine);
-    DTBNode *child = get_dtb_node(tms->device_tree, "arm-io");
+    DTBNode *child = find_dtb_node(tms->device_tree, "arm-io");
 
     assert(child != NULL);
-    child = get_dtb_node(child, "pmgr");
+    child = find_dtb_node(child, "pmgr");
     assert(child != NULL);
 
     prop = find_dtb_prop(child, "reg");
@@ -1043,12 +1044,12 @@ static void t8030_sart_setup(MachineState* machine)
 {
     uint64_t *reg;
     T8030MachineState *tms = T8030_MACHINE(machine);
-    DTBNode *child = get_dtb_node(tms->device_tree, "arm-io");
+    DTBNode *child = find_dtb_node(tms->device_tree, "arm-io");
     DTBProp *prop;
     MemoryRegion *sart;
 
     assert(child != NULL);
-    child = get_dtb_node(child, "sart-ans");
+    child = find_dtb_node(child, "sart-ans");
     assert(child != NULL);
 
     prop = find_dtb_prop(child, "reg");
@@ -1068,10 +1069,10 @@ static void t8030_create_ans(MachineState* machine)
     uint64_t *reg;
     T8030MachineState *tms = T8030_MACHINE(machine);
     SysBusDevice *ans;
-    DTBNode *child = get_dtb_node(tms->device_tree, "arm-io");
+    DTBNode *child = find_dtb_node(tms->device_tree, "arm-io");
 
     assert(child != NULL);
-    child = get_dtb_node(child, "ans");
+    child = find_dtb_node(child, "ans");
     assert(child != NULL);
 
     ans = apple_ans_create(child, tms->build_version);
@@ -1113,9 +1114,9 @@ static void t8030_create_gpio(MachineState *machine, const char *name)
     uint32_t *ints;
     int i;
     T8030MachineState *tms = T8030_MACHINE(machine);
-    DTBNode *child = get_dtb_node(tms->device_tree, "arm-io");
+    DTBNode *child = find_dtb_node(tms->device_tree, "arm-io");
 
-    child = get_dtb_node(child, name);
+    child = find_dtb_node(child, name);
     assert(child);
     gpio = apple_gpio_create(child);
     assert(gpio);
@@ -1167,9 +1168,10 @@ static void t8030_create_i2c(MachineState *machine, const char *name)
     uint32_t* ints;
     int i;
     T8030MachineState *tms = T8030_MACHINE(machine);
-    DTBNode *child = get_dtb_node(tms->device_tree, "arm-io");
+    DTBNode *child = find_dtb_node(tms->device_tree, "arm-io");
 
-    child = get_dtb_node(child, name);
+    assert(child);
+    child = find_dtb_node(child, name);
     if (!child) return;
 
     i2c = apple_i2c_create(child);
@@ -1236,8 +1238,8 @@ static void t8030_create_i2c(MachineState *machine, const char *name)
 static void t8030_create_usb(MachineState *machine)
 {
     T8030MachineState *tms = T8030_MACHINE(machine);
-    DTBNode *child = get_dtb_node(tms->device_tree, "arm-io");
-    DTBNode *drd = get_dtb_node(child, "usb-drd");
+    DTBNode *child = find_dtb_node(tms->device_tree, "arm-io");
+    DTBNode *drd = find_dtb_node(child, "usb-drd");
     DTBNode *phy, *complex, *device;
     DeviceState *otg;
     uint32_t value;
@@ -1327,10 +1329,10 @@ static void t8030_create_wdt(MachineState* machine)
     uint32_t value;
     T8030MachineState *tms = T8030_MACHINE(machine);
     SysBusDevice *wdt;
-    DTBNode *child = get_dtb_node(tms->device_tree, "arm-io");
+    DTBNode *child = find_dtb_node(tms->device_tree, "arm-io");
 
     assert(child != NULL);
-    child = get_dtb_node(child, "wdt");
+    child = find_dtb_node(child, "wdt");
     assert(child != NULL);
 
     wdt = apple_wdt_create(child);
@@ -1381,11 +1383,11 @@ static void t8030_create_aes(MachineState* machine)
     uint64_t *reg;
     T8030MachineState *tms = T8030_MACHINE(machine);
     SysBusDevice *aes;
-    DTBNode *child = get_dtb_node(tms->device_tree, "arm-io");
+    DTBNode *child = find_dtb_node(tms->device_tree, "arm-io");
     MemoryRegion *dma_mr = NULL;
 
     assert(child != NULL);
-    child = get_dtb_node(child, "aes");
+    child = find_dtb_node(child, "aes");
     assert(child != NULL);
 
     aes = apple_aes_create(child);
@@ -1595,7 +1597,7 @@ static void t8030_machine_init(MachineState *machine)
     t8030_patch_kernel(hdr);
 
     tms->device_tree = load_dtb_from_file(machine->dtb);
-    child = get_dtb_node(tms->device_tree, "arm-io");
+    child = find_dtb_node(tms->device_tree, "arm-io");
     assert(child != NULL);
 
     prop = find_dtb_prop(child, "ranges");
