@@ -50,6 +50,8 @@
 #include "hw/watchdog/apple_wdt.h"
 #include "hw/misc/apple_aes.h"
 #include "hw/nvram/apple_nvram.h"
+#include "hw/spmi/apple_spmi.h"
+#include "hw/spmi/apple_spmi_pmu.h"
 
 #include "hw/arm/exynos4210.h"
 #include "hw/arm/xnu_pf.h"
@@ -1421,6 +1423,76 @@ static void t8030_create_aes(MachineState* machine)
     sysbus_realize_and_unref(aes, &error_fatal);
 }
 
+static void t8030_create_spmi(MachineState *machine, const char *name)
+{
+    SysBusDevice *spmi = NULL;
+    DTBProp *prop;
+    uint64_t *reg;
+    uint32_t* ints;
+    T8030MachineState *tms = T8030_MACHINE(machine);
+    DTBNode *child = find_dtb_node(tms->device_tree, "arm-io");
+
+    assert(child);
+    child = find_dtb_node(child, name);
+    if (!child) return;
+
+    spmi = apple_spmi_create(child);
+    assert(spmi);
+    object_property_add_child(OBJECT(machine), name, OBJECT(spmi));
+
+    prop = find_dtb_prop(child, "reg");
+    assert(prop);
+
+    reg = (uint64_t*)prop->value;
+
+    for (int i = 0; i < 3; i++) {
+        sysbus_mmio_map(SYS_BUS_DEVICE(spmi), i,
+                        tms->soc_base_pa + reg[i * 2]);
+    }
+
+    prop = find_dtb_prop(child, "interrupts");
+    assert(prop);
+    ints = (uint32_t*)prop->value;
+    /* XXX: Only the second interrupt's parent is AIC */
+    sysbus_connect_irq(SYS_BUS_DEVICE(spmi), 0,
+                       qdev_get_gpio_in(DEVICE(tms->aic), ints[1]));
+
+    sysbus_realize_and_unref(SYS_BUS_DEVICE(spmi), &error_fatal);
+}
+
+static void t8030_create_pmu(MachineState *machine, const char *parent,
+                             const char *name)
+{
+    DeviceState *pmu = NULL;
+    AppleSPMIState *spmi = NULL;
+    DTBProp *prop;
+    T8030MachineState *tms = T8030_MACHINE(machine);
+    DTBNode *child = find_dtb_node(tms->device_tree, "arm-io");
+    uint32_t *ints;
+
+    assert(child);
+    child = find_dtb_node(child, parent);
+    if (!child) return;
+
+    spmi = APPLE_SPMI(object_property_get_link(OBJECT(machine), parent,
+                      &error_fatal));
+    assert(spmi);
+
+    child = find_dtb_node(child, name);
+    if (!child) return;
+
+    pmu = apple_spmi_pmu_create(child);
+    assert(pmu);
+    object_property_add_child(OBJECT(machine), name, OBJECT(pmu));
+
+    prop = find_dtb_prop(child, "interrupts");
+    assert(prop);
+    ints = (uint32_t *)prop->value;
+
+    qdev_connect_gpio_out(pmu, 0, qdev_get_gpio_in(DEVICE(spmi), ints[0]));
+    spmi_slave_realize_and_unref(SPMI_SLAVE(pmu), spmi->bus, &error_fatal);
+}
+
 static void t8030_cpu_reset(void *opaque)
 {
     MachineState *machine = MACHINE(opaque);
@@ -1563,6 +1635,12 @@ static void t8030_machine_init(MachineState *machine)
     t8030_create_wdt(machine);
 
     t8030_create_aes(machine);
+
+    t8030_create_spmi(machine, "spmi0");
+    t8030_create_spmi(machine, "spmi1");
+    t8030_create_spmi(machine, "spmi2");
+
+    t8030_create_pmu(machine, "spmi0", "spmi-pmu");
 }
 
 static void t8030_set_trustcache_filename(Object *obj, const char *value, Error **errp)

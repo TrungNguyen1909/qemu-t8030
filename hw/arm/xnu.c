@@ -54,6 +54,8 @@ static const char *KEEP_COMP[] = {
     "usb-complex,s8000\0usb-complex,s5l8960x\0$",
     "usb-device,s5l8900x\0$",
     "wdt,t8030\0wdt,s5l8960x\0$",
+    "spmi,t8015\0$", "spmi,gen0\0$",
+    "pmu,spmi\0pmu,avus\0$",
 };
 
 static const char *REM_NAMES[] = {
@@ -62,6 +64,7 @@ static const char *REM_NAMES[] = {
     "sep\0$", "pmp\0$",
     "aop-gpio\0$",
     "atc-phy\0$", "usb-drd\0$",
+    "dotara\0$", "baseband-spmi\0$", "stockholm-spmi\0",
 };
 
 static const char *REM_DEV_TYPES[] = { "backlight\0$", "pmp\0$", "wlan\0$", "bluetooth\0$", "aop\0$"};
