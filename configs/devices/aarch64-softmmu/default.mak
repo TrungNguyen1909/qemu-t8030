@@ -6,3 +6,4 @@ include ../arm-softmmu/default.mak
 CONFIG_XLNX_ZYNQMP_ARM=y
 CONFIG_XLNX_VERSAL=y
 CONFIG_SBSA_REF=y
+CONFIG_APPLE_SOC=y

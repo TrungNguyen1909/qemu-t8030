@@ -133,3 +133,13 @@ config XLNX_USB_SUBSYS
     bool
     default y if XLNX_VERSAL
     select USB_DWC3
+
+config USB_TCP
+    bool
+    select USB
+
+config APPLE_OTG
+    bool
+    select USB_TCP
+    select USB_DWC2
+    depends on APPLE_SOC

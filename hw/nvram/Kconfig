@@ -15,3 +15,9 @@ config NMC93XX_EEPROM
 
 config CHRP_NVRAM
     bool
+
+config APPLE_NVRAM
+    bool
+    select CHRP_NVRAM
+    depends on APPLE_SOC
+    depends on NVME_PCI

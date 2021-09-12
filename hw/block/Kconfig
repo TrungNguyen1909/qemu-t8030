@@ -44,3 +44,8 @@ config VHOST_USER_BLK
 
 config SWIM
     bool
+
+config APPLE_ANS
+    bool
+    depends on NVME_PCI
+    depends on APPLE_SOC

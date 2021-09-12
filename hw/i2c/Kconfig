@@ -36,3 +36,8 @@ config PCA954X
 config PMBUS
     bool
     select SMBUS
+
+config APPLE_I2C
+    bool
+    select BITBANG_I2C
+    depends on APPLE_SOC

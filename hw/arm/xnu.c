@@ -61,10 +61,10 @@ static const char *REM_NAMES[] = {
     "dockchannel-uart\0$",
     "sep\0$", "pmp\0$",
     "aop-gpio\0$",
-    "atc-phy\0$", "usb-drd\0$"
+    "atc-phy\0$", "usb-drd\0$",
 };
 
-static const char *REM_DEV_TYPES[] = { "backlight\0$", "pmp\0$" };
+static const char *REM_DEV_TYPES[] = { "backlight\0$", "pmp\0$", "wlan\0$", "bluetooth\0$", "aop\0$"};
 
 static const char *REM_PROPS[] = {
     "function-error_handler", "nvme-coastguard", "nand-debug",
@@ -370,7 +370,7 @@ void macho_load_dtb(DTBNode *root, AddressSpace *as, MemoryRegion *mem,
     set_dtb_prop(child, "security-domain", sizeof(data), (uint8_t *)&data);
     set_dtb_prop(child, "chip-epoch", sizeof(data), (uint8_t *)&data);
     set_dtb_prop(child, "amfi-allows-trust-cache-load", sizeof(data), (uint8_t *)&data);
-    data = 0xffffffff;
+    data = 0;
     set_dtb_prop(child, "debug-enabled", sizeof(data), (uint8_t *)&data);
 
     child = get_dtb_node(root, "chosen");

@@ -29,7 +29,6 @@ config ARM_VIRT
     select ACPI_HW_REDUCED
     select ACPI_NVDIMM
     select ACPI_APEI
-    select SPMI
 
 config CHEETAH
     bool
@@ -547,3 +546,20 @@ config ARMSSE
     select UNIMP
     select SSE_COUNTER
     select SSE_TIMER
+
+config APPLE_DART
+    bool
+    depends on APPLE_SOC
+
+config APPLE_SOC
+    bool
+    select EXYNOS4 # UART
+    select OR_IRQ
+    select UNIMP
+    select APPLE_ANS
+    select APPLE_I2C
+    select APPLE_OTG
+    select APPLE_NVRAM
+    select APPLE_SPMI
+    select APPLE_SPMI_PMU
+    select APPLE_DART

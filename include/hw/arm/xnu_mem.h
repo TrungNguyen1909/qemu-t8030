@@ -25,8 +25,6 @@
 #define HW_ARM_XNU_MEM_H
 
 #include "qemu-common.h"
-#include "hw/arm/boot.h"
-#include "target/arm/cpu.h"
 
 extern hwaddr g_virt_base;
 extern hwaddr g_phys_base;

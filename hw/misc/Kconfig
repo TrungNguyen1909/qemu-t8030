@@ -171,4 +171,9 @@ config SIFIVE_U_PRCI
 config VIRT_CTRL
     bool
 
+config APPLE_SPMI_PMU
+    bool
+    depends on APPLE_SOC
+    depends on SPMI
+
 source macio/Kconfig

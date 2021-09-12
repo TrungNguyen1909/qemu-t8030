@@ -23,18 +23,11 @@
 #include "qemu/osdep.h"
 #include "qapi/error.h"
 #include "qemu-common.h"
-#include "hw/arm/boot.h"
-#include "exec/address-spaces.h"
-#include "hw/misc/unimp.h"
 #include "sysemu/sysemu.h"
 #include "qemu/error-report.h"
-#include "hw/platform-bus.h"
+#include "exec/address-spaces.h"
 #include "exec/memory.h"
-#include "qemu-common.h"
 #include "exec/hwaddr.h"
-#include "hw/boards.h"
-#include "hw/arm/boot.h"
-#include "cpu.h"
 #include "hw/arm/xnu_mem.h"
 
 hwaddr g_virt_base, g_phys_base, g_phys_slide = 0, g_virt_slide = 0;
@@ -65,19 +58,6 @@ hwaddr vtop_static(hwaddr va)
 hwaddr ptov_static(hwaddr pa)
 {
     return ptov_bases(pa, g_phys_base, g_virt_base);
-}
-
-hwaddr vtop_mmu(hwaddr va, CPUState *cs)
-{
-    hwaddr phys_addr;
-    MemTxAttrs attrs = {};
-
-    phys_addr = arm_cpu_get_phys_page_attrs_debug(cs, va, &attrs);
-    if (phys_addr == -1) {
-        abort();
-    }
-
-    return phys_addr;
 }
 
 uint8_t get_highest_different_bit_index(hwaddr addr1, hwaddr addr2)
