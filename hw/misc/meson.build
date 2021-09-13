@@ -112,7 +112,9 @@ softmmu_ss.add(when: 'CONFIG_MSF2', if_true: files('msf2-sysreg.c'))
 softmmu_ss.add(when: 'CONFIG_NRF51_SOC', if_true: files('nrf51_rng.c'))
 
 softmmu_ss.add(when: 'CONFIG_GRLIB', if_true: files('grlib_ahb_apb_pnp.c'))
-softmmu_ss.add(when: 'CONFIG_APPLE_SOC', if_true: files('apple_aes.c'))
+softmmu_ss.add(when: 'CONFIG_APPLE_SOC', if_true: files(
+    'apple_aes.c',
+    'apple_mbox.c'))
 softmmu_ss.add(when: 'CONFIG_APPLE_SPMI_PMU', if_true: files('apple_spmi_pmu.c'))
 
 specific_ss.add(when: 'CONFIG_AVR_POWER', if_true: files('avr_power.c'))

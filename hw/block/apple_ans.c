@@ -1,24 +1,29 @@
 #include "qemu/osdep.h"
-#include "qapi/error.h"
-#include "hw/block/apple_ans.h"
-#include "hw/irq.h"
-#include "migration/vmstate.h"
 #include "qemu/bitops.h"
 #include "qemu/log.h"
 #include "qemu/module.h"
+#include "qapi/error.h"
+#include "hw/irq.h"
+#include "hw/block/block.h"
+#include "hw/pci/pci.h"
+#include "hw/pci/pcie_host.h"
+#include "hw/pci/msi.h"
+#include "hw/pci/msix.h"
+#include "sysemu/dma.h"
+#include "hw/nvme/nvme.h"
+#include "migration/vmstate.h"
 #include "hw/arm/xnu.h"
 #include "hw/arm/xnu_dtb.h"
-#include "hw/iop/mailbox.h"
+#include "hw/misc/apple_mbox.h"
+#include "hw/block/apple_ans.h"
 
 #define TYPE_APPLE_ANS "apple.ans"
 OBJECT_DECLARE_SIMPLE_TYPE(AppleANSState, APPLE_ANS)
 
-#define ANS_LOG_MSG(s, msg) \
+#define ANS_LOG_MSG(ep, msg) \
 do { qemu_log_mask(LOG_GUEST_ERROR, "ANS2: message:" \
-                   " type=0x%x ep=%u QWORD0=0x" TARGET_FMT_plx \
-                   " QWORD1=0x" TARGET_FMT_plx " ep0_state=0x%x\n", \
-                   msg->type, msg->endpoint, msg->data[0], msg->data[1], \
-                   s->mbox->ep0_status); } while (0)
+                   " ep=%u msg=0x" TARGET_FMT_plx, \
+                   ep, msg); } while (0)
 
 #define APPLE_BOOT_STATUS       0x1300
 #define   APPLE_BOOT_STATUS_OK  0xde71ce55
@@ -35,7 +40,7 @@ struct AppleANSState {
     MemoryRegion io_mmio;
     MemoryRegion io_ioport;
     MemoryRegion msix;
-    AppleIOPMailboxState *mbox;
+    AppleMboxState *mbox;
     qemu_irq irqs[2];
 
     NvmeCtrl nvme;
@@ -110,7 +115,13 @@ static void apple_ans_start(void *opaque)
     assert(PCI_DEVICE(&s->nvme)->bus_master_enable_region.enabled);
 }
 
-static const struct AppleIOPMailboxOps ans_mailbox_ops = {
+static void apple_ans_ep_handler(void *opaque, uint32_t ep, uint64_t msg)
+{
+    AppleANSState *s = APPLE_ANS(opaque);
+    ANS_LOG_MSG(ep, msg);
+}
+
+static const struct AppleMboxOps ans_mailbox_ops = {
     .start = apple_ans_start,
     .wakeup = apple_ans_start,
 };
@@ -163,7 +174,9 @@ SysBusDevice *apple_ans_create(DTBNode *node, uint32_t build_version)
      * 1: AppleASCWrapV2 coreRegisterMap
      * 2: AppleA7IOP autoBootRegMap
      */
-    s->mbox = apple_iop_mailbox_create("ANS2", s, reg[1], protocol_version, &ans_mailbox_ops);
+    s->mbox = apple_mbox_create("ANS2", s, reg[1], protocol_version,
+                                &ans_mailbox_ops);
+    apple_mbox_register_endpoint(s->mbox, 1, apple_ans_ep_handler);
     sysbus_init_mmio(sbd, sysbus_mmio_get_region(SYS_BUS_DEVICE(s->mbox), 0));
 
     s->iomems[1] = g_new(MemoryRegion, 1);
