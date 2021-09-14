@@ -136,7 +136,8 @@ config XLNX_USB_SUBSYS
 
 config USB_TCP
     bool
-    select USB
+    default y
+    depends on USB
 
 config APPLE_OTG
     bool
