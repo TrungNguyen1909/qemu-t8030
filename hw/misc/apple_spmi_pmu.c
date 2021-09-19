@@ -23,6 +23,7 @@ struct AppleSPMIPMUState {
 
     /*< public >*/
     qemu_irq irq;
+    uint64_t rtc_offset;
     uint64_t tick_offset;
     uint32_t tick_period;
     uint32_t reg_rtc;
@@ -36,9 +37,14 @@ static unsigned int frq_to_period_ns(unsigned int freq_hz)
     return NANOSECONDS_PER_SECOND > freq_hz ?
       NANOSECONDS_PER_SECOND / freq_hz : 1;
 }
-static uint64_t rtc_get_tick(AppleSPMIPMUState *p)
+static uint64_t rtc_get_tick(AppleSPMIPMUState *p, uint64_t *out_ns)
 {
     uint64_t now = qemu_clock_get_ns(rtc_clock);
+    uint64_t offset = p->rtc_offset;
+    if (out_ns) {
+        *out_ns = now;
+    }
+    now -= offset;
     return ((now / NANOSECONDS_PER_SECOND) << 15)
            | ((now / p->tick_period) & 0x7fff);
 }
@@ -63,7 +69,7 @@ static int apple_spmi_pmu_recv(SPMISlave *s, uint8_t *data,
 
     for (addr = p->addr; addr < p->addr + len; addr++) {
         if (addr >= p->reg_rtc && addr < p->reg_rtc + 6) {
-            uint64_t now = rtc_get_tick(p) - p->tick_offset;
+            uint64_t now = rtc_get_tick(p, NULL);
             p->reg[p->reg_rtc] = now << 1;
             p->reg[p->reg_rtc + 1] = now >> 7;
             p->reg[p->reg_rtc + 2] = now >> 15;
@@ -111,7 +117,7 @@ DeviceState *apple_spmi_pmu_create(DTBNode *node)
     p->reg_leg_scrpad = *(uint32_t *)prop->value;
 
     p->tick_period = frq_to_period_ns(RTC_TICK_FREQ);
-    p->tick_offset = rtc_get_tick(p);
+    p->tick_offset = rtc_get_tick(p, &p->rtc_offset);
 
     p->reg[p->reg_leg_scrpad + LEG_SCRPAD_OFFSET_SECS_OFFSET + 0] = p->tick_offset >> 15;
     p->reg[p->reg_leg_scrpad + LEG_SCRPAD_OFFSET_SECS_OFFSET + 1] = p->tick_offset >> (8 + 15);
