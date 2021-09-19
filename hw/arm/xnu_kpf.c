@@ -111,75 +111,65 @@ static bool kpf_amfi_callback(struct xnu_pf_patch *patch, uint32_t *opcode_strea
      * this is here to patch out the trustcache checks
      *  so that AMFI thinks that everything is in trustcache
      * there are two different versions of the trustcache function
-     *  either it's just a leaf that's branched to or it's a function with a real prolog
-     * the first portion of this function here will try to detect the prolog
-     *  and if it fails has_frame will be false
-     * if that's the case it will just make it return null
-     *  otherwise it has to respect the epilog so it will search for all the movs
-     *  that move into x0 and then turn them into a movz x0, 1
+     *  lookup_in_trust_cache_module has cdhash in x1
+     *  lookup_in_static_trust_cache has cdhash in x0 
+     * The former one requires [x2] = 2 and [x3] = 0
+     * both of them are patched to return 1
      */
-    char has_frame = 0;
-    for (int x = 0; x < 128; x++) {
-        uint32_t opcde = opcode_stream[-x];
-        if (opcde == RET || opcde == RETAB
-            /* unconditional branch */
-            || (opcde & 0xfc000000) == 0x14000000
-            || (opcde & 0xfc000000) == 0x94000000) {
-            break;
-        }
-        if (opcde == PACIBSP
-            /*ldp/stp???*/
-            || (opcde & 0x3e000000) == 0x28000000
-            || (opcde & 0x3e000000) == 0x2c000000) {
-            has_frame = 1;
-            break;
-        }
-    }
-    if (!has_frame) {
-        puts("KPF: Found AMFI (Leaf)");
-        opcode_stream[0] = 0xd2800020;
-        opcode_stream[1] = RET;
+    bool found_something = false;
+    /* find ldrb w*, [x*, 0xb] */
+    uint32_t *ldrb = find_next_insn(opcode_stream, 256, 0x39402c00, 0xfffffc00);
+    uint32_t cdhash_param = extract32(*ldrb, 5, 5);
+    uint32_t *frame = NULL;
+    uint32_t *start = opcode_stream;
+    bool pac = false;
+
+    /* Most reliable marker of a stack frame seems to be "add x29, sp, 0x...". */
+    frame = find_prev_insn(opcode_stream, 10, 0x910003fd, 0xff8003ff);
+    if (!frame) {
+        puts("kpf_amfi_callback: Found AMFI (Leaf)");
     } else {
-        bool found_something = false;
-        uint32_t *patchpoint = NULL;
-        uint32_t *retpoint = find_next_insn(&opcode_stream[0], 0x180, RETAB, 0xffffffff);
-
-        if (retpoint == NULL) {
-            retpoint = find_next_insn(&opcode_stream[0], 0x180, RET, 0xffffffff);
+        puts("kpf_amfi_callback: Found AMFI (Routine)");
+        start = find_prev_insn(frame, 10, 0xa9a003e0, 0xffe003e0);
+        if(!start) {
+            start = find_prev_insn(frame, 10, 0xd10003ff, 0xff8003ff);
         }
-        if (retpoint == NULL) {
-            puts("kpf_amfi_callback: failed to find retpoint");
+        if(!start) {
+            puts("kpf_amfi_callback: failed to find start");
             return false;
         }
-
-        patchpoint = find_next_insn(retpoint, 0x40, 0x32000000, 0xff80001f);
-        /* __PPLTEXT:__text:0xfffffff0097eded4      00010032       orr w0, w8, 1 */
-        if (patchpoint != NULL) {
-            patchpoint[0] = 0xd2800020;
-            found_something = true;
-        }
-
-        patchpoint = find_prev_insn(retpoint, 0x40, 0xAA0003E0, 0xffe0ffff);
-        /* __TEXT_EXEC:__text:FFFFFFF007CDDFDC      E00313AA       MOV X0, X19 */
-        if (patchpoint != NULL) {
-            patchpoint[0] = 0xd2800020;
-            found_something = true;
-        }
-
-        patchpoint = find_prev_insn(retpoint, 0x40, 0x52800000, 0xffffffff);
-        /* __PPLTEXT:__text:0xfffffff0097edeac      00008052       mov w0, 0 */
-        if (patchpoint != NULL) {
-            patchpoint[0] = 0xd2800020;
-            found_something = true;
-        }
-
-        if (!found_something) {
-            puts("kpf_amfi_callback: failed to find anything");
-            return false;
-        }
-        puts("KPF: Found AMFI (Routine)");
     }
-    return true;
+
+    fprintf(stderr, "%s: start @ 0x%llx\n", __func__,
+            ptov_static((hwaddr)start));
+
+    pac = find_prev_insn(start, 5, PACIBSP, 0xffffffff) != NULL;
+    switch (cdhash_param) {
+    case 0: {
+        *(start++) = 0x52800020; /* MOV W0, 1 */
+        *(start++) = (pac ? RETAB : RET);
+        found_something = true;
+        puts("kpf_amfi_callback: Found lookup_in_trust_cache_module");
+        break;
+    }
+    case 1:
+        *(start++) = 0x52800040; /* mov w0, 2 */
+        *(start++) = 0x39000040; /* strb w0, [x2] */
+        *(start++) = 0x52800000; /* mov w0, 0 */
+        *(start++) = 0x39000060; /* strb w0, [x3] */
+        *(start++) = 0x52800020; /* MOV W0, 1 */
+        *(start++) = (pac ? RETAB : RET);
+        found_something = true;
+        puts("kpf_amfi_callback: Found lookup_in_static_trust_cache");
+        break;
+    default:
+        puts("kpf_amfi_callback: Found unexpected prototype");
+        break;
+    }
+    if (!found_something) {
+        puts("kpf_amfi_callback: failed to patch anything");
+    }
+    return found_something;
 }
 
 static void kpf_amfi_patch(xnu_pf_patchset_t *xnu_text_exec_patchset)
@@ -191,9 +181,9 @@ static void kpf_amfi_patch(xnu_pf_patchset_t *xnu_text_exec_patchset)
      * 0xfffffff0072382b8      0bfd41d3       lsr x11, x8, 1
      * 0xfffffff0072382bc      6c250a9b       madd x12, x11, x10, x9
      * then the callback checks if this is just a leaf instead of a full routinue
-     * if it's a leave it will just replace the above with a movz x0,1;ret
-     * if it isn't a leaf it searches for all the places where a return happens
-     *  and patches them to return true
+     * if it isn't a leaf then it finds the start of the routine
+     * if cdhash is in x1 then [x2] = 2 and [x3] = 0
+     * Finally patches them to return true
      * To find the patch in r2 use:
      * /x 0000009100028052000000d30000009b:000000FF00FFFFFF000000FF000000FF
      */
@@ -340,11 +330,11 @@ static bool kpf_aksuc_handle(struct xnu_pf_patch *patch, uint32_t *opcode_stream
 
     pac = find_prev_insn(start, 5, PACIBSP, 0xffffffff) != NULL;
 
-   start[0] = 0x52800000; /* MOV W0, 0 */
-   start[1] = (pac ? RETAB : RET);
+    start[0] = 0x52800000; /* MOV W0, 0 */
+    start[1] = (pac ? RETAB : RET);
 
-   fprintf(stderr, "KPF: Found AppleKeyStoreUserClient::handleUserClientCommandGated\n");
-   return true;
+    fprintf(stderr, "KPF: Found AppleKeyStoreUserClient::handleUserClientCommandGated\n");
+    return true;
 }
 
 static void kpf_aks_kext_patches(xnu_pf_patchset_t *patchset)
