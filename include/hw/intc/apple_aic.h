@@ -105,11 +105,11 @@ typedef struct  {
     void *aic;
     qemu_irq irq;
     MemoryRegion iomem;
-    unsigned int cpu_id;
+    uint32_t cpu_id;
     uint32_t pendingIPI;
     uint32_t deferredIPI;
     uint32_t ipi_mask;
-} AppleAICOpaque;
+} AppleAICCPU;
 
 struct AppleAICState {
     SysBusDevice parent_obj;
@@ -117,14 +117,14 @@ struct AppleAICState {
     QemuMutex mutex;
     uint32_t phandle;
     uint32_t base_size;
-    size_t numEIR;
-    size_t numIRQ;
-    size_t numCPU;
+    uint32_t numEIR;
+    uint32_t numIRQ;
+    uint32_t numCPU;
+    uint32_t global_cfg;
     uint32_t *eir_mask;
     uint32_t *eir_dest;
-    AppleAICOpaque *cpus;
+    AppleAICCPU *cpus;
     uint32_t *eir_state;
-    uint32_t global_cfg;
 #ifdef AIC_DEBUG_NEW_IRQ
     uint32_t *eir_mask_once;
 #endif

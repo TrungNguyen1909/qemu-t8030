@@ -120,7 +120,7 @@ static void apple_aic_write(void *opaque,
                   uint64_t data,
                   unsigned size)
 {
-    AppleAICOpaque *o = (AppleAICOpaque *)opaque;
+    AppleAICCPU *o = (AppleAICCPU *)opaque;
     AppleAICState *s = APPLE_AIC(o->aic);
     uint32_t val = (uint32_t)data;
 
@@ -300,7 +300,7 @@ static uint64_t apple_aic_read(void *opaque,
                      hwaddr addr,
                      unsigned size)
 {
-    AppleAICOpaque *o = (AppleAICOpaque *)opaque;
+    AppleAICCPU *o = (AppleAICCPU *)opaque;
     AppleAICState *s = APPLE_AIC(o->aic);
 
     WITH_QEMU_LOCK_GUARD(&s->mutex) {
@@ -433,47 +433,47 @@ static const MemoryRegionOps apple_aic_ops = {
     .valid.unaligned = false,
 };
 
-static void apple_aic_init(Object *obj)
+static void apple_aic_realize(DeviceState *dev, struct Error **errp)
 {
-    AppleAICState *s = APPLE_AIC(obj);
-    SysBusDevice *sbd = SYS_BUS_DEVICE(obj);
+    AppleAICState *s = APPLE_AIC(dev);
+    SysBusDevice *sbd = SYS_BUS_DEVICE(dev);
     int i;
 
     qemu_mutex_init(&s->mutex);
-    s->cpus = g_new0(AppleAICOpaque, s->numCPU);
+    s->cpus = g_new0(AppleAICCPU, s->numCPU);
 
     for (i = 0; i < s->numCPU; i++) {
-        AppleAICOpaque *opaque = &s->cpus[i];
+        AppleAICCPU *cpu = &s->cpus[i];
 
-        opaque->aic = s;
-        opaque->cpu_id = i;
-        memory_region_init_io(&opaque->iomem, obj, &apple_aic_ops, opaque,
-                                TYPE_APPLE_AIC, s->base_size);
-        sysbus_init_mmio(sbd, &opaque->iomem);
-        sysbus_init_irq(sbd, &opaque->irq);
+        cpu->aic = s;
+        cpu->cpu_id = i;
+        memory_region_init_io(&cpu->iomem, OBJECT(dev), &apple_aic_ops, cpu,
+                              TYPE_APPLE_AIC, s->base_size);
+        sysbus_init_mmio(sbd, &cpu->iomem);
+        sysbus_init_irq(sbd, &cpu->irq);
     }
 
-    qdev_init_gpio_in(DEVICE(obj), apple_aic_set_irq, s->numIRQ);
+    qdev_init_gpio_in(dev, apple_aic_set_irq, s->numIRQ);
 
     assert(s->numCPU > 0);
 
-    s->eir_mask = g_malloc0(sizeof(uint32_t) * s->numEIR);
-    s->eir_dest = g_malloc0(sizeof(uint32_t) * s->numIRQ);
-    s->eir_state = g_malloc0(sizeof(bool) * s->numIRQ);
+    s->eir_mask = g_new0(uint32_t, s->numEIR);
+    s->eir_dest = g_new0(uint32_t, s->numIRQ);
+    s->eir_state = g_new0(uint32_t, s->numEIR);
 
 #ifdef AIC_DEBUG_NEW_IRQ
-    s->eir_mask_once = g_malloc0(sizeof(uint32_t) * s->numEIR);
+    s->eir_mask_once = g_new0(uint32_t, s->numEIR);
 #endif
-}
-
-static void apple_aic_realize(DeviceState *dev, Error **errp)
-{
-    AppleAICState *s = APPLE_AIC(dev);
 
     s->timer = timer_new_ns(QEMU_CLOCK_VIRTUAL, apple_aic_tick, dev);
     timer_mod_ns(s->timer, kAICWT);
-    apple_aic_reset(dev);
     msi_nonbroken = true;
+}
+
+static void apple_aic_unrealize(DeviceState *dev)
+{
+    AppleAICState *s = APPLE_AIC(dev);
+    timer_free(s->timer);
 }
 
 SysBusDevice *apple_aic_create(uint32_t numCPU, DTBNode *node)
@@ -502,20 +502,62 @@ SysBusDevice *apple_aic_create(uint32_t numCPU, DTBNode *node)
     prop = find_dtb_prop(node, "#shared-timestamps");
     assert(prop);
     assert(prop->length == 4);
-
     *(uint32_t *)prop->value = 0;
-    apple_aic_init(OBJECT(dev));
 
     return SYS_BUS_DEVICE(dev);
 }
+
+static const VMStateDescription vmstate_apple_aic_cpu = {
+    .name = "apple_aic_cpu",
+    .version_id = 1,
+    .minimum_version_id = 1,
+    .fields = (VMStateField[]) {
+        VMSTATE_UINT32(cpu_id, AppleAICCPU),
+        VMSTATE_UINT32(pendingIPI, AppleAICCPU),
+        VMSTATE_UINT32(deferredIPI, AppleAICCPU),
+        VMSTATE_UINT32(ipi_mask, AppleAICCPU),
+        VMSTATE_END_OF_LIST()
+    }
+};
+
+static const VMStateDescription vmstate_apple_aic = {
+    .name = "apple_aic",
+    .version_id = 1,
+    .minimum_version_id = 1,
+    .fields = (VMStateField[]) {
+        VMSTATE_UINT32(phandle, AppleAICState),
+        VMSTATE_UINT32(base_size, AppleAICState),
+        VMSTATE_UINT32(numEIR, AppleAICState),
+        VMSTATE_UINT32(numIRQ, AppleAICState),
+        VMSTATE_UINT32(numCPU, AppleAICState),
+        VMSTATE_UINT32(global_cfg, AppleAICState),
+        VMSTATE_VARRAY_UINT32(eir_mask, AppleAICState, numEIR, 1,
+                              vmstate_info_uint32, uint32_t),
+        VMSTATE_VARRAY_UINT32(eir_dest, AppleAICState, numIRQ, 1,
+                              vmstate_info_uint32, uint32_t),
+        VMSTATE_VARRAY_UINT32(eir_state, AppleAICState, numEIR, 1,
+                              vmstate_info_uint32, uint32_t),
+#ifdef AIC_DEBUG_NEW_IRQ
+        VMSTATE_VARRAY_UINT32(eir_mask_once, AppleAICState, numEIR, 1,
+                              vmstate_info_uint32, uint32_t),
+#endif
+        VMSTATE_STRUCT_VARRAY_POINTER_UINT32(cpus, AppleAICState, numCPU,
+                                             vmstate_apple_aic_cpu,
+                                             AppleAICCPU),
+
+        VMSTATE_END_OF_LIST()
+    }
+};
 
 static void apple_aic_class_init(ObjectClass *klass, void *data)
 {
     DeviceClass *dc = DEVICE_CLASS(klass);
 
     dc->realize = apple_aic_realize;
+    dc->unrealize = apple_aic_unrealize;
     dc->reset = apple_aic_reset;
     dc->desc = "Apple Interrupt Controller";
+    dc->vmsd = &vmstate_apple_aic;
 }
 
 static const TypeInfo apple_aic_info = {
