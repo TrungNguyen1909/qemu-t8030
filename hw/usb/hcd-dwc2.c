@@ -2400,6 +2400,10 @@ const VMStateDescription vmstate_dwc2_state = {
                              DWC2_HREG1_SIZE / sizeof(uint32_t)),
         VMSTATE_UINT32_ARRAY(dreg, DWC2State,
                              DWC2_DREG_SIZE / sizeof(uint32_t)),
+        VMSTATE_UINT32_ARRAY(diepreg, DWC2State,
+                             DWC2_DIEPREG_SIZE / sizeof(uint32_t)),
+        VMSTATE_UINT32_ARRAY(doepreg, DWC2State,
+                             DWC2_DOEPREG_SIZE / sizeof(uint32_t)),
         VMSTATE_UINT32_ARRAY(pcgreg, DWC2State,
                              DWC2_PCGREG_SIZE / sizeof(uint32_t)),
 
