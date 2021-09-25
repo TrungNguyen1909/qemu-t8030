@@ -876,6 +876,7 @@ struct dwc2_dma_desc {
 #define DEV_DMA_BUFF_STS_DMABUSY	1
 #define DEV_DMA_BUFF_STS_DMADONE	2
 #define DEV_DMA_BUFF_STS_HBUSY		3
+#define DEV_DMA_BUFF_STS_GET(_x)    (((_x) >> 30) & 0x3)
 #define DEV_DMA_STS_MASK		(0x3 << 28)
 #define DEV_DMA_STS_SHIFT		28
 #define DEV_DMA_STS_SUCC		0
