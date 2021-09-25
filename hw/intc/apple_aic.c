@@ -115,10 +115,8 @@ static void apple_aic_reset(DeviceState *dev)
     }
 }
 
-static void apple_aic_write(void *opaque,
-                  hwaddr addr,
-                  uint64_t data,
-                  unsigned size)
+static void apple_aic_write(void *opaque, hwaddr addr, uint64_t data,
+                            unsigned size)
 {
     AppleAICCPU *o = (AppleAICCPU *)opaque;
     AppleAICState *s = APPLE_AIC(o->aic);
@@ -296,9 +294,7 @@ static void apple_aic_write(void *opaque,
     }
 }
 
-static uint64_t apple_aic_read(void *opaque,
-                     hwaddr addr,
-                     unsigned size)
+static uint64_t apple_aic_read(void *opaque, hwaddr addr, unsigned size)
 {
     AppleAICCPU *o = (AppleAICCPU *)opaque;
     AppleAICState *s = APPLE_AIC(o->aic);
@@ -525,8 +521,6 @@ static const VMStateDescription vmstate_apple_aic = {
     .version_id = 1,
     .minimum_version_id = 1,
     .fields = (VMStateField[]) {
-        VMSTATE_UINT32(phandle, AppleAICState),
-        VMSTATE_UINT32(base_size, AppleAICState),
         VMSTATE_UINT32(numEIR, AppleAICState),
         VMSTATE_UINT32(numIRQ, AppleAICState),
         VMSTATE_UINT32(numCPU, AppleAICState),
