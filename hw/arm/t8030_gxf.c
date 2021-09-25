@@ -181,16 +181,30 @@ static void sprr_perm_el0_write(CPUARMState *env, const ARMCPRegInfo *ri, uint64
     tlb_flush_by_mmuidx(env_cpu(env), ARMMMUIdxBit_SE10_0 | ARMMMUIdxBit_E10_0);
 }
 
-static const ARMCPRegInfo t8030gxf_cp_reginfo[] = {
+static uint64_t gxf_cpreg_raw_read(CPUARMState *env, const ARMCPRegInfo *ri)
+{
+    return *(uint64_t *)((char *)(env) + (ri)->bank_fieldoffsets[0]);
+}
+
+static void gxf_cpreg_raw_write(CPUARMState *env, const ARMCPRegInfo *ri,
+                                uint64_t value)
+{
+    *(uint64_t *)((char *)(env) + (ri)->bank_fieldoffsets[0]) = value;
+}
+
+static const ARMCPRegInfo t8030gxf_cp_override_reginfo[] = {
     { .name = "TPIDR_EL1", .state = ARM_CP_STATE_AA64,
       .opc0 = 3, .opc1 = 0, .opc2 = 4, .crn = 13, .crm = 0,
       .access = PL1_RW, .type = ARM_CP_OVERRIDE,
       .readfn = tpidr_el1_read, .writefn = tpidr_el1_write,
+      .raw_readfn = raw_read, .raw_writefn = raw_write,
+      .fieldoffset = offsetof(CPUARMState, cp15.tpidr_el[1]),
       .resetvalue = 0 },
     { .name = "VBAR", .state = ARM_CP_STATE_BOTH,
       .opc0 = 3, .crn = 12, .crm = 0, .opc1 = 0, .opc2 = 0,
       .access = PL1_RW, .type = ARM_CP_OVERRIDE,
       .readfn = vbar_el1_read, .writefn = vbar_el1_write,
+      .raw_readfn = raw_read, .raw_writefn = raw_write,
       .bank_fieldoffsets = { offsetof(CPUARMState, cp15.vbar_s),
                              offsetof(CPUARMState, cp15.vbar_ns) },
       .resetvalue = 0 },
@@ -198,24 +212,36 @@ static const ARMCPRegInfo t8030gxf_cp_reginfo[] = {
       .type = ARM_CP_ALIAS | ARM_CP_OVERRIDE,
       .opc0 = 3, .opc1 = 0, .crn = 4, .crm = 0, .opc2 = 0,
       .access = PL1_RW,
+      .raw_readfn = raw_read, .raw_writefn = raw_write,
+      .fieldoffset = offsetof(CPUARMState, banked_spsr[BANK_SVC]),
       .readfn = spsr_el1_read, .writefn = spsr_el1_write },
     { .name = "ELR_EL1", .state = ARM_CP_STATE_AA64,
       .type = ARM_CP_ALIAS | ARM_CP_OVERRIDE,
       .opc0 = 3, .opc1 = 0, .crn = 4, .crm = 0, .opc2 = 1,
       .access = PL1_RW,
+      .raw_readfn = raw_read, .raw_writefn = raw_write,
+      .fieldoffset = offsetof(CPUARMState, elr_el[1]),
       .readfn = elr_el1_read, .writefn = elr_el1_write },
     { .name = "ESR_EL1", .state = ARM_CP_STATE_AA64,
       .opc0 = 3, .crn = 5, .crm = 2, .opc1 = 0, .opc2 = 0,
       .access = PL1_RW, .type = ARM_CP_OVERRIDE,
       .accessfn = access_tvm_trvm,
+      .raw_readfn = raw_read, .raw_writefn = raw_write,
+      .fieldoffset = offsetof(CPUARMState, cp15.esr_el[1]),
       .readfn = esr_el1_read, .writefn = esr_el1_write,
       .resetvalue = 0, },
     { .name = "FAR_EL1", .state = ARM_CP_STATE_AA64,
       .opc0 = 3, .crn = 6, .crm = 0, .opc1 = 0, .opc2 = 0,
       .type = ARM_CP_OVERRIDE,
       .access = PL1_RW, .accessfn = access_tvm_trvm,
+      .raw_readfn = raw_read, .raw_writefn = raw_write,
+      .fieldoffset = offsetof(CPUARMState, cp15.far_el[1]),
       .readfn = far_el1_read, .writefn = far_el1_write,
       .resetvalue = 0, },
+    REGINFO_SENTINEL
+};
+
+static const ARMCPRegInfo t8030gxf_cp_reginfo[] = {
     { .name = "GXF_CONFIG_EL1",
       .cp = CP_REG_ARM64_SYSREG_CP, .state = ARM_CP_STATE_AA64,
       .opc0 = 3, .opc1 = 6, .crn = 15, .crm = 1, .opc2 = 2,
@@ -241,42 +267,62 @@ static const ARMCPRegInfo t8030gxf_cp_reginfo[] = {
       .opc0 = 3, .opc1 = 6, .crn = 15, .crm = 8, .opc2 = 3,
       .access = PL1_RW, .accessfn = access_gxf, .resetvalue = 0,
       .fieldoffset = offsetof(CPUARMState, gxf.aspsr_gl[1]) },
+    { .name = "SP_GL11",
+      .cp = CP_REG_ARM64_SYSREG_CP, .state = ARM_CP_STATE_AA64,
+      .opc0 = 3, .opc1 = 6, .crn = 15, .crm = 9, .opc2 = 0,
+      .access = PL2_RW, .accessfn = access_gxf,
+      .raw_readfn = gxf_cpreg_raw_read, .raw_writefn = gxf_cpreg_raw_write,
+      .bank_fieldoffsets = { offsetof(CPUARMState, gxf.sp_gl[1]),
+                             offsetof(CPUARMState, sp_el[1]) }
+    },
     { .name = "TPIDR_GL11",
       .cp = CP_REG_ARM64_SYSREG_CP, .state = ARM_CP_STATE_AA64,
       .opc0 = 3, .opc1 = 6, .crn = 15, .crm = 9, .opc2 = 1,
       .access = PL1_RW, .accessfn = access_gxf,
-      .type = ARM_CP_ALIAS,
-      .fieldoffset = offsetof(CPUARMState, cp15.tpidr_el[1]) },
+      .raw_readfn = gxf_cpreg_raw_read, .raw_writefn = gxf_cpreg_raw_write,
+      .bank_fieldoffsets = { offsetof(CPUARMState, gxf.tpidr_gl[1]),
+                             offsetof(CPUARMState, cp15.tpidr_el[1]) }
+    },
     { .name = "VBAR_GL11",
       .cp = CP_REG_ARM64_SYSREG_CP, .state = ARM_CP_STATE_AA64,
       .opc0 = 3, .opc1 = 6, .crn = 15, .crm = 9, .opc2 = 2,
       .access = PL1_RW, .accessfn = access_gxf,
-      .type = ARM_CP_ALIAS,
-      .fieldoffset = offsetof(CPUARMState, cp15.vbar_el[1]) },
+      .raw_readfn = gxf_cpreg_raw_read, .raw_writefn = gxf_cpreg_raw_write,
+      .bank_fieldoffsets = { offsetof(CPUARMState, gxf.vbar_gl[1]),
+                             offsetof(CPUARMState, cp15.vbar_el[1]) },
+    },
     { .name = "SPSR_GL11",
       .cp = CP_REG_ARM64_SYSREG_CP, .state = ARM_CP_STATE_AA64,
       .opc0 = 3, .opc1 = 6, .crn = 15, .crm = 9, .opc2 = 3,
       .access = PL1_RW, .accessfn = access_gxf,
-      .type = ARM_CP_ALIAS,
-      .fieldoffset = offsetof(CPUARMState, banked_spsr[BANK_SVC]) },
+      .raw_readfn = gxf_cpreg_raw_read, .raw_writefn = gxf_cpreg_raw_write,
+      .bank_fieldoffsets = { offsetof(CPUARMState, gxf.spsr_gl[1]),
+                             offsetof(CPUARMState, banked_spsr[BANK_SVC]) },
+    },
     { .name = "ESR_GL11",
       .cp = CP_REG_ARM64_SYSREG_CP, .state = ARM_CP_STATE_AA64,
       .opc0 = 3, .opc1 = 6, .crn = 15, .crm = 9, .opc2 = 5,
       .access = PL1_RW, .accessfn = access_gxf,
-      .type = ARM_CP_ALIAS,
-      .fieldoffset = offsetof(CPUARMState, cp15.esr_el[1]) },
+      .raw_readfn = gxf_cpreg_raw_read, .raw_writefn = gxf_cpreg_raw_write,
+      .bank_fieldoffsets = { offsetof(CPUARMState, gxf.esr_gl[1]),
+                             offsetof(CPUARMState, cp15.esr_el[1]) },
+    },
     { .name = "ELR_GL11",
       .cp = CP_REG_ARM64_SYSREG_CP, .state = ARM_CP_STATE_AA64,
       .opc0 = 3, .opc1 = 6, .crn = 15, .crm = 9, .opc2 = 6,
       .access = PL1_RW, .accessfn = access_gxf,
-      .type = ARM_CP_ALIAS,
-      .fieldoffset = offsetof(CPUARMState, elr_el[1]) },
+      .raw_readfn = gxf_cpreg_raw_read, .raw_writefn = gxf_cpreg_raw_write,
+      .bank_fieldoffsets = { offsetof(CPUARMState, gxf.elr_gl[1]),
+                             offsetof(CPUARMState, elr_el[1]) },
+    },
     { .name = "FAR_GL11",
       .cp = CP_REG_ARM64_SYSREG_CP, .state = ARM_CP_STATE_AA64,
       .opc0 = 3, .opc1 = 6, .crn = 15, .crm = 9, .opc2 = 7,
       .access = PL1_RW, .accessfn = access_gxf,
-      .type = ARM_CP_ALIAS,
-      .fieldoffset = offsetof(CPUARMState, cp15.far_el[1]) },
+      .raw_readfn = gxf_cpreg_raw_read, .raw_writefn = gxf_cpreg_raw_write,
+      .bank_fieldoffsets = { offsetof(CPUARMState, gxf.far_gl[1]),
+                             offsetof(CPUARMState, cp15.far_el[1]) },
+    },
       //TODO: Implement lockdown for these registers to prevent unexpected changes
     { .name = "SPRR_CONFIG_EL1",
       .cp = CP_REG_ARM64_SYSREG_CP, .state = ARM_CP_STATE_AA64,
@@ -321,7 +367,12 @@ static const ARMCPRegInfo t8030gxf_cp_reginfo[] = {
       REGINFO_SENTINEL,
 };
 
-void t8030cpu_init_gxf(ARMCPU *cpu)
+void t8030cpu_init_gxf_override(T8030CPUState *cpu)
 {
-    define_arm_cp_regs(cpu, t8030gxf_cp_reginfo);
+    define_arm_cp_regs(ARM_CPU(cpu), t8030gxf_cp_override_reginfo);
+}
+
+void t8030cpu_init_gxf(T8030CPUState *cpu)
+{
+    define_arm_cp_regs(ARM_CPU(cpu), t8030gxf_cp_reginfo);
 }

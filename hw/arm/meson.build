@@ -2,6 +2,7 @@ arm_ss = ss.source_set()
 arm_ss.add(files('boot.c'), fdt)
 arm_ss.add(when: 'CONFIG_APPLE_SOC', if_true: files(
     't8030.c',
+    't8030_cpu.c',
     't8030_gxf.c',
     'xnu_dtb.c',
     'xnu_mem.c',
