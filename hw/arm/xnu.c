@@ -362,6 +362,7 @@ void macho_load_dtb(DTBNode *root, AddressSpace *as, MemoryRegion *mem,
         info->nvram_size = XNU_MAX_NVRAM_SIZE;
     }
     set_dtb_prop(child, "nvram-total-size", 4, (uint8_t *)&info->nvram_size);
+    set_dtb_prop(child, "nvram-bank-size", 4, (uint8_t *)&info->nvram_size);
     set_dtb_prop(child, "nvram-proxy-data", info->nvram_size, info->nvram_data);
 
     data = 1;
