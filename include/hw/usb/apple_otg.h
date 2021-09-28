@@ -17,7 +17,7 @@ struct AppleOTGState {
     MemoryRegion usbctl;
     uint8_t      usbctl_reg[0x1000];
     MemoryRegion dwc2_mr;
-    MemoryRegion dma_mr;
+    MemoryRegion *dma_mr;
     DWC2State    *dwc2;
     struct USBTCPHostState *usbtcp;
 };

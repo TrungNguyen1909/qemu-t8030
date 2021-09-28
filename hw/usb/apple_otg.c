@@ -9,6 +9,8 @@
 #include "qemu/timer.h"
 #include "hw/arm/xnu_dtb.h"
 #include "hw/usb/hcd-dwc2.h"
+#include "qapi/error.h"
+#include "qemu/error-report.h"
 
 #define rAUSB_USB20PHY_CTL		(0x00)
 #define rAUSB_USB20PHY_OTGSIG	(0x04)
@@ -20,6 +22,26 @@
 static void apple_otg_realize(DeviceState *dev, Error **errp)
 {
     AppleOTGState *s = APPLE_OTG(dev);
+    Object *obj;
+    Error *local_err = NULL;
+
+    obj = object_property_get_link(OBJECT(dev), "dma-mr", &local_err);
+    if (obj) {
+        s->dma_mr = MEMORY_REGION(obj);
+    } else {
+        if (local_err) {
+            error_reportf_err(local_err, "%s: no DMA memory region found: ",
+                            __func__);
+        }
+        warn_report("%s: Redirecting all DMA accesses to 0x800000000",
+                    __func__);
+        s->dma_mr = g_new(MemoryRegion, 1);
+        memory_region_init_alias(s->dma_mr, OBJECT(dev),
+                                 TYPE_APPLE_OTG ".dma-mr", get_system_memory(),
+                                 0x800000000, UINT32_MAX);
+    }
+    assert(object_property_add_const_link(OBJECT(s->dwc2), "dma-mr",
+                                          OBJECT(s->dma_mr)));
     sysbus_realize(SYS_BUS_DEVICE(s->dwc2), errp);
     sysbus_realize(SYS_BUS_DEVICE(s->usbtcp), errp);
     sysbus_pass_irq(SYS_BUS_DEVICE(s), SYS_BUS_DEVICE(s->dwc2));
@@ -102,10 +124,12 @@ DeviceState *apple_otg_create(DTBNode *node)
     sbd = SYS_BUS_DEVICE(dev);
     s = APPLE_OTG(dev);
 
-    memory_region_init_io(&s->phy, OBJECT(dev), &phy_reg_ops, s, TYPE_APPLE_OTG ".phy", sizeof(s->phy_reg));
+    memory_region_init_io(&s->phy, OBJECT(dev), &phy_reg_ops, s,
+                          TYPE_APPLE_OTG ".phy", sizeof(s->phy_reg));
     sysbus_init_mmio(sbd, &s->phy);
     *(uint32_t*)(s->phy_reg + rAUSB_USB20PHY_OTGSIG) |= (1 << 8); //cable connected
-    memory_region_init_io(&s->usbctl, OBJECT(dev), &usbctl_reg_ops, s, TYPE_APPLE_OTG ".usbctl", sizeof(s->usbctl_reg));
+    memory_region_init_io(&s->usbctl, OBJECT(dev), &usbctl_reg_ops, s,
+                          TYPE_APPLE_OTG ".usbctl", sizeof(s->usbctl_reg));
     sysbus_init_mmio(sbd, &s->usbctl);
     child = get_dtb_node(node, "usb-device");
     assert(child);
@@ -117,8 +141,6 @@ DeviceState *apple_otg_create(DTBNode *node)
                         sysbus_mmio_get_region(SYS_BUS_DEVICE(dwc2), 0),
                         0, ((uint64_t *)prop->value)[1]);
     sysbus_init_mmio(sbd, &s->dwc2_mr);
-    memory_region_init_alias(&s->dma_mr, OBJECT(dev), TYPE_APPLE_OTG ".dma-mr", get_system_memory(), 0x800000000, UINT32_MAX);
-    assert(object_property_add_const_link(OBJECT(dwc2), "dma-mr", OBJECT(&s->dma_mr)));
     s->dwc2 = dwc2;
 
     s->usbtcp = USB_TCP_HOST(qdev_new(TYPE_USB_TCP_HOST));
