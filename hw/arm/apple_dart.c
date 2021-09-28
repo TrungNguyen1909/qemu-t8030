@@ -120,7 +120,7 @@ struct AppleDARTInstance {
     dart_instance_t type;
 #pragma pack(push, 1)
     union {
-        uint32_t base_reg[0x4000];
+        uint32_t base_reg[0x4000/sizeof(uint32_t)];
         struct {
             uint32_t params1;
             uint32_t params2;
@@ -258,7 +258,7 @@ static uint64_t base_reg_read(void *opaque,
                               unsigned size)
 {
     AppleDARTInstance *o = (AppleDARTInstance *)opaque;
-    DPRINTF("%s[%d]: (%s) %s @ 0x"TARGET_FMT_plx"\n", s->name, o->id,
+    DPRINTF("%s[%d]: (%s) %s @ 0x"TARGET_FMT_plx"\n", o->s->name, o->id,
             dart_instance_name[o->type], __func__, addr);
 
     if (o->type == DART_DART) {
@@ -284,6 +284,64 @@ static const MemoryRegionOps base_reg_ops = {
         .valid.unaligned = false,
 };
 
+static AppleDARTTLBEntry *apple_dart_ptw(AppleDARTInstance *o, uint32_t sid,
+                                         hwaddr iova, uint32_t *error_status)
+{
+    AppleDARTState *s = o->s;
+
+    uint64_t idx = (iova & (s->l_mask[0])) >> s->l_shift[0];
+    uint64_t pte, pa;
+    int level;
+    AppleDARTTLBEntry *tlb_entry = NULL;
+    uint32_t err_status = 0;
+
+    if ((idx >= DART_MAX_TTBR)
+        || ((o->ttbr[sid][idx] & DART_TTBR_VALID) == 0)) {
+        err_status = (DART_ERROR_FLAG | DART_ERROR_TTBR_INVLD);
+        goto end;
+    }
+
+    pte = o->ttbr[sid][idx];
+    pa = (pte & DART_TTBR_MASK) << DART_TTBR_SHIFT;
+
+    for (level = 1; level < 3; level++) {
+        idx = (iova & (s->l_mask[level])) >> s->l_shift[level];
+        pa += 8 * idx;
+
+        if (dma_memory_read(&address_space_memory, pa, &pte, sizeof(pte))
+            != MEMTX_OK) {
+            err_status = (DART_ERROR_FLAG | DART_ERROR_L2E_INVLD);
+            pa = 0;
+            pte = 0;
+            break;
+        }
+        DPRINTF("%s: level: %d, pa: 0x"TARGET_FMT_plx
+                " pte: 0x%llx(0x%llx)\n", __func__, level, pa, pte, idx);
+
+        if ((pte & DART_TTE_VALID) == 0) {
+            err_status = (DART_ERROR_FLAG | DART_ERROR_PTE_INVLD);
+            pa = 0;
+            pte = 0;
+            break;
+        }
+        pa = pte & s->page_mask & DART_TTE_ADDR_MASK;
+    }
+
+    if ((pte & DART_TTE_VALID)) {
+        tlb_entry = g_new0(AppleDARTTLBEntry, 1);
+        tlb_entry->block_addr = (pte & s->page_mask & DART_TTE_ADDR_MASK);
+        tlb_entry->perm = IOMMU_ACCESS_FLAG(!(pte & DART_TTE_NO_READ),
+                                            !(pte & DART_TTE_NO_WRITE));
+    } else {
+        err_status = (DART_ERROR_FLAG | DART_ERROR_PTE_INVLD);
+    }
+end:
+    if (error_status) {
+        *error_status = err_status;
+    }
+    return tlb_entry;
+}
+
 static IOMMUTLBEntry apple_dart_translate(IOMMUMemoryRegion *mr, hwaddr addr,
                                           IOMMUAccessFlags flag, int iommu_idx)
 {
@@ -304,12 +362,7 @@ static IOMMUTLBEntry apple_dart_translate(IOMMUMemoryRegion *mr, hwaddr addr,
 
     assert(sid < DART_MAX_STREAMS);
     qemu_mutex_lock(&o->mutex);
-    sid = o->remap[sid];
-
-    if (sid >= DART_MAX_STREAMS) {
-        /* TODO: What error should be thrown here? */
-        goto end;
-    }
+    sid = o->remap[sid] & 0xf;
 
     if (s->bypass & (1 << sid)) {
         goto end;
@@ -317,10 +370,12 @@ static IOMMUTLBEntry apple_dart_translate(IOMMUMemoryRegion *mr, hwaddr addr,
 
     if ((o->tcr[sid] & DART_TCR_TXEN) == 0) {
         /* Disabled translation goto bypass address, not error */
+        entry.perm = IOMMU_RW;
         goto end;
     }
 
     if (o->tcr[sid] & DART_TCR_BYPASS_DART) {
+        entry.perm = IOMMU_RW;
         goto end;
     }
 
@@ -330,75 +385,23 @@ static IOMMUTLBEntry apple_dart_translate(IOMMUMemoryRegion *mr, hwaddr addr,
     tlb_entry = g_hash_table_lookup(o->tlb, GUINT_TO_POINTER(key));
 
     if (tlb_entry == NULL) {
-        uint64_t idx = (iova & (s->l_mask[0])) >> s->l_shift[0];
-        uint64_t pte, pa;
-        int level;
-
-        if ((idx >= DART_MAX_TTBR)
-            || ((o->ttbr[sid][idx] & DART_TTBR_VALID) == 0)) {
-            o->error_address = addr;
-            o->error_status |= (DART_ERROR_FLAG | DART_ERROR_TTBR_INVLD);
-            o->error_status = deposit32(o->error_status,
-                                        DART_ERROR_STREAM_SHIFT,
-                                        DART_ERROR_STREAM_LENGTH, iommu->sid);
-            goto end;
-        }
-
-        pte = o->ttbr[sid][idx];
-        pa = (pte & DART_TTBR_MASK) << DART_TTBR_SHIFT;
-
-        for (level = 1; level < 3; level++) {
-            idx = (iova & (s->l_mask[level])) >> s->l_shift[level];
-            pa += 8 * idx;
-
-            if (dma_memory_read(&address_space_memory, pa, &pte, sizeof(pte))
-                != MEMTX_OK) {
-                o->error_address = addr;
-                o->error_status |= (DART_ERROR_FLAG | DART_ERROR_L2E_INVLD);
-                o->error_status = deposit32(o->error_status,
-                                            DART_ERROR_STREAM_SHIFT,
-                                            DART_ERROR_STREAM_LENGTH,
-                                            iommu->sid);
-                pa = 0;
-                pte = 0;
-                break;
-            }
-            DPRINTF("%s: level: %d, pa: 0x"TARGET_FMT_plx
-                    " pte: 0x%llx(0x%llx)\n", __func__, level, pa, pte, idx);
-
-            if ((pte & DART_TTE_VALID) == 0) {
-                o->error_address = addr;
-                o->error_status |= (DART_ERROR_FLAG | DART_ERROR_PTE_INVLD);
-                o->error_status = deposit32(o->error_status,
-                                            DART_ERROR_STREAM_SHIFT,
-                                            DART_ERROR_STREAM_LENGTH,
-                                            iommu->sid);
-                pa = 0;
-                pte = 0;
-                break;
-            }
-            pa = pte & s->page_mask & DART_TTE_ADDR_MASK;
-        }
-
-        if ((pte & DART_TTE_VALID)) {
-            tlb_entry = g_new0(AppleDARTTLBEntry, 1);
-            tlb_entry->block_addr = (pte & s->page_mask & DART_TTE_ADDR_MASK);
-            tlb_entry->perm = IOMMU_ACCESS_FLAG(!(pte & DART_TTE_NO_READ),
-                                                !(pte & DART_TTE_NO_WRITE));
-
+        uint32_t status = 0;
+        tlb_entry = apple_dart_ptw(o, sid, iova, &status);
+        if (tlb_entry) {
             g_hash_table_insert(o->tlb, GUINT_TO_POINTER(key), tlb_entry);
             DPRINTF("%s[%d]: (%s) SID %u: 0x"
                     TARGET_FMT_plx " -> 0x" TARGET_FMT_plx " (%c%c)\n",
                     s->name, o->id, dart_instance_name[o->type],
-                    iommu->sid, addr, entry.translated_addr,
-                    (entry.perm & IOMMU_RO) ? 'r' : '-',
-                    (entry.perm & IOMMU_WO) ? 'w' : '-');
+                    iommu->sid, addr,
+                    tlb_entry->block_addr | (addr & s->page_bits),
+                    (tlb_entry->perm & IOMMU_RO) ? 'r' : '-',
+                    (tlb_entry->perm & IOMMU_WO) ? 'w' : '-');
         } else {
-            o->error_address = addr;
-            o->error_status |= (DART_ERROR_FLAG | DART_ERROR_PTE_INVLD);
+            o->error_status |= status;
             o->error_status = deposit32(o->error_status,
                                         DART_ERROR_STREAM_SHIFT,
                                         DART_ERROR_STREAM_LENGTH, iommu->sid);
+            o->error_address = addr;
         }
     }
     if (tlb_entry) {
@@ -489,6 +492,7 @@ SysBusDevice *apple_dart_create(DTBNode *node)
 
     prop = find_dtb_prop(node, "name");
     strlcpy(s->name, (char *)prop->value, sizeof(s->name));
+    dev->id = g_strdup((char *)prop->value);
 
     prop = find_dtb_prop(node, "page-size");
     if (!prop || prop->length < 4) {
@@ -591,12 +595,37 @@ SysBusDevice *apple_dart_create(DTBNode *node)
     return sbd;
 }
 
+static const VMStateDescription vmstate_apple_dart_instance = {
+    .name = "apple_dart_instance",
+    .version_id = 1,
+    .minimum_version_id = 1,
+    .fields = (VMStateField[]) {
+        VMSTATE_UINT32_ARRAY(base_reg, AppleDARTInstance,
+                             0x4000 / sizeof(uint32_t)),
+        VMSTATE_END_OF_LIST()
+    }
+};
+
+static const VMStateDescription vmstate_apple_dart = {
+    .name = "apple_dart",
+    .version_id = 1,
+    .minimum_version_id = 1,
+    .priority = MIG_PRI_IOMMU,
+    .fields = (VMStateField[]) {
+        VMSTATE_STRUCT_ARRAY(instances, AppleDARTState, DART_MAX_INSTANCE, 1,
+                              vmstate_apple_dart_instance, AppleDARTInstance),
+
+        VMSTATE_END_OF_LIST()
+    }
+};
+
 static void apple_dart_class_init(ObjectClass *klass, void *data)
 {
     DeviceClass *dc = DEVICE_CLASS(klass);
 
     dc->reset = apple_dart_reset;
     dc->desc = "Apple DART IOMMU";
+    dc->vmsd = &vmstate_apple_dart;
 }
 
 static void apple_dart_iommu_memory_region_class_init(ObjectClass *klass,
