@@ -52,6 +52,7 @@
 #include "hw/nvram/apple_nvram.h"
 #include "hw/spmi/apple_spmi.h"
 #include "hw/spmi/apple_spmi_pmu.h"
+#include "hw/arm/apple_dart.h"
 
 #include "hw/arm/exynos4210.h"
 #include "hw/arm/xnu_pf.h"
@@ -506,6 +507,45 @@ static void t8030_pmgr_setup(MachineState* machine)
     set_dtb_prop(child, "voltage-states9-sram", 56, (uint8_t*)"\x00\x00\x00\x00\xf1\x02\x00\x00\x00\x2a\x75\x15\xf1\x02\x00\x00\xc0\x4f\xef\x1e\xf1\x02\x00\x00\x00\xcd\x56\x27\xf1\x02\x00\x00\x00\x11\xec\x2f\xf1\x02\x00\x00\x00\x55\x81\x38\x16\x03\x00\x00\x80\xfe\x2a\x47\x96\x03\x00\x00");
 }
 
+static void t8030_create_dart(MachineState *machine, const char *name)
+{
+    AppleDARTState *dart = NULL;
+    DTBProp *prop;
+    uint64_t *reg;
+    uint32_t* ints;
+    int i;
+    T8030MachineState *tms = T8030_MACHINE(machine);
+    DTBNode *child = find_dtb_node(tms->device_tree, "arm-io");
+
+    assert(child);
+    child = find_dtb_node(child, name);
+    if (!child) return;
+
+    dart = apple_dart_create(child);
+    assert(dart);
+    object_property_add_child(OBJECT(machine), name, OBJECT(dart));
+
+    prop = find_dtb_prop(child, "reg");
+    assert(prop);
+
+    reg = (uint64_t *)prop->value;
+
+    for (int i = 0; i < prop->length / 16; i++) {
+        sysbus_mmio_map(SYS_BUS_DEVICE(dart), i, tms->soc_base_pa + reg[i*2]);
+    }
+
+    prop = find_dtb_prop(child, "interrupts");
+    assert(prop);
+    ints = (uint32_t*)prop->value;
+
+    for(i = 0; i < prop->length / sizeof(uint32_t); i++) {
+        sysbus_connect_irq(SYS_BUS_DEVICE(dart), i,
+                           qdev_get_gpio_in(DEVICE(tms->aic), ints[i]));
+    }
+
+    sysbus_realize_and_unref(SYS_BUS_DEVICE(dart), &error_fatal);
+}
+
 static void t8030_sart_setup(MachineState* machine)
 {
     uint64_t *reg;
@@ -755,13 +795,18 @@ static void t8030_create_usb(MachineState *machine)
     set_dtb_prop(device, "disable-charger-detect", sizeof(value), (uint8_t *)&value);
     set_dtb_prop(device, "phy-interface", 4, (uint8_t*)&(uint32_t[]){ 0x8 });
     set_dtb_prop(device, "publish-criteria", 4, (uint8_t*)&(uint32_t[]){ 0x3 });
-    set_dtb_prop(device, "configuration-string", 18, (uint8_t*)"stdMuxPTPEthValIDA");
+    prop = find_dtb_prop(drd, "configuration-string");
+    assert(prop);
+    set_dtb_prop(device, "configuration-string", prop->length, prop->value);
+    prop = find_dtb_prop(drd, "iommu-parent");
+    assert(prop);
+    set_dtb_prop(device, "iommu-parent", prop->length, prop->value);
     set_dtb_prop(device, "AAPL,phandle", 4, (uint8_t*)&(uint32_t[]){ 0x8e });
     set_dtb_prop(device, "host-mac-address", 6, (uint8_t*)"\0\0\0\0\0\0");
     set_dtb_prop(device, "device-mac-address", 6, (uint8_t*)"\0\0\0\0\0\0");
     set_dtb_prop(device, "num-of-eps", 4, (uint8_t*)&(uint32_t[]){ 0x0e });
     set_dtb_prop(device, "interrupt-parent", 4, (uint8_t*)&(uint32_t[]){ APPLE_AIC(tms->aic)->phandle });
-    set_dtb_prop(device, "compatible", 20, (uint8_t*)"usb-device,s5l8900x");
+    set_dtb_prop(device, "compatible", 37, (uint8_t*)"usb-device,t7000\0usb-device,s5l8900x");
 
     set_dtb_prop(device, "interrupts", 4, (uint8_t*)&(uint32_t[]){ ((uint32_t*)find_dtb_prop(drd, "interrupts")->value)[0] });
     set_dtb_prop(device, "ahb-burst", 4, (uint8_t*)&(uint32_t[]){ 0xe });
@@ -773,17 +818,36 @@ static void t8030_create_usb(MachineState *machine)
         0x100000,
         0x10000,
     });
+
+
+    prop = find_dtb_prop(dart_usb_mapper, "reg");
+    assert(prop);
+    assert(prop->length == 4);
+    dart = APPLE_DART(object_property_get_link(OBJECT(machine),
+                      "dart-usb", &error_fatal));
+    iommu = apple_dart_iommu_mr(dart, *(uint32_t *)prop->value);
+    assert(iommu);
+
     otg = apple_otg_create(complex);
-    sysbus_mmio_map(SYS_BUS_DEVICE(otg), 0, tms->soc_base_pa + ((uint64_t*)find_dtb_prop(phy, "reg")->value)[0]);
-    sysbus_mmio_map(SYS_BUS_DEVICE(otg), 1, tms->soc_base_pa + ((uint64_t*)find_dtb_prop(phy, "reg")->value)[2]);
+    assert(object_property_add_const_link(OBJECT(otg), "dma-mr",
+                                          OBJECT(iommu)));
+    prop = find_dtb_prop(phy, "reg");
+    assert(prop);
+    sysbus_mmio_map(SYS_BUS_DEVICE(otg), 0,
+                    tms->soc_base_pa + ((uint64_t*)prop->value)[0]);
+    sysbus_mmio_map(SYS_BUS_DEVICE(otg), 1,
+                    tms->soc_base_pa + ((uint64_t*)prop->value)[2]);
     sysbus_mmio_map(SYS_BUS_DEVICE(otg), 2,
                     tms->soc_base_pa
                     + ((uint64_t*)find_dtb_prop(complex, "ranges")->value)[1]
                     + ((uint64_t*)find_dtb_prop(device, "reg")->value)[0]);
     sysbus_realize_and_unref(SYS_BUS_DEVICE(otg), &error_fatal);
 
-    sysbus_connect_irq(SYS_BUS_DEVICE(otg), 0, qdev_get_gpio_in(DEVICE(tms->aic),
-                       ((uint32_t *)find_dtb_prop(device, "interrupts")->value)[0]));
+    prop = find_dtb_prop(device, "interrupts");
+    assert(prop);
+    sysbus_connect_irq(SYS_BUS_DEVICE(otg), 0,
+                       qdev_get_gpio_in(DEVICE(tms->aic),
+                       ((uint32_t *)prop->value)[0]));
 }
 
 static void t8030_create_wdt(MachineState* machine)
@@ -849,12 +913,17 @@ static void t8030_create_aes(MachineState* machine)
     uint64_t *reg;
     T8030MachineState *tms = T8030_MACHINE(machine);
     SysBusDevice *aes;
+    AppleDARTState *dart;
     DTBNode *child = find_dtb_node(tms->device_tree, "arm-io");
-    MemoryRegion *dma_mr = NULL;
+    IOMMUMemoryRegion *dma_mr = NULL;
+    DTBNode *dart_sio = find_dtb_node(child, "dart-sio");
+    DTBNode *dart_aes_mapper = find_dtb_node(dart_sio, "mapper-aes");
 
     assert(child != NULL);
     child = find_dtb_node(child, "aes");
     assert(child != NULL);
+    assert(dart_sio);
+    assert(dart_aes_mapper);
 
     aes = apple_aes_create(child);
     assert(aes);
@@ -878,15 +947,15 @@ static void t8030_create_aes(MachineState* machine)
 
     sysbus_connect_irq(aes, 0, qdev_get_gpio_in(DEVICE(tms->aic), *ints));
 
-    prop = find_dtb_prop(child, "iommu-parent");
-    if (prop) {
-        remove_dtb_prop(child, prop);
-        /* TODO: DART */
-    }
+    dart = APPLE_DART(object_property_get_link(OBJECT(machine),
+                      "dart-sio", &error_fatal));
+    assert(dart);
 
-    dma_mr = g_new0(MemoryRegion, 1);
-    memory_region_init_alias(dma_mr, OBJECT(aes), TYPE_APPLE_AES ".dma-mr", tms->sysmem, 0x800000000, UINT32_MAX);
-    assert(object_property_add_const_link(OBJECT(aes), "dma-mr", OBJECT(tms->sysmem)));
+    prop = find_dtb_prop(dart_aes_mapper, "reg");
+
+    dma_mr = apple_dart_iommu_mr(dart, *(uint32_t *)prop->value);
+    assert(dma_mr);
+    assert(object_property_add_const_link(OBJECT(aes), "dma-mr", OBJECT(dma_mr)));
 
     sysbus_realize_and_unref(aes, &error_fatal);
 }
@@ -1054,6 +1123,9 @@ static void t8030_machine_init(MachineState *machine)
     t8030_create_i2c(machine, "smc-i2c0");
     t8030_create_i2c(machine, "smc-i2c1");
 
+    t8030_create_dart(machine, "dart-usb");
+    t8030_create_dart(machine, "dart-sio");
+    t8030_create_dart(machine, "dart-disp0");
     t8030_create_usb(machine);
 
     t8030_create_wdt(machine);

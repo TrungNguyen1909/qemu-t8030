@@ -53,9 +53,11 @@ static const char *KEEP_COMP[] = {
     "otgphyctrl,s8000\0otgphyctrl,s5l8960x\0$",
     "usb-complex,s8000\0usb-complex,s5l8960x\0$",
     "usb-device,s5l8900x\0$",
+    "usb-device,t7000\0usb-device,s5l8900x\0$",
     "wdt,t8030\0wdt,s5l8960x\0$",
     "spmi,t8015\0$", "spmi,gen0\0$",
     "pmu,spmi\0pmu,avus\0$",
+    "dart,t8020\0$", "iommu-mapper\0$",
 };
 
 static const char *REM_NAMES[] = {
@@ -64,7 +66,11 @@ static const char *REM_NAMES[] = {
     "sep\0$", "pmp\0$",
     "aop-gpio\0$",
     "atc-phy\0$", "usb-drd\0$",
-    "dotara\0$", "baseband-spmi\0$", "stockholm-spmi\0",
+    "dotara\0$", "baseband-spmi\0$", "stockholm-spmi\0$",
+    "dart-aop\0$", "dart-pmp\0$", "dart-sep\0$", "dart-rsm\0$",
+    "dart-scaler\0$", "dart-jpeg0\0$", "dart-jpeg1\0$",
+    "dart-isp\0$", "dart-ave\0$", "dart-avd\0$", "dart-ane\0$",
+    "dart-apcie2\0$", "dart-apcie3\0$",
 };
 
 static const char *REM_DEV_TYPES[] = { "backlight\0$", "pmp\0$", "wlan\0$", "bluetooth\0$", "aop\0$"};
