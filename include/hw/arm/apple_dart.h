@@ -15,7 +15,7 @@ OBJECT_DECLARE_SIMPLE_TYPE(AppleDARTState, APPLE_DART)
 #define TYPE_APPLE_DART_IOMMU_MEMORY_REGION "apple.dart.iommu"
 OBJECT_DECLARE_SIMPLE_TYPE(AppleDARTIOMMUMemoryRegion, APPLE_DART_IOMMU_MEMORY_REGION)
 
-IOMMUMemoryRegion *apple_dart_iommu_mr(SysBusDevice *sbd, uint32_t sid);
-SysBusDevice *apple_dart_create(DTBNode *node);
+IOMMUMemoryRegion *apple_dart_iommu_mr(AppleDARTState *dart, uint32_t sid);
+AppleDARTState *apple_dart_create(DTBNode *node);
 
 #endif /* HW_ARM_APPLE_DART_H */

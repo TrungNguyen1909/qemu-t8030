@@ -460,9 +460,8 @@ static void apple_dart_reset(DeviceState *dev)
     }
 }
 
-IOMMUMemoryRegion *apple_dart_iommu_mr(SysBusDevice *sbd, uint32_t sid)
+IOMMUMemoryRegion *apple_dart_iommu_mr(AppleDARTState *s, uint32_t sid)
 {
-    AppleDARTState *s = APPLE_DART(sbd);
     int i;
 
     if (sid >= DART_MAX_STREAMS) {
@@ -476,7 +475,7 @@ IOMMUMemoryRegion *apple_dart_iommu_mr(SysBusDevice *sbd, uint32_t sid)
     return NULL;
 }
 
-SysBusDevice *apple_dart_create(DTBNode *node)
+AppleDARTState *apple_dart_create(DTBNode *node)
 {
     DeviceState  *dev;
     AppleDARTState *s;
@@ -592,7 +591,7 @@ SysBusDevice *apple_dart_create(DTBNode *node)
 
     sysbus_init_irq(sbd, &s->irq);
 
-    return sbd;
+    return s;
 }
 
 static const VMStateDescription vmstate_apple_dart_instance = {
