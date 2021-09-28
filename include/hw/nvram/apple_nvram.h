@@ -71,6 +71,7 @@ struct AppleNvramClass {
 
 NvramPartition *nvram_find_part(NvramBank *bank, const char *name);
 NvramBank *nvram_parse(void *buf, size_t len);
+void apple_nvram_load(AppleNvramState *s);
 void apple_nvram_save(AppleNvramState *s);
 ssize_t apple_nvram_serialize(AppleNvramState *s, void *buffer, size_t size);
 

@@ -202,6 +202,7 @@ static void t8030_memory_setup(MachineState *machine)
         error_setg(&error_abort, "%s: Failed to find nvram device", __func__);
         return;
     };
+    apple_nvram_load(nvram);
 
     fprintf(stderr, "boot_mode: %u\n", tms->boot_mode);
     switch (tms->boot_mode) {

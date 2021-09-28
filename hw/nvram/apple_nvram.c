@@ -410,15 +410,11 @@ void apple_nvram_save(AppleNvramState *s)
     }
 }
 
-static void apple_nvram_reset(DeviceState *dev)
+void apple_nvram_load(AppleNvramState *s)
 {
-    AppleNvramState *s = APPLE_NVRAM(dev);
-    AppleNvramClass *anc = APPLE_NVRAM_GET_CLASS(dev);
-    NvmeNamespace *ns = NVME_NS(dev);
+    NvmeNamespace *ns = NVME_NS(s);
     g_autofree void *buffer = NULL;
     size_t len = blk_getlength(ns->blkconf.blk);
-
-    anc->parent_reset(dev);
 
     if (len > 0x2000) {
         len = 0x2000;
@@ -455,6 +451,7 @@ static void apple_nvram_reset(DeviceState *dev)
 
 static void apple_nvram_realize(DeviceState *dev, Error **errp)
 {
+    AppleNvramState *s = APPLE_NVRAM(dev);
     AppleNvramClass *anc = APPLE_NVRAM_GET_CLASS(dev);
     Error *local_err = NULL;
 
@@ -463,7 +460,7 @@ static void apple_nvram_realize(DeviceState *dev, Error **errp)
         error_propagate(errp, local_err);
         return;
     }
-    apple_nvram_reset(dev);
+    apple_nvram_load(s);
 }
 
 static void apple_nvram_unrealize(DeviceState *dev)
@@ -495,7 +492,6 @@ static void apple_nvram_class_init(ObjectClass *klass, void *data)
     set_bit(DEVICE_CATEGORY_STORAGE, dc->categories);
 
     device_class_set_parent_realize(dc, apple_nvram_realize, &anc->parent_realize);
-    device_class_set_parent_reset(dc, apple_nvram_reset, &anc->parent_reset);
     device_class_set_parent_unrealize(dc, apple_nvram_unrealize, &anc->parent_unrealize);
     dc->desc = "Apple NVRAM";
 }
