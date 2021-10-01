@@ -74,5 +74,7 @@ typedef struct
     char *ticket_filename;
     BootMode boot_mode;
     uint32_t build_version;
+    hwaddr panic_base;
+    hwaddr panic_size;
 } T8030MachineState;
 #endif

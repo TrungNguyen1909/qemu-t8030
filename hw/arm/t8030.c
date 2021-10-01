@@ -58,6 +58,7 @@
 #include "hw/arm/xnu_pf.h"
 
 #define T8030_DRAM_BASE 0x800000000
+#define T8030_PANIC_LOG_SIZE (0x100000)
 #define T8030_USB_OTG_BASE 0x39000000
 #define NOP_INST 0xd503201f
 #define MOV_W0_01_INST 0x52800020
@@ -132,6 +133,26 @@ static void t8030_patch_kernel(struct mach_header_64 *hdr)
     kpf();
 }
 
+static bool t8030_check_panic(MachineState *machine)
+{
+    T8030MachineState *tms = T8030_MACHINE(machine);
+    if (!tms->panic_size) {
+        return false;
+    }
+    g_autofree struct xnu_embedded_panic_header *panic_info =
+                                                   g_malloc0(tms->panic_size);
+    g_autofree void *buffer = g_malloc0(tms->panic_size);
+
+    address_space_rw(&address_space_memory, tms->panic_base,
+                     MEMTXATTRS_UNSPECIFIED, (uint8_t *)panic_info,
+                     tms->panic_size, 0);
+    address_space_rw(&address_space_memory, tms->panic_base,
+                     MEMTXATTRS_UNSPECIFIED, (uint8_t *)buffer,
+                     tms->panic_size, 1);
+
+    return panic_info->eph_magic == EMBEDDED_PANIC_MAGIC;
+}
+
 static void t8030_memory_setup(MachineState *machine)
 {
     struct mach_header_64 *hdr;
@@ -157,6 +178,10 @@ static void t8030_memory_setup(MachineState *machine)
     //After that we have the device tree
     //After that we have the rest of the RAM
 
+    if (t8030_check_panic(machine)) {
+        qemu_system_guest_panicked(NULL);
+        return;
+    }
     hdr = tms->kernel;
     assert(hdr);
     macho_highest_lowest(hdr, NULL, &virt_end);
@@ -263,13 +288,26 @@ static void t8030_memory_setup(MachineState *machine)
         }
     }
 
+    mem_size = machine->ram_size - T8030_PANIC_LOG_SIZE;
+
+    DTBNode *pram = find_dtb_node(tms->device_tree, "pram");
+    if (pram) {
+        uint64_t panic_base = T8030_DRAM_BASE + mem_size;
+        uint64_t panic_size = T8030_PANIC_LOG_SIZE;
+        set_dtb_prop(pram, "reg", 8, (uint8_t *)&panic_base);
+        DTBNode *chosen = find_dtb_node(tms->device_tree, "chosen");
+        set_dtb_prop(chosen, "embedded-panic-log-size", 8,
+                     (uint8_t *)&panic_size);
+        tms->panic_base = panic_base;
+        tms->panic_size = panic_size;
+    }
+
     macho_load_dtb(tms->device_tree, nsas, sysmem, "DeviceTree", info);
 
     phys_ptr += align_16k_high(info->dtb_size);
 
     top_of_kernel_data_pa = (align_16k_high(phys_ptr) + 0x3000ull) & ~0x3fffull;
 
-    mem_size = machine->ram_size;
     fprintf(stderr, "cmdline: [%s]\n", cmdline);
     macho_setup_bootargs("BootArgs", nsas, sysmem, info->bootargs_pa,
                          g_virt_base, g_phys_base, mem_size,

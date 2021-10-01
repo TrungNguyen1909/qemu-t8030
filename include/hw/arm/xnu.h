@@ -148,6 +148,46 @@ struct xnu_arm64_boot_args {
     uint64_t           memSizeActual;                              /* Actual size of memory */
 };
 
+#define EMBEDDED_PANIC_HEADER_OSVERSION_LEN                      32
+#define EMBEDDED_PANIC_HEADER_FLAG_COREDUMP_COMPLETE             0x01
+#define EMBEDDED_PANIC_HEADER_FLAG_STACKSHOT_SUCCEEDED           0x02
+#define EMBEDDED_PANIC_HEADER_FLAG_STACKSHOT_FAILED_DEBUGGERSYNC 0x04
+#define EMBEDDED_PANIC_HEADER_FLAG_STACKSHOT_FAILED_ERROR        0x08
+#define EMBEDDED_PANIC_HEADER_FLAG_STACKSHOT_FAILED_INCOMPLETE   0x10
+#define EMBEDDED_PANIC_HEADER_FLAG_STACKSHOT_FAILED_NESTED       0x20
+#define EMBEDDED_PANIC_HEADER_FLAG_NESTED_PANIC                  0x40
+#define EMBEDDED_PANIC_HEADER_FLAG_BUTTON_RESET_PANIC            0x80
+#define EMBEDDED_PANIC_HEADER_FLAG_COPROC_INITIATED_PANIC        0x100
+#define EMBEDDED_PANIC_HEADER_FLAG_COREDUMP_FAILED               0x200
+#define EMBEDDED_PANIC_HEADER_FLAG_COMPRESS_FAILED               0x400
+#define EMBEDDED_PANIC_HEADER_FLAG_STACKSHOT_DATA_COMPRESSED     0x800
+
+#define EMBEDDED_PANIC_HEADER_CURRENT_VERSION 2
+#define EMBEDDED_PANIC_MAGIC 0x46554E4B /* FUNK */
+struct xnu_embedded_panic_header {
+    uint32_t eph_magic;                /* EMBEDDED_PANIC_MAGIC if valid */
+    uint32_t eph_crc;                  /* CRC of everything following the ph_crc in the header and the contents */
+    uint32_t eph_version;              /* embedded_panic_header version */
+    uint64_t eph_panic_flags;          /* Flags indicating any state or relevant details */
+    uint32_t eph_panic_log_offset;     /* Offset of the beginning of the panic log from the beginning of the header */
+    uint32_t eph_panic_log_len;        /* length of the panic log */
+    uint32_t eph_stackshot_offset;     /* Offset of the beginning of the panic stackshot from the beginning of the header */
+    uint32_t eph_stackshot_len;        /* length of the panic stackshot (0 if not valid ) */
+    uint32_t eph_other_log_offset;     /* Offset of the other log (any logging subsequent to the stackshot) from the beginning of the header */
+    uint32_t eph_other_log_len;        /* length of the other log */
+    union {
+        struct {
+            uint64_t eph_x86_power_state:8,
+                eph_x86_efi_boot_state:8,
+                eph_x86_system_state:8,
+                eph_x86_unused_bits:40;
+        }; // anonymous struct to group the bitfields together.
+        uint64_t eph_x86_do_not_use; /* Used for offsetof/sizeof when parsing header */
+    };
+    char eph_os_version[EMBEDDED_PANIC_HEADER_OSVERSION_LEN];
+    char eph_macos_version[EMBEDDED_PANIC_HEADER_OSVERSION_LEN];
+} __attribute__((packed));
+
 #define XNU_MAX_NVRAM_SIZE  (0xFFFF * 0x10)
 
 typedef struct macho_boot_info {
