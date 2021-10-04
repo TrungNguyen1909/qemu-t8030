@@ -19,9 +19,9 @@ struct AppleSPMIState {
     qemu_irq irq;
     qemu_irq resp_irq;
     Fifo32 resp_fifo;
-    uint32_t base_reg[0x1000];
-    uint32_t fault_reg[0x1000];
-    uint32_t fault_counter_reg[0x64];
+    uint32_t base_reg[0x1000 / sizeof(uint32_t)];
+    uint32_t fault_reg[0x1000 / sizeof(uint32_t)];
+    uint32_t fault_counter_reg[0x64 / sizeof(uint32_t)];
     uint32_t resp_intr_index;
     uint32_t phandle;
     uint32_t reg_vers;
