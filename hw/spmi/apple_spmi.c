@@ -156,9 +156,9 @@ static void apple_spmi_base_reg_write(void *opaque, hwaddr addr,
             #endif
 
             if (opc == SPMI_CMD_EXT_WRITE || opc == SPMI_CMD_EXT_WRITEL) {
-                s->data_length = len;
+                s->data_length = (len + 3) / 4;
                 s->data_filled = 0;
-                s->data = g_malloc0(len);
+                s->data = g_new0(uint32_t, s->data_length);
             }
             if (spmi_start_transfer(s->bus, sid, opc, addr)) {
                 return;
@@ -180,23 +180,27 @@ static void apple_spmi_base_reg_write(void *opaque, hwaddr addr,
             }
             if (s->data == NULL && !parity) {
                 spmi_end_transfer(s->bus);
+                qflg = 1;
+                iflg = 1;
             }
         } else {
             s->data[s->data_filled++] = value;
-            if (s->data_filled >= (s->data_length + 3) / 4) {
+            if (s->data_filled >= s->data_length) {
+                uint32_t requested_len = spmi_data_length(s->command);
                 uint32_t count = spmi_send(s->bus, (uint8_t *)s->data,
-                                           s->data_length);
+                                           requested_len);
                 fifo32_push(&s->resp_fifo, (s->command & 0xFFF)
-                                           | ((count == s->data_length) << 15));
+                                           | ((count == requested_len) << 15));
                 g_free(s->data);
                 s->data = NULL;
-            }
-            if (s->command & SPMI_REQ_FINAL) {
-                spmi_end_transfer(s->bus);
+                s->data_length = 0;
+                if (s->command & SPMI_REQ_FINAL) {
+                    spmi_end_transfer(s->bus);
+                    qflg = 1;
+                    iflg = 1;
+                }
             }
         }
-        qflg = 1;
-        iflg = 1;
         break;
     }
     case SPMI_INT_ENAB(0) ... SPMI_INT_ENAB(SPMI_NUM_IRQ_BANK - 1):
@@ -279,6 +283,7 @@ static void apple_spmi_reset(DeviceState *dev)
                                           | SPMI_QUEUE_STATUS_RSP_EMPTY;
     fifo32_reset(&s->resp_fifo);
     s->data = NULL;
+    s->data_length = 0;
 }
 
 static void apple_spmi_realize(DeviceState *dev, Error **errp)
@@ -358,6 +363,26 @@ SysBusDevice *apple_spmi_create(DTBNode *node)
     return sbd;
 }
 
+static const VMStateDescription vmstate_apple_spmi = {
+    .name = "apple_spmi",
+    .fields = (VMStateField[]) {
+        VMSTATE_FIFO32(resp_fifo, AppleSPMIState),
+        VMSTATE_UINT32_ARRAY(base_reg, AppleSPMIState,
+                             0x1000 / sizeof(uint32_t)),
+        VMSTATE_UINT32_ARRAY(fault_reg, AppleSPMIState,
+                             0x1000 / sizeof(uint32_t)),
+        VMSTATE_UINT32_ARRAY(fault_counter_reg, AppleSPMIState,
+                             0x64 / sizeof(uint32_t)),
+        VMSTATE_UINT32(data_length, AppleSPMIState),
+        VMSTATE_UINT32(data_filled, AppleSPMIState),
+        VMSTATE_UINT32(command, AppleSPMIState),
+        VMSTATE_VARRAY_UINT32_ALLOC(data, AppleSPMIState, data_length, 0,
+                                    vmstate_info_uint32, uint32_t),
+
+        VMSTATE_END_OF_LIST()
+    }
+};
+
 static void apple_spmi_class_init(ObjectClass *klass, void *data)
 {
     DeviceClass *dc = DEVICE_CLASS(klass);
@@ -366,6 +391,7 @@ static void apple_spmi_class_init(ObjectClass *klass, void *data)
     /* dc->unrealize = apple_spmi_unrealize; */
     dc->reset = apple_spmi_reset;
     dc->desc = "Apple SPMI Controller";
+    dc->vmsd = &vmstate_apple_spmi;
     set_bit(DEVICE_CATEGORY_BRIDGE, dc->categories);
 }
 
