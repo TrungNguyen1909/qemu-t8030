@@ -17,7 +17,7 @@ pip3 install pyasn1
 ### macOS Homebrew
 
 ```sh
-brew install libtasn1 meson ninja pixman lzfse jtool2 jq
+brew install libtasn1 meson ninja pixman jtool2 jq coreutils
 ```
 
 
@@ -25,8 +25,22 @@ brew install libtasn1 meson ninja pixman lzfse jtool2 jq
 ```sh
 sudo apt update
 sudo apt install -y git libglib2.0-dev libfdt-dev libpixman-1-dev zlib1g-dev libtasn1-dev ninja-build build-essential cmake
+```
 
-# install lzfse
+Get jtool2 from the [jtool2's official website](http://newosxbook.com/tools/jtool.html).
+
+There is a `jtool2.ELF64` inside the package.
+
+### Install lzfse
+
+For Linux, follow the step below to install lzfse.
+
+For macOS, you can install lzfse from Homebrew.
+However, there are some problems building when Homebrew uses `/opt` prefix.
+
+If you have issues regarding LZFSE, try installing it from sources like below.
+
+```sh
 git clone https://github.com/lzfse/lzfse
 cd lzfse
 mkdir build; cd build
@@ -36,18 +50,13 @@ sudo make install
 cd ..
 ```
 
-Get jtool2 from the [jtool2's official website](http://newosxbook.com/tools/jtool.html).
-
-There is a `jtool2.ELF64` inside the package.
-
-
 # Building QEMU
 
 ```sh
 git clone https://github.com/TrungNguyen1909/qemu-t8030
 cd qemu-tt8030
 mkdir build; cd build
-../configure --target-list=aarch64-softmmu,x86_64-softmmu --disable-capstone --disable-slirp
+../configure --target-list=aarch64-softmmu,x86_64-softmmu --disable-capstone --enable-lzfse
 make -j$(nproc)
 ```
 
