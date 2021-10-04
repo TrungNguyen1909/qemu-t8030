@@ -296,6 +296,20 @@ static WatchdogTimerModel model = {
     .wdt_description = "Apple WDT",
 };
 
+static const VMStateDescription vmstate_apple_wdt = {
+    .name = "apple_wdt",
+    .fields = (VMStateField[]) {
+        VMSTATE_TIMER_PTR(timer, AppleWDTState),
+        VMSTATE_UINT64(cnt_period_ns, AppleWDTState),
+        VMSTATE_UINT64(cntfrq_hz, AppleWDTState),
+        VMSTATE_UINT32_ARRAY(reg.raw, AppleWDTState,
+                             REG_SIZE / sizeof(uint32_t)),
+        VMSTATE_UINT32(scratch, AppleWDTState),
+        VMSTATE_TIMER_PTR(timer, AppleWDTState),
+        VMSTATE_END_OF_LIST()
+    }
+};
+
 static void apple_wdt_class_init(ObjectClass *klass, void *data)
 {
     DeviceClass *dc = DEVICE_CLASS(klass);
@@ -304,6 +318,7 @@ static void apple_wdt_class_init(ObjectClass *klass, void *data)
     dc->unrealize = apple_wdt_unrealize;
     dc->reset = apple_wdt_reset;
     dc->desc = "Apple Watch Dog Timer";
+    dc->vmsd = &vmstate_apple_wdt;
     set_bit(DEVICE_CATEGORY_MISC, dc->categories);
 }
 
