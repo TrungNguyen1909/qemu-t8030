@@ -45,6 +45,7 @@ struct AppleANSState {
 
     NvmeCtrl nvme;
     uint32_t nvme_interrupt_idx;
+    bool started;
 };
 
 static void ascv2_core_reg_write(void *opaque, hwaddr addr,
@@ -112,12 +113,12 @@ static void apple_ans_start(void *opaque)
     config |= 0x0002 | 0x0004; /* memory | bus */
     pci_default_write_config(PCI_DEVICE(&s->nvme),
                              PCI_COMMAND, config, 4);
+    s->started = true;
     assert(PCI_DEVICE(&s->nvme)->bus_master_enable_region.enabled);
 }
 
 static void apple_ans_ep_handler(void *opaque, uint32_t ep, uint64_t msg)
 {
-    AppleANSState *s = APPLE_ANS(opaque);
     ANS_LOG_MSG(ep, msg);
 }
 
@@ -270,6 +271,26 @@ static void apple_ans_unrealize(DeviceState *dev)
     qdev_unrealize(DEVICE(s->mbox));
 }
 
+static int apple_ans_post_load(void *opaque, int version_id)
+{
+    AppleANSState *s = APPLE_ANS(opaque);
+    if (s->started) {
+        apple_ans_start(s);
+    }
+    return 0;
+}
+
+static const VMStateDescription vmstate_apple_ans = {
+    .name = "apple_ans",
+    .post_load = apple_ans_post_load,
+    .fields = (VMStateField[]) {
+        VMSTATE_UINT32(nvme_interrupt_idx, AppleANSState),
+        VMSTATE_BOOL(started, AppleANSState),
+
+        VMSTATE_END_OF_LIST()
+    }
+};
+
 static void apple_ans_class_init(ObjectClass *klass, void *data)
 {
     DeviceClass *dc = DEVICE_CLASS(klass);
@@ -278,6 +299,7 @@ static void apple_ans_class_init(ObjectClass *klass, void *data)
     dc->unrealize = apple_ans_unrealize;
     /* dc->reset = apple_ans_reset; */
     dc->desc = "Apple ANS NVMe";
+    dc->vmsd = &vmstate_apple_ans;
     set_bit(DEVICE_CATEGORY_BRIDGE, dc->categories);
     dc->fw_name = "pci";
 }
