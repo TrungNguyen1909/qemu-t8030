@@ -5,6 +5,7 @@
 #include "qemu/main-loop.h"
 #include "hw/irq.h"
 #include "hw/misc/apple_mbox.h"
+#include "migration/vmstate.h"
 #include "trace.h"
 
 #define IOP_LOG_MSG(s, msg) \
@@ -123,11 +124,9 @@ struct AppleMboxState {
     qemu_irq irqs[3];
     uint64_t inboxBuffer[2];
     QTAILQ_HEAD(, apple_mbox_msg) inbox;
-    uint64_t inboxSize;
 
     bool outboxEnable;
     QTAILQ_HEAD(, apple_mbox_msg) outbox;
-    uint64_t outboxSize;
 
     GTree *endpoints;
     QEMUBH *bh;
@@ -212,7 +211,7 @@ static gboolean iop_rollcall(gpointer key, gpointer value, gpointer data)
 {
     struct iop_rollcall_data *d = (struct iop_rollcall_data *)data;
     AppleMboxState *s = d->s;
-    uint32_t ep = (uint32_t)key;
+    uint32_t ep = (uint64_t)key;
 
     if ((ep - 1) / 32 != d->last_block) {
         apple_mbox_msg_t m = g_new0(struct apple_mbox_msg, 1);
@@ -497,6 +496,12 @@ void apple_mbox_register_endpoint(AppleMboxState *s, uint32_t ep,
     g_tree_insert(s->endpoints, GUINT_TO_POINTER(ep), handler);
 }
 
+void apple_mbox_unregister_endpoint(AppleMboxState *s, uint32_t ep)
+{
+    assert(ep > 0);
+    g_tree_remove(s->endpoints, GUINT_TO_POINTER(ep));
+}
+
 AppleMboxState *apple_mbox_create(const char *role,
                                   void *opaque,
                                   uint64_t mmio_size,
@@ -561,13 +566,13 @@ static void apple_mbox_reset(DeviceState *dev)
     s->ep0_status = EP0_IDLE;
 
     WITH_QEMU_LOCK_GUARD(&s->mutex) {
-        while(!QTAILQ_EMPTY(&s->inbox)) {
+        while (!QTAILQ_EMPTY(&s->inbox)) {
             apple_mbox_msg_t m = QTAILQ_FIRST(&s->inbox);
             QTAILQ_REMOVE(&s->inbox, m, entry);
             g_free(m);
         }
 
-        while(!QTAILQ_EMPTY(&s->outbox)) {
+        while (!QTAILQ_EMPTY(&s->outbox)) {
             apple_mbox_msg_t m = QTAILQ_FIRST(&s->outbox);
             QTAILQ_REMOVE(&s->outbox, m, entry);
             g_free(m);
@@ -578,6 +583,49 @@ static void apple_mbox_reset(DeviceState *dev)
     qemu_irq_raise(s->irqs[APPLE_MBOX_IRQ_INBOX]);
 }
 
+static int apple_mbox_post_load(void *opaque, int version_id)
+{
+    AppleMboxState *s = APPLE_MBOX(opaque);
+
+    WITH_QEMU_LOCK_GUARD(&s->mutex) {
+        if (!apple_mbox_empty(s)) {
+            qemu_bh_schedule(s->bh);
+        }
+    }
+    return 0;
+}
+
+static const VMStateDescription vmstate_apple_mbox_msg = {
+    .name = "apple_mbox_msg",
+    .version_id = 1,
+    .minimum_version_id = 1,
+    .fields = (VMStateField[]) {
+        VMSTATE_UINT64_ARRAY(data, struct apple_mbox_msg, 2),
+        VMSTATE_END_OF_LIST()
+    }
+};
+
+static const VMStateDescription vmstate_apple_mbox = {
+    .name = "apple_mbox",
+    .version_id = 1,
+    .minimum_version_id = 1,
+    .post_load = apple_mbox_post_load,
+    .fields = (VMStateField[]) {
+        VMSTATE_UINT32(ep0_status, AppleMboxState),
+        VMSTATE_UINT32(protocol_version, AppleMboxState),
+        VMSTATE_UINT32(config, AppleMboxState),
+        VMSTATE_UINT32(cpu_ctrl, AppleMboxState),
+        VMSTATE_UINT64_ARRAY(inboxBuffer, AppleMboxState, 2),
+        VMSTATE_QTAILQ_V(inbox, AppleMboxState, 1, vmstate_apple_mbox_msg,
+                        struct apple_mbox_msg, entry),
+        VMSTATE_BOOL(outboxEnable, AppleMboxState),
+        VMSTATE_QTAILQ_V(outbox, AppleMboxState, 1, vmstate_apple_mbox_msg,
+                        struct apple_mbox_msg, entry),
+
+        VMSTATE_END_OF_LIST()
+    }
+};
+
 static void apple_mbox_class_init(ObjectClass *klass, void *data)
 {
     DeviceClass *dc = DEVICE_CLASS(klass);
@@ -586,6 +634,7 @@ static void apple_mbox_class_init(ObjectClass *klass, void *data)
     dc->unrealize = apple_mbox_unrealize;
     dc->reset = apple_mbox_reset;
     dc->desc = "Apple IOP Mailbox";
+    dc->vmsd = &vmstate_apple_mbox;
     set_bit(DEVICE_CATEGORY_MISC, dc->categories);
 }
 

@@ -32,10 +32,15 @@ void apple_mbox_send_message(AppleMboxState *s, uint32_t ep, uint64_t msg);
 void apple_mbox_register_endpoint(AppleMboxState *s, uint32_t ep,
                                   AppleMboxEPHandler handler);
 
+/*
+ * Unregister an inbox endpoint listener.
+ */
+void apple_mbox_unregister_endpoint(AppleMboxState *s, uint32_t ep);
+
 AppleMboxState *apple_mbox_create(const char *role,
-                                               void *opaque,
-                                               uint64_t mmio_size,
-                                               uint32_t protocol_version,
-                                               const struct AppleMboxOps *ops);
+                                  void *opaque,
+                                  uint64_t mmio_size,
+                                  uint32_t protocol_version,
+                                  const struct AppleMboxOps *ops);
 
 #endif /* HW_MISC_APPLE_MBOX_H */
