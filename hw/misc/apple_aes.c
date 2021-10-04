@@ -28,16 +28,17 @@ typedef struct AESCommand {
 } AESCommand;
 
 typedef struct AESKey {
+    QCryptoCipher *cipher;
     key_select_t select;
+    QCryptoCipherAlgorithm algo;
+    uint8_t key[32];
     uint32_t len;
-    bool wrapped;
-    bool encrypt;
     key_func_t func;
     block_mode_t mode;
-    uint8_t id;
-    uint8_t key[32];
-    QCryptoCipher *cipher;
+    bool wrapped;
+    bool encrypt;
     bool disabled;
+    uint8_t id;
 } AESKey;
 
 struct AppleAESState {
@@ -91,6 +92,7 @@ static QCryptoCipherMode key_mode(block_mode_t mode) {
 }
 
 static void apple_aes_reset(DeviceState *s);
+static void *aes_thread(void *opaque);
 
 static void aes_update_irq(AppleAESState *s)
 {
@@ -138,6 +140,15 @@ static void aes_empty_fifo(AppleAESState *s)
     }
 }
 
+static void aes_start(AppleAESState *s)
+{
+    if (s->stopped) {
+        s->stopped = false;
+        qemu_thread_create(&s->thread, TYPE_APPLE_AES, aes_thread, s,
+                           QEMU_THREAD_JOINABLE);
+    }
+}
+
 static void aes_stop(AppleAESState *s)
 {
     if (!s->stopped) {
@@ -157,6 +168,7 @@ static bool aes_process_command(AppleAESState *s, AESCommand *cmd)
         {
             uint32_t ctx = COMMAND_KEY_COMMAND_KEY_CONTEXT(cmd->command);
             s->keys[ctx].select = COMMAND_KEY_COMMAND_KEY_SELECT(cmd->command);
+            s->keys[ctx].algo = key_algo(COMMAND_KEY_COMMAND_KEY_LENGTH(cmd->command));
             s->keys[ctx].len = key_size(COMMAND_KEY_COMMAND_KEY_LENGTH(cmd->command)) / 8;
             s->keys[ctx].wrapped = (cmd->command & COMMAND_KEY_COMMAND_WRAPPED) != 0;
             s->keys[ctx].encrypt = (cmd->command & COMMAND_KEY_COMMAND_ENCRYPT) != 0;
@@ -192,7 +204,7 @@ static bool aes_process_command(AppleAESState *s, AESCommand *cmd)
                 } else {
                     qatomic_and(&s->reg.int_status.raw, ~AES_BLK_INT_KEY_0_DISABLED);
                 }
-                s->keys[ctx].cipher = qcrypto_cipher_new(key_algo(COMMAND_KEY_COMMAND_KEY_LENGTH(cmd->command)),
+                s->keys[ctx].cipher = qcrypto_cipher_new(s->keys[ctx].algo,
                         key_mode(s->keys[ctx].mode),
                         s->keys[ctx].key, s->keys[ctx].len, &error_abort);
             }
@@ -294,7 +306,7 @@ static void *aes_thread(void *opaque)
             if (!aes_process_command(s, cmd)) {
                 qemu_mutex_lock_iothread();
             }
-            s->reg.command_fifo_status.level -= cmd->data_len / 4;
+            s->reg.command_fifo_status.level -= cmd->data_len;
             aes_update_command_fifo_status(s);
             qemu_mutex_unlock_iothread();
 
@@ -378,10 +390,7 @@ static void aes_reg_write(void *opaque, hwaddr addr,
     case rAES_CONTROL:
         switch (val) {
         case AES_BLK_CONTROL_START:
-            if (s->stopped) {
-                s->stopped = false;
-                qemu_thread_create(&s->thread, TYPE_APPLE_AES, aes_thread, s, QEMU_THREAD_JOINABLE);
-            }
+            aes_start(s);
             break;
         case AES_BLK_CONTROL_STOP:
             aes_stop(s);
@@ -401,8 +410,8 @@ static void aes_reg_write(void *opaque, hwaddr addr,
         break;
     case rAES_COMMAND_FIFO:
         if (s->data_len > s->data_read) {
-            s->data[s->data_read / 4] = val;
-            s->data_read += 4;
+            s->data[s->data_read] = val;
+            s->data_read++;
         } else {
             s->command = val;
             switch (COMMAND_OPCODE(val)) {
@@ -411,39 +420,40 @@ static void aes_reg_write(void *opaque, hwaddr addr,
                     uint32_t key_len =
                         key_size(COMMAND_KEY_COMMAND_KEY_LENGTH(val)) / 8;
 
-                    s->data_len = key_len + 4;
-                    s->data = (uint32_t *)g_malloc0(s->data_len);
+                    s->data_len = key_len / 4 + 1;
+                    s->data = g_new0(uint32_t, s->data_len);
                     s->data[0] = val;
-                    s->data_read = 4;
+                    s->data_read = 1;
                 } else {
-                    s->data_len = 4;
-                    s->data = (uint32_t *)g_malloc0(s->data_len);
+                    s->data_len = 1;
+                    s->data = g_new0(uint32_t, s->data_len);
                     s->data[0] = val;
-                    s->data_read = 4;
+                    s->data_read = 1;
                 }
                 break;
             case OPCODE_IV:
-                s->data_len = sizeof(command_iv_t);
-                s->data = (uint32_t *)g_malloc0(s->data_len);
+                s->data_len = sizeof(command_iv_t) / 4;
+                s->data = g_new0(uint32_t, s->data_len);
                 s->data[0] = val;
-                s->data_read = 4;
+                s->data_read = 1;
                 break;
             case OPCODE_DATA:
-                s->data_len = sizeof(command_data_t);
-                s->data = (uint32_t *)g_malloc0(s->data_len);
+                s->data_len = sizeof(command_data_t) / 4;
+                s->data = g_new0(uint32_t, s->data_len);
                 s->data[0] = val;
-                s->data_read = 4;
+                s->data_read = 1;
                 break;
             case OPCODE_STORE_IV:
-                s->data_len = sizeof(command_store_iv_t);
-                s->data = (uint32_t *)g_malloc0(s->data_len);
+                s->data_len = sizeof(command_store_iv_t) / 4;
+                s->data = g_new0(uint32_t, s->data_len);
                 s->data[0] = val;
-                s->data_read = 4;
+                s->data_read = 1;
                 break;
             case OPCODE_FLAG:
-                s->data_len = s->data_read = 4;
-                s->data = (uint32_t *)g_malloc0(s->data_len);
+                s->data_len = 1;
+                s->data = g_new0(uint32_t, s->data_len);
                 s->data[0] = val;
+                s->data_read = 1;
                 break;
             default:
                 qatomic_or(&s->reg.int_status.raw, AES_BLK_INT_INVALID_COMMAND);
@@ -632,6 +642,93 @@ SysBusDevice *apple_aes_create(DTBNode *node)
     return sbd;
 }
 
+static int apple_aes_key_post_load(void *opaque, int version_id)
+{
+    AESKey *k = (AESKey *)opaque;
+    if (k->cipher) {
+        qcrypto_cipher_free(k->cipher);
+        k->cipher = NULL;
+    }
+    if (k->select != KEY_SELECT_SOFTWARE) {
+        k->disabled = true;
+    } else {
+        k->disabled = false;
+        k->cipher = qcrypto_cipher_new(k->algo, key_mode(k->mode), k->key,
+                                       k->len, &error_abort);
+    }
+    return 0;
+}
+
+static int apple_aes_pre_save(void *opaque)
+{
+    AppleAESState *s = APPLE_AES(opaque);
+    if (!s->stopped) {
+        aes_stop(s);
+        s->stopped = false;
+    }
+    return 0;
+}
+
+static int apple_aes_post_load(void *opaque, int version_id)
+{
+    AppleAESState *s = APPLE_AES(opaque);
+    if (!s->stopped) {
+        s->stopped = true;
+        aes_start(s);
+    }
+    return 0;
+}
+
+static const VMStateDescription vmstate_apple_aes_command = {
+    .name = "apple_aes_command",
+    .fields = (VMStateField[]) {
+        VMSTATE_UINT32(command, AESCommand),
+        VMSTATE_UINT32(data_len, AESCommand),
+        VMSTATE_VARRAY_UINT32(data, AESCommand, data_len, 1,
+                              vmstate_info_uint32, uint32_t),
+        VMSTATE_END_OF_LIST()
+    }
+};
+
+static const VMStateDescription vmstate_apple_aes_key = {
+    .name = "apple_aes_key",
+    .post_load = apple_aes_key_post_load,
+    .fields = (VMStateField[]) {
+        VMSTATE_UINT32(select, AESKey),
+        VMSTATE_UINT32(algo, AESKey),
+        VMSTATE_UINT32(len, AESKey),
+        VMSTATE_BOOL(wrapped, AESKey),
+        VMSTATE_BOOL(encrypt, AESKey),
+        VMSTATE_UINT32(func, AESKey),
+        VMSTATE_UINT32(mode, AESKey),
+        VMSTATE_UINT8(id, AESKey),
+        VMSTATE_UINT8_ARRAY(key, AESKey, 32),
+        VMSTATE_BOOL(disabled, AESKey),
+        VMSTATE_END_OF_LIST()
+    }
+};
+
+static const VMStateDescription vmstate_apple_aes = {
+    .name = "apple_aes",
+    .pre_save = apple_aes_pre_save,
+    .post_load = apple_aes_post_load,
+    .fields = (VMStateField[]) {
+        VMSTATE_INT32(last_level, AppleAESState),
+        VMSTATE_UINT32_ARRAY(reg.raw, AppleAESState,
+                             AES_BLK_REG_SIZE / sizeof(uint32_t)),
+        VMSTATE_QTAILQ_V(queue, AppleAESState, 0, vmstate_apple_aes_command,
+                         AESCommand, entry),
+        VMSTATE_UINT32(command, AppleAESState),
+        VMSTATE_UINT32(data_len, AppleAESState),
+        VMSTATE_UINT32(data_read, AppleAESState),
+        VMSTATE_STRUCT_ARRAY(keys, AppleAESState, 2, 1, vmstate_apple_aes_key,
+                             AESKey),
+        VMSTATE_UINT8_2DARRAY(iv, AppleAESState, 4, 16),
+        VMSTATE_BOOL(stopped, AppleAESState),
+        VMSTATE_END_OF_LIST()
+    }
+};
+
 static void apple_aes_class_init(ObjectClass *klass, void *data)
 {
     DeviceClass *dc = DEVICE_CLASS(klass);
@@ -640,6 +737,7 @@ static void apple_aes_class_init(ObjectClass *klass, void *data)
     dc->unrealize = apple_aes_unrealize;
     dc->reset = apple_aes_reset;
     dc->desc = "Apple AES Accelerator";
+    dc->vmsd = &vmstate_apple_aes;
     set_bit(DEVICE_CATEGORY_MISC, dc->categories);
 }
 
