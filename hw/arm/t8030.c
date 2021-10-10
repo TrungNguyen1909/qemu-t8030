@@ -69,28 +69,14 @@
 static void t8030_wake_up_cpus(MachineState* machine, uint64_t cpu_mask)
 {
     T8030MachineState* tms = T8030_MACHINE(machine);
-
     int i;
 
     for(i = 0; i < machine->smp.cpus; i++) {
-        if (test_bit(i, (unsigned long*)&cpu_mask) && t8030_cpu_is_sleep(tms->cpus[i])) {
-            int ret = QEMU_ARM_POWERCTL_RET_SUCCESS;
-
-            if (ARM_CPU(tms->cpus[i])->power_state != PSCI_ON) {
-                ret = arm_set_cpu_on_and_reset(tms->cpus[i]->mpidr);
-            }
-
-            if (ret != QEMU_ARM_POWERCTL_RET_SUCCESS) {
-                error_report("%s: failed to bring up CPU %d: err %d",
-                        __func__, i, ret);
-            }
+        if (test_bit(i, (unsigned long*)&cpu_mask)
+            && t8030_cpu_is_sleep(tms->cpus[i])) {
+            t8030_cpu_wakeup(tms->cpus[i]);
         }
     }
-}
-
-static void t8030_wake_up_cpu(MachineState* machine, uint32_t cpu_id)
-{
-    t8030_wake_up_cpus(machine, 1 << cpu_id);
 }
 
 static void t8030_create_s3c_uart(const T8030MachineState *tms, Chardev *chr)

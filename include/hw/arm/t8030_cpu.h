@@ -126,4 +126,5 @@ typedef struct T8030CPUCluster {
 T8030CPUState *t8030_cpu_create(DTBNode *node);
 T8030CPUState *t8030_cs_from_env(CPUARMState *env);
 bool t8030_cpu_is_sleep(T8030CPUState *tcpu);
+void t8030_cpu_wakeup(T8030CPUState *tcpu);
 #endif /* HW_ARM_T8030_CPU_H */
