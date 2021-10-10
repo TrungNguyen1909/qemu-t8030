@@ -126,7 +126,7 @@ inline bool t8030_cpu_is_sleep(T8030CPUState *tcpu)
     return CPU(tcpu)->halted;
 }
 
-static void t8030_cpu_wakeup(T8030CPUState *tcpu)
+void t8030_cpu_wakeup(T8030CPUState *tcpu)
 {
     int ret = QEMU_ARM_POWERCTL_RET_SUCCESS;
 
