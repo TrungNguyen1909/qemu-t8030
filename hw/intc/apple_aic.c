@@ -31,35 +31,33 @@ static void apple_aic_update(AppleAICState *s)
         }
     }
 
-    for (i = 0; i < s->numEIR; i++) {
-        if (unlikely(s->eir_state[i] & (~s->eir_mask[i]))) {
-            int j;
-            int dest;
-            for (j = 0; j < 32; j++) {
-                if (((s->eir_mask[i] & (1 << j)) == 0)
-                    && (s->eir_state[i] & (1 << j))
-                    && (dest = s->eir_dest[AIC_EIR_TO_SRC(i, j)])) {
-                    if (((intr & dest) == 0)) {
-                        /* The interrupt doesn't have a cpu that can process it yet */
-                        uint32_t cpu = find_first_bit((unsigned long *)&s->eir_dest[AIC_EIR_TO_SRC(i, j)],
-                                                        s->numCPU);
-                        intr |= (1 << cpu);
-                        potential |= dest;
-                    } else {
-                        int k;
-                        for (k = 0; k < s->numCPU; k++) {
-                            if (((intr & (1 << k)) == 0) && (potential & (1 << k))) {
-                                /* cpu K isn't in the interrupt list and can handle some of the previous interrupts */
-                                intr |= (1 << k);
-                                break;
-                            }
-                        }
+    i = -1;
+    while ((i = find_next_bit((unsigned long *)s->eir_state, s->numIRQ, i+1))
+            < s->numIRQ) {
+        int dest;
+        if ((test_bit(i, (unsigned long *)s->eir_mask) == 0)
+            && (dest = s->eir_dest[i])) {
+            if (((intr & dest) == 0)) {
+                /* The interrupt doesn't have a cpu that can process it yet */
+                uint32_t cpu = find_first_bit((unsigned long *)&s->eir_dest[i],
+                                                s->numCPU);
+                intr |= (1 << cpu);
+                potential |= dest;
+            } else {
+                int k;
+                for (k = 0; k < s->numCPU; k++) {
+                    if (((intr & (1 << k)) == 0) && (potential & (1 << k))) {
+                        /* 
+                         * cpu K isn't in the interrupt list
+                         * and can handle some of the previous interrupts
+                         */
+                        intr |= (1 << k);
+                        break;
                     }
                 }
             }
-        }
+        }     
     }
-
     for (i = 0; i < s->numCPU; i++) {
         if (intr & (1 << i)) {
             qemu_irq_raise(s->cpus[i].irq);
@@ -333,17 +331,13 @@ static uint64_t apple_aic_read(void *opaque, hwaddr addr, unsigned size)
                     }
                 }
 
-                for (i = 0; i < s->numEIR; i++) {
-                    if (unlikely(s->eir_state[i] & (~s->eir_mask[i]))) {
-                        int j;
-
-                        for (j = 0; j < 32; j++) {
-                            if (((s->eir_mask[i] & (1 << j)) == 0)
-                                && (s->eir_state[i] & (1 << j))
-                                && (s->eir_dest[AIC_EIR_TO_SRC(i, j)] & (1 << o->cpu_id))) {
-                                s->eir_mask[i] |= (1 << j);
-                                return kAIC_INT_EXT | AIC_EIR_TO_SRC(i, j);
-                            }
+                i = -1;
+                while ((i = find_next_bit((unsigned long *)s->eir_state,
+                                         s->numIRQ, i+1)) < s->numIRQ) {
+                    if (test_bit(i, (unsigned long *)s->eir_mask) == 0) {
+                        if (s->eir_dest[i] & (1 << o->cpu_id)) {
+                                set_bit(i, (unsigned long *)s->eir_mask);
+                                return kAIC_INT_EXT | AIC_INT_EXTID(i);
                         }
                     }
                 }
