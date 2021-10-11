@@ -95,7 +95,8 @@ int env_unset(AppleNvramState *s, const char *name)
     return 1;
 }
 
-int env_set(AppleNvramState *s, const char *name, const char *val, uint32_t flags)
+int env_set(AppleNvramState *s, const char *name, const char *val,
+            uint32_t flags)
 {
     g_autofree env_var *v;
 
@@ -112,7 +113,7 @@ int env_set(AppleNvramState *s, const char *name, const char *val, uint32_t flag
         return -1;
     }
 
-    strlcpy(v->name, name, sizeof(v->name));
+    g_strlcpy(v->name, name, sizeof(v->name));
     v->str = g_strdup(val);
 
     if (v->str == NULL) {
@@ -128,15 +129,19 @@ int env_set(AppleNvramState *s, const char *name, const char *val, uint32_t flag
     return 0;
 }
 
-int env_set_uint(AppleNvramState *s, const char *name, size_t val, uint32_t flags)
+int env_set_uint(AppleNvramState *s, const char *name, size_t val,
+                 uint32_t flags)
 {
     g_autofree char *buf = NULL;
 
-    asprintf(&buf, "0x%lx", val);
+    if (asprintf(&buf, "0x%lx", val) < 0) {
+        return -1;
+    }
     return env_set(s, name, buf, flags);
 }
 
-int env_set_bool(AppleNvramState *s, const char *name, bool val, uint32_t flags)
+int env_set_bool(AppleNvramState *s, const char *name, bool val,
+                 uint32_t flags)
 {
     return env_set(s, name, val ? "true" : "false", flags);
 }
@@ -307,6 +312,7 @@ void nvram_free(NvramBank *bank)
 
     while (p1) {
         NvramPartition *p2 = QTAILQ_NEXT(p1, entry);
+        g_free(p1->data);
         g_free(p1);
         p1 = p2;
     }
@@ -371,7 +377,7 @@ ssize_t apple_nvram_serialize(AppleNvramState *s, void *buffer, size_t size)
     if (!p) {
         p = g_malloc0(sizeof(NvramPartition));
         p->sig = 0x70;
-        strlcpy(p->name, "common", sizeof(p->name));
+        g_strlcpy(p->name, "common", sizeof(p->name));
         p->len = 0x7f0;
         p->data = g_malloc0(p->len);
         QTAILQ_INSERT_HEAD(&s->bank->parts, p, entry);
@@ -391,6 +397,23 @@ ssize_t apple_nvram_serialize(AppleNvramState *s, void *buffer, size_t size)
     }
     memcpy(buffer, buf, len);
     return len;
+}
+
+static void apple_nvram_cleanup(AppleNvramState *s)
+{
+    env_var *v = QTAILQ_FIRST(&s->env);
+    if (s->bank) {
+        nvram_free(s->bank);
+        s->bank = NULL;
+    }
+
+    while (v != NULL) {
+        env_var *next = QTAILQ_NEXT(v, entry);
+        g_free(v->str);
+        g_free(v);
+        v = next;
+    }
+    QTAILQ_INIT(&s->env);
 }
 
 void apple_nvram_save(AppleNvramState *s)
@@ -429,11 +452,8 @@ void apple_nvram_load(AppleNvramState *s)
         error_report("%s: Failed to read NVRAM", __func__);
         return;
     }
-
-    if (s->bank) {
-        nvram_free(s->bank);
-        s->bank = NULL;
-    }
+    
+    apple_nvram_cleanup(s);
     s->len = len;
     s->bank = nvram_parse(buffer, len);
     QTAILQ_INIT(&s->env);
@@ -441,7 +461,7 @@ void apple_nvram_load(AppleNvramState *s)
     if (nvram_find_part(s->bank, "common") == NULL) {
         NvramPartition *part = g_malloc0(sizeof(NvramPartition));
         part->sig = 0x70;
-        strlcpy(part->name, "common", sizeof(part->name));
+        g_strlcpy(part->name, "common", sizeof(part->name));
         part->len = 0x7f0;
         part->data = g_malloc0(part->len);
         QTAILQ_INSERT_HEAD(&s->bank->parts, part, entry);
@@ -469,19 +489,8 @@ static void apple_nvram_unrealize(DeviceState *dev)
     AppleNvramClass *anc = APPLE_NVRAM_GET_CLASS(dev);
 
     anc->parent_unrealize(dev);
-    env_var *v = QTAILQ_FIRST(&s->env);
 
-    if (s->bank) {
-        nvram_free(s->bank);
-        s->bank = NULL;
-    }
-
-    while (v != NULL) {
-        env_var *next = QTAILQ_NEXT(v, entry);
-        g_free(v->str);
-        g_free(v);
-        v = next;
-    }
+    apple_nvram_cleanup(s);
 }
 
 static void apple_nvram_class_init(ObjectClass *klass, void *data)
