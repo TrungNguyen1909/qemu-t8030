@@ -21,30 +21,6 @@ OBJECT_DECLARE_SIMPLE_TYPE(T8030CPUCluster, T8030_CPU_CLUSTER)
 #define T8030_CPREG_VAR_NAME(name) cpreg_##name
 #define T8030_CPREG_VAR_DEF(name) uint64_t T8030_CPREG_VAR_NAME(name)
 
-#define MPIDR_AFF0_SHIFT 0
-#define MPIDR_AFF0_WIDTH 8
-#define MPIDR_AFF0_MASK  (((1 << MPIDR_AFF0_WIDTH) - 1) << MPIDR_AFF0_SHIFT)
-#define MPIDR_AFF1_SHIFT 8
-#define MPIDR_AFF1_WIDTH 8
-#define MPIDR_AFF1_MASK  (((1 << MPIDR_AFF1_WIDTH) - 1) << MPIDR_AFF1_SHIFT)
-#define MPIDR_AFF2_SHIFT 16
-#define MPIDR_AFF2_WIDTH 8
-#define MPIDR_AFF2_MASK  (((1 << MPIDR_AFF2_WIDTH) - 1) << MPIDR_AFF2_SHIFT)
-
-#define MPIDR_CPU_ID(mpidr_el1_val)             (((mpidr_el1_val) & MPIDR_AFF0_MASK) >> MPIDR_AFF0_SHIFT)
-#define MPIDR_CLUSTER_ID(mpidr_el1_val)         (((mpidr_el1_val) & MPIDR_AFF1_MASK) >> MPIDR_AFF1_SHIFT)
-
-#define IPI_SR_SRC_CPU_SHIFT 8
-#define IPI_SR_SRC_CPU_WIDTH 8
-#define IPI_SR_SRC_CPU_MASK  (((1 << IPI_SR_SRC_CPU_WIDTH) - 1) << IPI_SR_SRC_CPU_SHIFT)
-#define IPI_SR_SRC_CPU(ipi_sr_val)         (((ipi_sr_val) & IPI_SR_SRC_CPU_MASK) >> IPI_SR_SRC_CPU_SHIFT)
-
-#define IPI_RR_TARGET_CLUSTER_SHIFT 16
-#define ARM64_REG_IPI_RR_TYPE_IMMEDIATE (0 << 28)
-#define ARM64_REG_IPI_RR_TYPE_RETRACT   (1 << 28)
-#define ARM64_REG_IPI_RR_TYPE_DEFERRED  (2 << 28)
-#define ARM64_REG_IPI_RR_TYPE_NOWAKE    (3 << 28)
-
 #define kDeferredIPITimerDefault 64000
 
 typedef struct T8030CPUClass {
@@ -97,11 +73,11 @@ typedef struct T8030CPUState {
     T8030_CPREG_VAR_DEF(ARM64_REG_CYC_OVRD);
     T8030_CPREG_VAR_DEF(ARM64_REG_ACC_CFG);
     T8030_CPREG_VAR_DEF(S3_5_c15_c10_1);
-    //uncore
+    /* uncore */
     T8030_CPREG_VAR_DEF(UPMPCM);
     T8030_CPREG_VAR_DEF(UPMCR0);
     T8030_CPREG_VAR_DEF(UPMSR);
-    //ktrr
+    /* ktrr */
     T8030_CPREG_VAR_DEF(ARM64_REG_CTRR_A_LWR_EL1);
     T8030_CPREG_VAR_DEF(ARM64_REG_CTRR_A_UPR_EL1);
     T8030_CPREG_VAR_DEF(ARM64_REG_CTRR_CTL_EL1);
@@ -124,7 +100,6 @@ typedef struct T8030CPUCluster {
 } T8030CPUCluster;
 
 T8030CPUState *t8030_cpu_create(DTBNode *node);
-T8030CPUState *t8030_cs_from_env(CPUARMState *env);
 bool t8030_cpu_is_sleep(T8030CPUState *tcpu);
 void t8030_cpu_wakeup(T8030CPUState *tcpu);
 #endif /* HW_ARM_T8030_CPU_H */
