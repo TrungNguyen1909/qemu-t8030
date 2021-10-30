@@ -57,6 +57,8 @@ static const char *KEEP_COMP[] = {
     "wdt,t8030\0wdt,s5l8960x\0$",
     "spmi,t8015\0$", "spmi,gen0\0$",
     "pmu,spmi\0pmu,avus\0$",
+    "smc-pmu\0$",
+    "buttons\0$",
     "dart,t8020\0$", "iommu-mapper\0$",
 };
 
