@@ -53,6 +53,7 @@
 #include "hw/nvram/apple_nvram.h"
 #include "hw/spmi/apple_spmi.h"
 #include "hw/spmi/apple_spmi_pmu.h"
+#include "hw/misc/apple_smc.h"
 #include "hw/arm/apple_dart.h"
 
 #include "hw/arm/exynos4210.h"
@@ -1056,6 +1057,46 @@ static void t8030_create_pmu(MachineState *machine, const char *parent,
     spmi_slave_realize_and_unref(SPMI_SLAVE(pmu), spmi->bus, &error_fatal);
 }
 
+static void t8030_create_smc(MachineState* machine)
+{
+    int i;
+    uint32_t *ints;
+    DTBProp *prop;
+    uint64_t *reg;
+    T8030MachineState *tms = T8030_MACHINE(machine);
+    SysBusDevice *smc;
+    DTBNode *child = find_dtb_node(tms->device_tree, "arm-io");
+
+    assert(child != NULL);
+    child = find_dtb_node(child, "smc");
+    assert(child != NULL);
+
+    smc = apple_smc_create(child, tms->build_version);
+    assert(smc);
+
+    object_property_add_child(OBJECT(machine), "smc", OBJECT(smc));
+    prop = find_dtb_prop(child, "reg");
+    assert(prop);
+    reg = (uint64_t*)prop->value;
+
+    /*
+    0: AppleA7IOP akfRegMap
+    1: AppleASCWrapV2 coreRegisterMap
+    */
+    for (int i = 0; i < prop->length / 16; i++) {
+        sysbus_mmio_map(smc, i, tms->soc_base_pa + reg[i * 2]);
+    }
+
+    prop = find_dtb_prop(child, "interrupts");
+    assert(prop);
+    ints = (uint32_t*)prop->value;
+
+    for(i = 0; i < prop->length / sizeof(uint32_t); i++) {
+        sysbus_connect_irq(smc, i, qdev_get_gpio_in(DEVICE(tms->aic), ints[i]));
+    }
+
+    sysbus_realize_and_unref(smc, &error_fatal);
+}
 
 static void t8030_cpu_reset(void *opaque)
 {
@@ -1163,6 +1204,8 @@ static void t8030_machine_init(MachineState *machine)
     t8030_create_spmi(machine, "spmi2");
 
     t8030_create_pmu(machine, "spmi0", "spmi-pmu");
+
+    t8030_create_smc(machine);
 }
 
 static void t8030_set_trustcache_filename(Object *obj, const char *value, Error **errp)
