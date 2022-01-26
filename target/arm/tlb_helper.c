@@ -91,6 +91,9 @@ static void QEMU_NORETURN arm_deliver_fault(ARMCPU *cpu, vaddr addr,
     if (access_type == MMU_INST_FETCH) {
         syn = syn_insn_abort(same_el, fi->ea, fi->s1ptw, fsc);
         exc = EXCP_PREFETCH_ABORT;
+        if (fi->type == ARMFault_GXF_Abort) {
+            exc = EXCP_GXF_ABORT;
+        }
     } else {
         syn = merge_syn_data_abort(env->exception.syndrome, target_el,
                                    same_el, fi->ea, fi->s1ptw,

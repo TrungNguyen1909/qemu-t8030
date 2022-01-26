@@ -9637,6 +9637,7 @@ void arm_log_exception(int idx)
             [EXCP_LSERR] = "v8M LSERR UsageFault",
             [EXCP_UNALIGNED] = "v7M UNALIGNED UsageFault",
             [EXCP_GENTER] = "Guarded execution enter",
+            [EXCP_GXF_ABORT] = "Guarded execution abort",
         };
 
         if (idx >= 0 && idx < ARRAY_SIZE(excnames)) {
@@ -10316,6 +10317,10 @@ static void arm_cpu_do_interrupt_aarch64(CPUState *cs)
     }
 
     switch (cs->exception_index) {
+    case EXCP_GXF_ABORT:
+        addr = env->gxf.gxf_abort_el[new_el];
+        genter = true;
+        /* fall through */ 
     case EXCP_PREFETCH_ABORT:
     case EXCP_DATA_ABORT:
         if (arm_is_guarded(env)) {
@@ -11980,9 +11985,21 @@ static bool get_phys_addr_lpae(CPUARMState *env, uint64_t address,
         xn = extract32(attrs, 12, 1);
         pxn = extract32(attrs, 11, 1);
         *prot = get_S1prot(env, mmu_idx, aarch64, ap, ns, xn, pxn);
+
+        if (access_type == MMU_INST_FETCH) {
+            if (arm_is_sprr_enabled(env) && !arm_is_guarded(env)) {
+                if (!(*prot & (1 << access_type))) {
+                    int gl_prot = pte_to_sprr_prot_is_guarded(env, ap, xn,
+                                                                 pxn, true);
+                    if (gl_prot & (1 << access_type)) {
+                        fault_type = ARMFault_GXF_Abort;
+                        goto do_fault;
+                    }
+                }
+            }
+        }
     }
 
-    //TODO: GXF aborts when EL jumps to GL code
     fault_type = ARMFault_Permission;
     if (!(*prot & (1 << access_type))) {
         goto do_fault;

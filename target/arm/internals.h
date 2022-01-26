@@ -367,6 +367,7 @@ typedef enum ARMFaultType {
     ARMFault_ICacheMaint,
     ARMFault_QEMU_NSCExec, /* v8M: NS executing in S&NSC memory */
     ARMFault_QEMU_SFault, /* v8M: SecureFault INVTRAN, INVEP or AUVIOL */
+    ARMFault_GXF_Abort,
 } ARMFaultType;
 
 /**
@@ -530,6 +531,10 @@ static inline uint32_t arm_fi_to_lfsc(ARMMMUFaultInfo *fi)
         break;
     case ARMFault_Exclusive:
         fsc = 0x35;
+        break;
+    case ARMFault_GXF_Abort:
+        /* TODO: GXF set this properly */
+        fsc = (fi->level & 3) | (0x3 << 2);
         break;
     default:
         /* Other faults can't occur in a context that requires a
