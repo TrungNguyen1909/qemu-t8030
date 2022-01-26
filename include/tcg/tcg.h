@@ -1159,8 +1159,8 @@ typedef uint32_t TCGMemOpIdx;
  */
 static inline TCGMemOpIdx make_memop_idx(MemOp op, unsigned idx)
 {
-    tcg_debug_assert(idx <= 15);
-    return (op << 4) | idx;
+    tcg_debug_assert(idx <= 31);
+    return (op << 5) | idx;
 }
 
 /**
@@ -1171,7 +1171,7 @@ static inline TCGMemOpIdx make_memop_idx(MemOp op, unsigned idx)
  */
 static inline MemOp get_memop(TCGMemOpIdx oi)
 {
-    return oi >> 4;
+    return oi >> 5;
 }
 
 /**
@@ -1182,7 +1182,7 @@ static inline MemOp get_memop(TCGMemOpIdx oi)
  */
 static inline unsigned get_mmuidx(TCGMemOpIdx oi)
 {
-    return oi & 15;
+    return oi & 31;
 }
 
 /**
