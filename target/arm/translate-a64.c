@@ -14685,6 +14685,7 @@ static void disas_gxf_insn(DisasContext *s, uint32_t insn)
 
         default:
             unallocated_encoding(s);
+            break;
     }
 }
 
@@ -14741,7 +14742,11 @@ static void disas_a64_insn(CPUARMState *env, DisasContext *s)
 
     switch (extract32(insn, 25, 4)) {
     case 0x0:
-        disas_gxf_insn(s, insn);
+        if (s->gxf_active) {
+            disas_gxf_insn(s, insn);
+        } else {
+            unallocated_encoding(s);
+        }
         break;
     case 0x1: case 0x3: /* UNALLOCATED */
         unallocated_encoding(s);
@@ -14806,6 +14811,7 @@ static void aarch64_tr_init_disas_context(DisasContextBase *dcbase,
      */
     dc->secure_routed_to_el3 = arm_feature(env, ARM_FEATURE_EL3) &&
                                !arm_el_is_aa64(env, 3);
+    dc->gxf_active = arm_feature(env, ARM_FEATURE_GXF);
     dc->thumb = 0;
     dc->sctlr_b = 0;
     dc->be_data = EX_TBFLAG_ANY(tb_flags, BE_DATA) ? MO_BE : MO_LE;
@@ -14831,7 +14837,7 @@ static void aarch64_tr_init_disas_context(DisasContextBase *dcbase,
     dc->ata = EX_TBFLAG_A64(tb_flags, ATA);
     dc->mte_active[0] = EX_TBFLAG_A64(tb_flags, MTE_ACTIVE);
     dc->mte_active[1] = EX_TBFLAG_A64(tb_flags, MTE0_ACTIVE);
-    dc->guarded = arm_mmu_idx_is_guarded(dc->mmu_idx);
+    dc->guarded = dc->gxf_active && arm_mmu_idx_is_guarded(dc->mmu_idx);
     dc->vec_len = 0;
     dc->vec_stride = 0;
     dc->cp_regs = arm_cpu->cp_regs;

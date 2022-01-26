@@ -902,6 +902,8 @@ struct ARMCPU {
     bool has_el2;
     /* CPU has security extension */
     bool has_el3;
+    /* CPU has Apple's GXF support */
+    bool has_gxf;
     /* CPU has PMU (Performance Monitor Unit) */
     bool has_pmu;
     /* CPU has VFP */
@@ -2208,6 +2210,7 @@ enum arm_features {
     ARM_FEATURE_M_SECURITY, /* M profile Security Extension */
     ARM_FEATURE_M_MAIN, /* M profile Main Extension */
     ARM_FEATURE_V8_1M, /* M profile extras only in v8.1M and later */
+    ARM_FEATURE_GXF, /* has Apple's GXF support */
 };
 
 static inline int arm_feature(CPUARMState *env, int feature)
@@ -2787,7 +2790,8 @@ static inline int arm_current_el(CPUARMState *env)
 /* Return true if the processor is in GXF state */
 static inline bool arm_is_guarded(CPUARMState *env)
 {
-    return env->gxf.gxf_status_el[arm_current_el(env)] & 1;
+    return arm_feature(env, ARM_FEATURE_GXF) && (arm_current_el(env) > 0) &&
+           (env->gxf.gxf_status_el[arm_current_el(env)] & 1);
 }
 
 /* Return true if the processor has SPRR enabled */

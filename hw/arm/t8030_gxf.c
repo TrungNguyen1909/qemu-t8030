@@ -375,4 +375,5 @@ void t8030cpu_init_gxf_override(T8030CPUState *cpu)
 void t8030cpu_init_gxf(T8030CPUState *cpu)
 {
     define_arm_cp_regs(ARM_CPU(cpu), t8030gxf_cp_reginfo);
+    object_property_set_bool(OBJECT(cpu), "has_gxf", true, &error_abort);
 }

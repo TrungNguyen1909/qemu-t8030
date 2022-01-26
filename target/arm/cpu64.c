@@ -840,6 +840,9 @@ static void aarch64_max_initfn(Object *obj)
         /* Default to PAUTH on, with the architected algorithm. */
         qdev_property_add_static(DEVICE(obj), &arm_cpu_pauth_property);
         qdev_property_add_static(DEVICE(obj), &arm_cpu_pauth_impdef_property);
+
+        /* GXF is available, disabled by default */
+        set_feature(&cpu->env, ARM_FEATURE_GXF);
     }
 
     aarch64_add_sve_properties(obj);
