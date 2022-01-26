@@ -815,6 +815,8 @@ static void tlbiall_nsnh_write(CPUARMState *env, const ARMCPRegInfo *ri,
     tlb_flush_by_mmuidx(cs,
                         ARMMMUIdxBit_E10_1 |
                         ARMMMUIdxBit_E10_1_PAN |
+                        ARMMMUIdxBit_GE10_1 |
+                        ARMMMUIdxBit_GE10_1_PAN |
                         ARMMMUIdxBit_E10_0);
 }
 
@@ -826,6 +828,8 @@ static void tlbiall_nsnh_is_write(CPUARMState *env, const ARMCPRegInfo *ri,
     tlb_flush_by_mmuidx_all_cpus_synced(cs,
                                         ARMMMUIdxBit_E10_1 |
                                         ARMMMUIdxBit_E10_1_PAN |
+                                        ARMMMUIdxBit_GE10_1 |
+                                        ARMMMUIdxBit_GE10_1_PAN |
                                         ARMMMUIdxBit_E10_0);
 }
 
@@ -835,7 +839,7 @@ static void tlbiall_hyp_write(CPUARMState *env, const ARMCPRegInfo *ri,
 {
     CPUState *cs = env_cpu(env);
 
-    tlb_flush_by_mmuidx(cs, ARMMMUIdxBit_E2);
+    tlb_flush_by_mmuidx(cs, ARMMMUIdxBit_GE2 | ARMMMUIdxBit_E2);
 }
 
 static void tlbiall_hyp_is_write(CPUARMState *env, const ARMCPRegInfo *ri,
@@ -843,7 +847,8 @@ static void tlbiall_hyp_is_write(CPUARMState *env, const ARMCPRegInfo *ri,
 {
     CPUState *cs = env_cpu(env);
 
-    tlb_flush_by_mmuidx_all_cpus_synced(cs, ARMMMUIdxBit_E2);
+    tlb_flush_by_mmuidx_all_cpus_synced(cs, ARMMMUIdxBit_E2 |
+                                            ARMMMUIdxBit_GE2);
 }
 
 static void tlbimva_hyp_write(CPUARMState *env, const ARMCPRegInfo *ri,
@@ -852,7 +857,7 @@ static void tlbimva_hyp_write(CPUARMState *env, const ARMCPRegInfo *ri,
     CPUState *cs = env_cpu(env);
     uint64_t pageaddr = value & ~MAKE_64BIT_MASK(0, 12);
 
-    tlb_flush_page_by_mmuidx(cs, pageaddr, ARMMMUIdxBit_E2);
+    tlb_flush_page_by_mmuidx(cs, pageaddr, ARMMMUIdxBit_E2 | ARMMMUIdxBit_GE2);
 }
 
 static void tlbimva_hyp_is_write(CPUARMState *env, const ARMCPRegInfo *ri,
@@ -862,7 +867,8 @@ static void tlbimva_hyp_is_write(CPUARMState *env, const ARMCPRegInfo *ri,
     uint64_t pageaddr = value & ~MAKE_64BIT_MASK(0, 12);
 
     tlb_flush_page_by_mmuidx_all_cpus_synced(cs, pageaddr,
-                                             ARMMMUIdxBit_E2);
+                                             ARMMMUIdxBit_E2 |
+                                             ARMMMUIdxBit_GE2);
 }
 
 static const ARMCPRegInfo cp_reginfo[] = {
@@ -2885,6 +2891,8 @@ static int gt_phys_redir_timeridx(CPUARMState *env)
     case ARMMMUIdx_E20_0:
     case ARMMMUIdx_E20_2:
     case ARMMMUIdx_E20_2_PAN:
+    case ARMMMUIdx_GE20_2:
+    case ARMMMUIdx_GE20_2_PAN:
     case ARMMMUIdx_SE20_0:
     case ARMMMUIdx_SE20_2:
     case ARMMMUIdx_SE20_2_PAN:
@@ -2900,6 +2908,8 @@ static int gt_virt_redir_timeridx(CPUARMState *env)
     case ARMMMUIdx_E20_0:
     case ARMMMUIdx_E20_2:
     case ARMMMUIdx_E20_2_PAN:
+    case ARMMMUIdx_GE20_2:
+    case ARMMMUIdx_GE20_2_PAN:
     case ARMMMUIdx_SE20_0:
     case ARMMMUIdx_SE20_2:
     case ARMMMUIdx_SE20_2_PAN:
@@ -3538,7 +3548,9 @@ static uint64_t do_ats_write(CPUARMState *env, uint64_t value,
         if (arm_feature(env, ARM_FEATURE_EL2)) {
             if (mmu_idx == ARMMMUIdx_E10_0 ||
                 mmu_idx == ARMMMUIdx_E10_1 ||
-                mmu_idx == ARMMMUIdx_E10_1_PAN) {
+                mmu_idx == ARMMMUIdx_E10_1_PAN ||
+                mmu_idx == ARMMMUIdx_GE10_1 ||
+                mmu_idx == ARMMMUIdx_GE10_1_PAN) {
                 format64 |= env->cp15.hcr_el2 & (HCR_VM | HCR_DC);
             } else {
                 format64 |= arm_current_el(env) == 2;
@@ -3603,6 +3615,7 @@ static void ats_write(CPUARMState *env, const ARMCPRegInfo *ri, uint64_t value)
     ARMMMUIdx mmu_idx;
     int el = arm_current_el(env);
     bool secure = arm_is_secure_below_el3(env);
+    bool guarded = arm_is_guarded(env);
 
     switch (ri->opc2 & 6) {
     case 0:
@@ -3617,9 +3630,12 @@ static void ats_write(CPUARMState *env, const ARMCPRegInfo *ri, uint64_t value)
         case 1:
             if (ri->crm == 9 && (env->uncached_cpsr & CPSR_PAN)) {
                 mmu_idx = (secure ? ARMMMUIdx_Stage1_SE1_PAN
-                           : ARMMMUIdx_Stage1_E1_PAN);
+                           : (guarded ? ARMMMUIdx_Stage1_GE1_PAN
+                              : ARMMMUIdx_Stage1_E1_PAN));
             } else {
-                mmu_idx = secure ? ARMMMUIdx_Stage1_SE1 : ARMMMUIdx_Stage1_E1;
+                mmu_idx = secure ? ARMMMUIdx_Stage1_SE1
+                          : (guarded ? ARMMMUIdx_Stage1_GE1
+                             : ARMMMUIdx_Stage1_E1);
             }
             break;
         default:
@@ -3697,6 +3713,7 @@ static void ats_write64(CPUARMState *env, const ARMCPRegInfo *ri,
     MMUAccessType access_type = ri->opc2 & 1 ? MMU_DATA_STORE : MMU_DATA_LOAD;
     ARMMMUIdx mmu_idx;
     int secure = arm_is_secure_below_el3(env);
+    bool guarded = arm_is_guarded(env);
 
     switch (ri->opc2 & 6) {
     case 0:
@@ -3704,13 +3721,17 @@ static void ats_write64(CPUARMState *env, const ARMCPRegInfo *ri,
         case 0: /* AT S1E1R, AT S1E1W, AT S1E1RP, AT S1E1WP */
             if (ri->crm == 9 && (env->pstate & PSTATE_PAN)) {
                 mmu_idx = (secure ? ARMMMUIdx_Stage1_SE1_PAN
-                           : ARMMMUIdx_Stage1_E1_PAN);
+                           : (guarded ? ARMMMUIdx_Stage1_GE1_PAN
+                              : ARMMMUIdx_Stage1_E1_PAN));
             } else {
-                mmu_idx = secure ? ARMMMUIdx_Stage1_SE1 : ARMMMUIdx_Stage1_E1;
+                mmu_idx = secure ? ARMMMUIdx_Stage1_SE1
+                          : (guarded ? ARMMMUIdx_Stage1_GE1
+                             : ARMMMUIdx_Stage1_E1);
             }
             break;
         case 4: /* AT S1E2R, AT S1E2W */
-            mmu_idx = secure ? ARMMMUIdx_SE2 : ARMMMUIdx_E2;
+            mmu_idx = secure ? ARMMMUIdx_SE2
+                      : (guarded ? ARMMMUIdx_GE2 : ARMMMUIdx_E2);
             break;
         case 6: /* AT S1E3R, AT S1E3W */
             mmu_idx = ARMMMUIdx_SE3;
@@ -3723,7 +3744,8 @@ static void ats_write64(CPUARMState *env, const ARMCPRegInfo *ri,
         mmu_idx = secure ? ARMMMUIdx_Stage1_SE0 : ARMMMUIdx_Stage1_E0;
         break;
     case 4: /* AT S12E1R, AT S12E1W */
-        mmu_idx = secure ? ARMMMUIdx_SE10_1 : ARMMMUIdx_E10_1;
+        mmu_idx = secure ? ARMMMUIdx_SE10_1
+                  : (guarded ? ARMMMUIdx_GE10_1 : ARMMMUIdx_E10_1);
         break;
     case 6: /* AT S12E0R, AT S12E0W */
         mmu_idx = secure ? ARMMMUIdx_SE10_0 : ARMMMUIdx_E10_0;
@@ -4025,9 +4047,12 @@ static void vmsa_tcr_ttbr_el2_write(CPUARMState *env, const ARMCPRegInfo *ri,
      */
     if (extract64(raw_read(env, ri) ^ value, 48, 16) &&
         (arm_hcr_el2_eff(env) & HCR_E2H)) {
-        uint16_t mask = ARMMMUIdxBit_E20_2 |
-                        ARMMMUIdxBit_E20_2_PAN |
-                        ARMMMUIdxBit_E20_0;
+        uint16_t mask = ARMMMUIdxBit_E20_0;
+        if (arm_is_guarded(env)) {
+            mask |= ARMMMUIdxBit_GE20_2 | ARMMMUIdxBit_GE20_2_PAN;
+        } else {
+            mask |= ARMMMUIdxBit_E20_2 | ARMMMUIdxBit_E20_2_PAN;
+        }
 
         if (arm_is_secure_below_el3(env)) {
             mask >>= ARM_MMU_IDX_A_NS;
@@ -4049,9 +4074,12 @@ static void vttbr_write(CPUARMState *env, const ARMCPRegInfo *ri,
      * the combined stage 1&2 tlbs (EL10_1 and EL10_0).
      */
     if (raw_read(env, ri) != value) {
-        uint16_t mask = ARMMMUIdxBit_E10_1 |
-                        ARMMMUIdxBit_E10_1_PAN |
-                        ARMMMUIdxBit_E10_0;
+        uint16_t mask = ARMMMUIdxBit_E10_0;
+        if (arm_is_guarded(env)) {
+            mask |= ARMMMUIdxBit_GE10_1 | ARMMMUIdxBit_GE10_1_PAN;
+        } else {
+            mask |= ARMMMUIdxBit_E10_1 | ARMMMUIdxBit_E10_1_PAN;
+        }
 
         if (arm_is_secure_below_el3(env)) {
             mask >>= ARM_MMU_IDX_A_NS;
@@ -4526,15 +4554,19 @@ static CPAccessResult aa64_cacheop_pou_access(CPUARMState *env,
 static int vae1_tlbmask(CPUARMState *env)
 {
     uint64_t hcr = arm_hcr_el2_eff(env);
-    uint16_t mask;
+    uint32_t mask;
 
     if ((hcr & (HCR_E2H | HCR_TGE)) == (HCR_E2H | HCR_TGE)) {
         mask = ARMMMUIdxBit_E20_2 |
                ARMMMUIdxBit_E20_2_PAN |
+               ARMMMUIdxBit_GE20_2 |
+               ARMMMUIdxBit_GE20_2_PAN |
                ARMMMUIdxBit_E20_0;
     } else {
         mask = ARMMMUIdxBit_E10_1 |
                ARMMMUIdxBit_E10_1_PAN |
+               ARMMMUIdxBit_GE10_1 |
+               ARMMMUIdxBit_GE10_1_PAN |
                ARMMMUIdxBit_E10_0;
     }
 
@@ -4611,6 +4643,8 @@ static int alle1_tlbmask(CPUARMState *env)
     } else {
         return ARMMMUIdxBit_E10_1 |
                ARMMMUIdxBit_E10_1_PAN |
+               ARMMMUIdxBit_GE10_1 |
+               ARMMMUIdxBit_GE10_1_PAN |
                ARMMMUIdxBit_E10_0;
     }
 }
@@ -4626,7 +4660,10 @@ static int e2_tlbmask(CPUARMState *env)
         return ARMMMUIdxBit_E20_0 |
                ARMMMUIdxBit_E20_2 |
                ARMMMUIdxBit_E20_2_PAN |
-               ARMMMUIdxBit_E2;
+               ARMMMUIdxBit_E2 |
+               ARMMMUIdxBit_GE20_2 |
+               ARMMMUIdxBit_GE20_2_PAN |
+               ARMMMUIdxBit_GE2;
     }
 }
 
@@ -4748,7 +4785,8 @@ static void tlbi_aa64_vae2is_write(CPUARMState *env, const ARMCPRegInfo *ri,
     CPUState *cs = env_cpu(env);
     uint64_t pageaddr = sextract64(value << 12, 0, 56);
     bool secure = arm_is_secure_below_el3(env);
-    int mask = secure ? ARMMMUIdxBit_SE2 : ARMMMUIdxBit_E2;
+    int mask = secure ? ARMMMUIdxBit_SE2 :
+               (ARMMMUIdxBit_E2 | ARMMMUIdxBit_GE2);
     int bits = tlbbits_for_regime(env, secure ? ARMMMUIdx_SE2 : ARMMMUIdx_E2,
                                   pageaddr);
 
@@ -4867,7 +4905,7 @@ static void tlbi_aa64_rvae1is_write(CPUARMState *env,
 static int vae2_tlbmask(CPUARMState *env)
 {
     return (arm_is_secure_below_el3(env)
-            ? ARMMMUIdxBit_SE2 : ARMMMUIdxBit_E2);
+            ? ARMMMUIdxBit_SE2 : (ARMMMUIdxBit_E2 | ARMMMUIdxBit_GE2));
 }
 
 static void tlbi_aa64_rvae2_write(CPUARMState *env,
@@ -10639,6 +10677,10 @@ static inline ARMMMUIdx stage_1_mmu_idx(ARMMMUIdx mmu_idx)
         return ARMMMUIdx_Stage1_E1;
     case ARMMMUIdx_E10_1_PAN:
         return ARMMMUIdx_Stage1_E1_PAN;
+    case ARMMMUIdx_GE10_1:
+        return ARMMMUIdx_Stage1_GE1;
+    case ARMMMUIdx_GE10_1_PAN:
+        return ARMMMUIdx_Stage1_GE1_PAN;
     default:
         return mmu_idx;
     }
@@ -10688,6 +10730,8 @@ static inline bool regime_is_user(CPUARMState *env, ARMMMUIdx mmu_idx)
     case ARMMMUIdx_E10_0:
     case ARMMMUIdx_E10_1:
     case ARMMMUIdx_E10_1_PAN:
+    case ARMMMUIdx_GE10_1:
+    case ARMMMUIdx_GE10_1_PAN:
         g_assert_not_reached();
     }
 }
@@ -13407,6 +13451,8 @@ int arm_mmu_idx_to_el(ARMMMUIdx mmu_idx)
     case ARMMMUIdx_E10_1_PAN:
     case ARMMMUIdx_SE10_1:
     case ARMMMUIdx_SE10_1_PAN:
+    case ARMMMUIdx_GE10_1:
+    case ARMMMUIdx_GE10_1_PAN:
         return 1;
     case ARMMMUIdx_E2:
     case ARMMMUIdx_E20_2:
@@ -13414,11 +13460,32 @@ int arm_mmu_idx_to_el(ARMMMUIdx mmu_idx)
     case ARMMMUIdx_SE2:
     case ARMMMUIdx_SE20_2:
     case ARMMMUIdx_SE20_2_PAN:
+    case ARMMMUIdx_GE2:
+    case ARMMMUIdx_GE20_2:
+    case ARMMMUIdx_GE20_2_PAN:
         return 2;
     case ARMMMUIdx_SE3:
         return 3;
     default:
         g_assert_not_reached();
+    }
+}
+
+int arm_mmu_idx_is_guarded(ARMMMUIdx mmu_idx)
+{
+    if (mmu_idx & ARM_MMU_IDX_M) {
+        return false;
+    }
+
+    switch (mmu_idx) {
+    case ARMMMUIdx_GE10_1:
+    case ARMMMUIdx_GE10_1_PAN:
+    case ARMMMUIdx_GE2:
+    case ARMMMUIdx_GE20_2:
+    case ARMMMUIdx_GE20_2_PAN:
+        return true;
+    default:
+        return false;
     }
 }
 
@@ -13475,6 +13542,10 @@ ARMMMUIdx arm_mmu_idx_el(CPUARMState *env, int el)
 
     if (arm_is_secure_below_el3(env)) {
         idx &= ~ARM_MMU_IDX_A_NS;
+    }
+
+    if (arm_is_guarded(env) && (el > 0)) {
+        idx |= ARM_MMU_IDX_A_GXF;
     }
 
     return idx;
@@ -13638,10 +13709,6 @@ static CPUARMTBFlags rebuild_hflags_a64(CPUARMState *env, int el, int fp_el,
         }
     }
 
-    if (arm_is_guarded(env)) {
-        DP_TBFLAG_A64(flags, GUARDED, 1);
-    }
-
     if (cpu_isar_feature(aa64_bti, env_archcpu(env))) {
         /* Note that SCTLR_EL[23].BT == SCTLR_BT1.  */
         if (sctlr & (el == 0 ? SCTLR_BT0 : SCTLR_BT1)) {
@@ -13656,6 +13723,8 @@ static CPUARMTBFlags rebuild_hflags_a64(CPUARMState *env, int el, int fp_el,
         case ARMMMUIdx_E10_1_PAN:
         case ARMMMUIdx_SE10_1:
         case ARMMMUIdx_SE10_1_PAN:
+        case ARMMMUIdx_GE10_1:
+        case ARMMMUIdx_GE10_1_PAN:
             /* TODO: ARMv8.3-NV */
             DP_TBFLAG_A64(flags, UNPRIV, 1);
             break;
@@ -13663,6 +13732,8 @@ static CPUARMTBFlags rebuild_hflags_a64(CPUARMState *env, int el, int fp_el,
         case ARMMMUIdx_E20_2_PAN:
         case ARMMMUIdx_SE20_2:
         case ARMMMUIdx_SE20_2_PAN:
+        case ARMMMUIdx_GE20_2:
+        case ARMMMUIdx_GE20_2_PAN:
             /*
              * Note that EL20_2 is gated by HCR_EL2.E2H == 1, but EL20_0 is
              * gated by HCR_EL2.<E2H,TGE> == '11', and so is LDTR.

@@ -3174,12 +3174,13 @@ bool write_cpustate_to_list(ARMCPU *cpu, bool kvm_sync);
  * For M profile we arrange them to have a bit for priv, a bit for negpri
  * and a bit for secure.
  */
-#define ARM_MMU_IDX_A     0x10  /* A profile */
-#define ARM_MMU_IDX_NOTLB 0x20  /* does not have a TLB */
-#define ARM_MMU_IDX_M     0x40  /* M profile */
+#define ARM_MMU_IDX_A     0x20  /* A profile */
+#define ARM_MMU_IDX_NOTLB 0x40  /* does not have a TLB */
+#define ARM_MMU_IDX_M     0x80  /* M profile */
 
 /* Meanings of the bits for A profile mmu idx values */
 #define ARM_MMU_IDX_A_NS     0x8
+#define ARM_MMU_IDX_A_GXF    0x10
 
 /* Meanings of the bits for M profile mmu idx values */
 #define ARM_MMU_IDX_M_PRIV   0x1
@@ -3188,7 +3189,7 @@ bool write_cpustate_to_list(ARMCPU *cpu, bool kvm_sync);
 
 #define ARM_MMU_IDX_TYPE_MASK \
     (ARM_MMU_IDX_A | ARM_MMU_IDX_M | ARM_MMU_IDX_NOTLB)
-#define ARM_MMU_IDX_COREIDX_MASK 0xf
+#define ARM_MMU_IDX_COREIDX_MASK 0x1f
 
 typedef enum ARMMMUIdx {
     /*
@@ -3211,6 +3212,12 @@ typedef enum ARMMMUIdx {
     ARMMMUIdx_E20_2_PAN = ARMMMUIdx_SE20_2_PAN | ARM_MMU_IDX_A_NS,
     ARMMMUIdx_E2        = ARMMMUIdx_SE2 | ARM_MMU_IDX_A_NS,
 
+    ARMMMUIdx_GE10_1     = ARMMMUIdx_E10_1 | ARM_MMU_IDX_A_GXF,
+    ARMMMUIdx_GE20_2     = ARMMMUIdx_E20_2 | ARM_MMU_IDX_A_GXF,
+    ARMMMUIdx_GE10_1_PAN = ARMMMUIdx_E10_1_PAN | ARM_MMU_IDX_A_GXF,
+    ARMMMUIdx_GE20_2_PAN = ARMMMUIdx_E20_2_PAN | ARM_MMU_IDX_A_GXF,
+    ARMMMUIdx_GE2        = ARMMMUIdx_E2 | ARM_MMU_IDX_A_GXF,
+
     /*
      * These are not allocated TLBs and are used only for AT system
      * instructions or for the first stage of an S12 page table walk.
@@ -3221,6 +3228,8 @@ typedef enum ARMMMUIdx {
     ARMMMUIdx_Stage1_SE0 = 3 | ARM_MMU_IDX_NOTLB,
     ARMMMUIdx_Stage1_SE1 = 4 | ARM_MMU_IDX_NOTLB,
     ARMMMUIdx_Stage1_SE1_PAN = 5 | ARM_MMU_IDX_NOTLB,
+    ARMMMUIdx_Stage1_GE1 = 6 | ARM_MMU_IDX_NOTLB,
+    ARMMMUIdx_Stage1_GE1_PAN = 7 | ARM_MMU_IDX_NOTLB,
     /*
      * Not allocated a TLB: used only for second stage of an S12 page
      * table walk, or for descriptor loads during first stage of an S1
@@ -3228,8 +3237,8 @@ typedef enum ARMMMUIdx {
      * then various TLB flush insns which currently are no-ops or flush
      * only stage 1 MMU indexes will need to change to flush stage 2.
      */
-    ARMMMUIdx_Stage2     = 6 | ARM_MMU_IDX_NOTLB,
-    ARMMMUIdx_Stage2_S   = 7 | ARM_MMU_IDX_NOTLB,
+    ARMMMUIdx_Stage2     = 8 | ARM_MMU_IDX_NOTLB,
+    ARMMMUIdx_Stage2_S   = 9 | ARM_MMU_IDX_NOTLB,
 
     /*
      * M-profile.
@@ -3267,6 +3276,11 @@ typedef enum ARMMMUIdxBit {
     TO_CORE_BIT(SE20_2_PAN),
     TO_CORE_BIT(SE2),
     TO_CORE_BIT(SE3),
+    TO_CORE_BIT(GE10_1),
+    TO_CORE_BIT(GE10_1_PAN),
+    TO_CORE_BIT(GE2),
+    TO_CORE_BIT(GE20_2),
+    TO_CORE_BIT(GE20_2_PAN),
 
     TO_CORE_BIT(MUser),
     TO_CORE_BIT(MPriv),
@@ -3509,13 +3523,13 @@ FIELD(TBFLAG_ANY, AARCH64_STATE, 0, 1)
 FIELD(TBFLAG_ANY, SS_ACTIVE, 1, 1)
 FIELD(TBFLAG_ANY, PSTATE__SS, 2, 1)      /* Not cached. */
 FIELD(TBFLAG_ANY, BE_DATA, 3, 1)
-FIELD(TBFLAG_ANY, MMUIDX, 4, 4)
+FIELD(TBFLAG_ANY, MMUIDX, 4, 5)
 /* Target EL if we take a floating-point-disabled exception */
-FIELD(TBFLAG_ANY, FPEXC_EL, 8, 2)
+FIELD(TBFLAG_ANY, FPEXC_EL, 9, 2)
 /* For A-profile only, target EL for debug exceptions.  */
-FIELD(TBFLAG_ANY, DEBUG_TARGET_EL, 10, 2)
+FIELD(TBFLAG_ANY, DEBUG_TARGET_EL, 11, 2)
 /* Memory operations require alignment: SCTLR_ELx.A or CCR.UNALIGN_TRP */
-FIELD(TBFLAG_ANY, ALIGN_MEM, 12, 1)
+FIELD(TBFLAG_ANY, ALIGN_MEM, 13, 1)
 
 /*
  * Bit usage when in AArch32 state, both A- and M-profile.
@@ -3574,7 +3588,6 @@ FIELD(TBFLAG_A64, ATA, 15, 1)
 FIELD(TBFLAG_A64, TCMA, 16, 2)
 FIELD(TBFLAG_A64, MTE_ACTIVE, 18, 1)
 FIELD(TBFLAG_A64, MTE0_ACTIVE, 19, 1)
-FIELD(TBFLAG_A64, GUARDED, 20, 1)
 
 /*
  * Helpers for using the above.
