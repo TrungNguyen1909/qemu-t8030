@@ -76,10 +76,10 @@
  * target_ulong even on 32 bit builds */
 QEMU_BUILD_BUG_ON(sizeof(target_ulong) > sizeof(run_on_cpu_data));
 
-/* We currently can't handle more than 16 bits in the MMUIDX bitmask.
+/* We currently can't handle more than 32 bits in the MMUIDX bitmask.
  */
-QEMU_BUILD_BUG_ON(NB_MMU_MODES > 16);
-#define ALL_MMUIDX_BITS ((1 << NB_MMU_MODES) - 1)
+QEMU_BUILD_BUG_ON(NB_MMU_MODES > 31);
+#define ALL_MMUIDX_BITS ((1U << NB_MMU_MODES) - 1)
 
 static inline size_t tlb_n_entries(CPUTLBDescFast *fast)
 {
@@ -342,13 +342,13 @@ void tlb_flush_counts(size_t *pfull, size_t *ppart, size_t *pelide)
 static void tlb_flush_by_mmuidx_async_work(CPUState *cpu, run_on_cpu_data data)
 {
     CPUArchState *env = cpu->env_ptr;
-    uint16_t asked = data.host_int;
-    uint16_t all_dirty, work, to_clean;
+    uint32_t asked = data.host_int;
+    uint32_t all_dirty, work, to_clean;
     int64_t now = get_clock_realtime();
 
     assert_cpu_is_self(cpu);
 
-    tlb_debug("mmu_idx:0x%04" PRIx16 "\n", asked);
+    tlb_debug("mmu_idx:0x%04" PRIx32 "\n", asked);
 
     qemu_spin_lock(&env_tlb(env)->c.lock);
 
@@ -371,18 +371,18 @@ static void tlb_flush_by_mmuidx_async_work(CPUState *cpu, run_on_cpu_data data)
                    env_tlb(env)->c.full_flush_count + 1);
     } else {
         qatomic_set(&env_tlb(env)->c.part_flush_count,
-                   env_tlb(env)->c.part_flush_count + ctpop16(to_clean));
+                   env_tlb(env)->c.part_flush_count + ctpop32(to_clean));
         if (to_clean != asked) {
             qatomic_set(&env_tlb(env)->c.elide_flush_count,
                        env_tlb(env)->c.elide_flush_count +
-                       ctpop16(asked & ~to_clean));
+                       ctpop32(asked & ~to_clean));
         }
     }
 }
 
-void tlb_flush_by_mmuidx(CPUState *cpu, uint16_t idxmap)
+void tlb_flush_by_mmuidx(CPUState *cpu, uint32_t idxmap)
 {
-    tlb_debug("mmu_idx: 0x%" PRIx16 "\n", idxmap);
+    tlb_debug("mmu_idx: 0x%" PRIx32 "\n", idxmap);
 
     if (cpu->created && !qemu_cpu_is_self(cpu)) {
         async_run_on_cpu(cpu, tlb_flush_by_mmuidx_async_work,
@@ -397,11 +397,11 @@ void tlb_flush(CPUState *cpu)
     tlb_flush_by_mmuidx(cpu, ALL_MMUIDX_BITS);
 }
 
-void tlb_flush_by_mmuidx_all_cpus(CPUState *src_cpu, uint16_t idxmap)
+void tlb_flush_by_mmuidx_all_cpus(CPUState *src_cpu, uint32_t idxmap)
 {
     const run_on_cpu_func fn = tlb_flush_by_mmuidx_async_work;
 
-    tlb_debug("mmu_idx: 0x%"PRIx16"\n", idxmap);
+    tlb_debug("mmu_idx: 0x%"PRIx32"\n", idxmap);
 
     flush_all_helper(src_cpu, fn, RUN_ON_CPU_HOST_INT(idxmap));
     fn(src_cpu, RUN_ON_CPU_HOST_INT(idxmap));
@@ -412,11 +412,11 @@ void tlb_flush_all_cpus(CPUState *src_cpu)
     tlb_flush_by_mmuidx_all_cpus(src_cpu, ALL_MMUIDX_BITS);
 }
 
-void tlb_flush_by_mmuidx_all_cpus_synced(CPUState *src_cpu, uint16_t idxmap)
+void tlb_flush_by_mmuidx_all_cpus_synced(CPUState *src_cpu, uint32_t idxmap)
 {
     const run_on_cpu_func fn = tlb_flush_by_mmuidx_async_work;
 
-    tlb_debug("mmu_idx: 0x%"PRIx16"\n", idxmap);
+    tlb_debug("mmu_idx: 0x%"PRIx32"\n", idxmap);
 
     flush_all_helper(src_cpu, fn, RUN_ON_CPU_HOST_INT(idxmap));
     async_safe_run_on_cpu(src_cpu, fn, RUN_ON_CPU_HOST_INT(idxmap));
@@ -472,7 +472,8 @@ static inline bool tlb_flush_entry_locked(CPUTLBEntry *tlb_entry,
 }
 
 /* Called with tlb_c.lock held */
-static void tlb_flush_vtlb_page_mask_locked(CPUArchState *env, int mmu_idx,
+static void tlb_flush_vtlb_page_mask_locked(CPUArchState *env,
+                                            int mmu_idx,
                                             target_ulong page,
                                             target_ulong mask)
 {
@@ -487,7 +488,8 @@ static void tlb_flush_vtlb_page_mask_locked(CPUArchState *env, int mmu_idx,
     }
 }
 
-static inline void tlb_flush_vtlb_page_locked(CPUArchState *env, int mmu_idx,
+static inline void tlb_flush_vtlb_page_locked(CPUArchState *env,
+                                              int mmu_idx,
                                               target_ulong page)
 {
     tlb_flush_vtlb_page_mask_locked(env, mmu_idx, page, -1);
@@ -524,7 +526,7 @@ static void tlb_flush_page_locked(CPUArchState *env, int midx,
  */
 static void tlb_flush_page_by_mmuidx_async_0(CPUState *cpu,
                                              target_ulong addr,
-                                             uint16_t idxmap)
+                                             uint32_t idxmap)
 {
     CPUArchState *env = cpu->env_ptr;
     int mmu_idx;
@@ -559,14 +561,14 @@ static void tlb_flush_page_by_mmuidx_async_1(CPUState *cpu,
 {
     target_ulong addr_and_idxmap = (target_ulong) data.target_ptr;
     target_ulong addr = addr_and_idxmap & TARGET_PAGE_MASK;
-    uint16_t idxmap = addr_and_idxmap & ~TARGET_PAGE_MASK;
+    uint32_t idxmap = addr_and_idxmap & ~TARGET_PAGE_MASK;
 
     tlb_flush_page_by_mmuidx_async_0(cpu, addr, idxmap);
 }
 
 typedef struct {
     target_ulong addr;
-    uint16_t idxmap;
+    uint32_t idxmap;
 } TLBFlushPageByMMUIdxData;
 
 /**
@@ -588,9 +590,9 @@ static void tlb_flush_page_by_mmuidx_async_2(CPUState *cpu,
     g_free(d);
 }
 
-void tlb_flush_page_by_mmuidx(CPUState *cpu, target_ulong addr, uint16_t idxmap)
+void tlb_flush_page_by_mmuidx(CPUState *cpu, target_ulong addr, uint32_t idxmap)
 {
-    tlb_debug("addr: "TARGET_FMT_lx" mmu_idx:%" PRIx16 "\n", addr, idxmap);
+    tlb_debug("addr: "TARGET_FMT_lx" mmu_idx:%" PRIx32 "\n", addr, idxmap);
 
     /* This should already be page aligned */
     addr &= TARGET_PAGE_MASK;
@@ -622,9 +624,9 @@ void tlb_flush_page(CPUState *cpu, target_ulong addr)
 }
 
 void tlb_flush_page_by_mmuidx_all_cpus(CPUState *src_cpu, target_ulong addr,
-                                       uint16_t idxmap)
+                                       uint32_t idxmap)
 {
-    tlb_debug("addr: "TARGET_FMT_lx" mmu_idx:%"PRIx16"\n", addr, idxmap);
+    tlb_debug("addr: "TARGET_FMT_lx" mmu_idx:%"PRIx32"\n", addr, idxmap);
 
     /* This should already be page aligned */
     addr &= TARGET_PAGE_MASK;
@@ -663,9 +665,9 @@ void tlb_flush_page_all_cpus(CPUState *src, target_ulong addr)
 
 void tlb_flush_page_by_mmuidx_all_cpus_synced(CPUState *src_cpu,
                                               target_ulong addr,
-                                              uint16_t idxmap)
+                                              uint32_t idxmap)
 {
-    tlb_debug("addr: "TARGET_FMT_lx" mmu_idx:%"PRIx16"\n", addr, idxmap);
+    tlb_debug("addr: "TARGET_FMT_lx" mmu_idx:%"PRIx32"\n", addr, idxmap);
 
     /* This should already be page aligned */
     addr &= TARGET_PAGE_MASK;
@@ -760,7 +762,7 @@ static void tlb_flush_range_locked(CPUArchState *env, int midx,
 typedef struct {
     target_ulong addr;
     target_ulong len;
-    uint16_t idxmap;
+    uint32_t idxmap;
     uint16_t bits;
 } TLBFlushRangeData;
 
@@ -797,7 +799,7 @@ static void tlb_flush_range_by_mmuidx_async_1(CPUState *cpu,
 }
 
 void tlb_flush_range_by_mmuidx(CPUState *cpu, target_ulong addr,
-                               target_ulong len, uint16_t idxmap,
+                               target_ulong len, uint32_t idxmap,
                                unsigned bits)
 {
     TLBFlushRangeData d;
@@ -833,14 +835,14 @@ void tlb_flush_range_by_mmuidx(CPUState *cpu, target_ulong addr,
 }
 
 void tlb_flush_page_bits_by_mmuidx(CPUState *cpu, target_ulong addr,
-                                   uint16_t idxmap, unsigned bits)
+                                   uint32_t idxmap, unsigned bits)
 {
     tlb_flush_range_by_mmuidx(cpu, addr, TARGET_PAGE_SIZE, idxmap, bits);
 }
 
 void tlb_flush_range_by_mmuidx_all_cpus(CPUState *src_cpu,
                                         target_ulong addr, target_ulong len,
-                                        uint16_t idxmap, unsigned bits)
+                                        uint32_t idxmap, unsigned bits)
 {
     TLBFlushRangeData d;
     CPUState *dst_cpu;
@@ -880,7 +882,7 @@ void tlb_flush_range_by_mmuidx_all_cpus(CPUState *src_cpu,
 
 void tlb_flush_page_bits_by_mmuidx_all_cpus(CPUState *src_cpu,
                                             target_ulong addr,
-                                            uint16_t idxmap, unsigned bits)
+                                            uint32_t idxmap, unsigned bits)
 {
     tlb_flush_range_by_mmuidx_all_cpus(src_cpu, addr, TARGET_PAGE_SIZE,
                                        idxmap, bits);
@@ -889,7 +891,7 @@ void tlb_flush_page_bits_by_mmuidx_all_cpus(CPUState *src_cpu,
 void tlb_flush_range_by_mmuidx_all_cpus_synced(CPUState *src_cpu,
                                                target_ulong addr,
                                                target_ulong len,
-                                               uint16_t idxmap,
+                                               uint32_t idxmap,
                                                unsigned bits)
 {
     TLBFlushRangeData d, *p;
@@ -931,7 +933,7 @@ void tlb_flush_range_by_mmuidx_all_cpus_synced(CPUState *src_cpu,
 
 void tlb_flush_page_bits_by_mmuidx_all_cpus_synced(CPUState *src_cpu,
                                                    target_ulong addr,
-                                                   uint16_t idxmap,
+                                                   uint32_t idxmap,
                                                    unsigned bits)
 {
     tlb_flush_range_by_mmuidx_all_cpus_synced(src_cpu, addr, TARGET_PAGE_SIZE,
