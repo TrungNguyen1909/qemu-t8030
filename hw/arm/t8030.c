@@ -771,8 +771,14 @@ static void t8030_create_usb(MachineState *machine)
     T8030MachineState *tms = T8030_MACHINE(machine);
     DTBNode *child = find_dtb_node(tms->device_tree, "arm-io");
     DTBNode *drd = find_dtb_node(child, "usb-drd");
+    DTBNode *dart_usb = find_dtb_node(child, "dart-usb");
+    DTBNode *dart_usb_mapper = find_dtb_node(dart_usb, "mapper-usb-drd");
     DTBNode *phy, *complex, *device;
+    DTBProp *prop;
     DeviceState *otg;
+    AppleDARTState *dart;
+
+    IOMMUMemoryRegion *iommu = NULL;
     uint32_t value;
 
     phy = get_dtb_node(child, "otgphyctrl");
@@ -854,6 +860,7 @@ static void t8030_create_usb(MachineState *machine)
     assert(iommu);
 
     otg = apple_otg_create(complex);
+    object_property_add_child(OBJECT(machine), "otg", OBJECT(otg));
     assert(object_property_add_const_link(OBJECT(otg), "dma-mr",
                                           OBJECT(iommu)));
     prop = find_dtb_prop(phy, "reg");
@@ -875,7 +882,7 @@ static void t8030_create_usb(MachineState *machine)
                        ((uint32_t *)prop->value)[0]));
 }
 
-static void t8030_create_wdt(MachineState* machine)
+static void t8030_create_wdt(MachineState *machine)
 {
     int i;
     uint32_t *ints;
