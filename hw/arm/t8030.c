@@ -1281,22 +1281,9 @@ static char *t8030_get_boot_mode(Object *obj, Error **errp)
     }
 }
 
-static void t8030_instance_init(Object *obj)
+static void t8030_machine_class_init(ObjectClass *oc, void *data)
 {
-    object_property_add_str(obj, "trustcache-filename", t8030_get_trustcache_filename, t8030_set_trustcache_filename);
-    object_property_set_description(obj, "trustcache-filename",
-                                    "Set the trustcache filename to be loaded");
-    object_property_add_str(obj, "ticket-filename", t8030_get_ticket_filename, t8030_set_ticket_filename);
-    object_property_set_description(obj, "ticket-filename",
-                                    "Set the APTicket filename to be loaded");
-    object_property_add_str(obj, "boot-mode", t8030_get_boot_mode, t8030_set_boot_mode);
-    object_property_set_description(obj, "boot-mode",
-                                    "Set boot mode of the machine");
-}
-
-static void t8030_machine_class_init(ObjectClass *klass, void *data)
-{
-    MachineClass *mc = MACHINE_CLASS(klass);
+    MachineClass *mc = MACHINE_CLASS(oc);
 
     mc->desc = "T8030";
     mc->init = t8030_machine_init;
@@ -1310,6 +1297,22 @@ static void t8030_machine_class_init(ObjectClass *klass, void *data)
     mc->no_parallel = 1;
     mc->default_cpu_type = TYPE_T8030_CPU;
     mc->minimum_page_bits = 14;
+
+    object_class_property_add_str(oc, "trustcache-filename",
+                                  t8030_get_trustcache_filename,
+                                  t8030_set_trustcache_filename);
+    object_class_property_set_description(oc, "trustcache-filename",
+                                   "Set the trustcache filename to be loaded");
+    object_class_property_add_str(oc, "ticket-filename",
+                                  t8030_get_ticket_filename,
+                                  t8030_set_ticket_filename);
+    object_class_property_set_description(oc, "ticket-filename",
+                                    "Set the APTicket filename to be loaded");
+    object_class_property_add_str(oc, "boot-mode",
+                                  t8030_get_boot_mode,
+                                  t8030_set_boot_mode);
+    object_class_property_set_description(oc, "boot-mode",
+                                    "Set boot mode of the machine");
 }
 
 static const TypeInfo t8030_machine_info = {
@@ -1318,7 +1321,6 @@ static const TypeInfo t8030_machine_info = {
     .instance_size = sizeof(T8030MachineState),
     .class_size = sizeof(T8030MachineClass),
     .class_init = t8030_machine_class_init,
-    .instance_init = t8030_instance_init,
 };
 
 static void t8030_machine_types(void)
