@@ -158,7 +158,7 @@ static T8030CPUCluster *t8030_find_cluster(int cluster_id)
 {
     T8030CPUCluster *cluster = NULL;
     QTAILQ_FOREACH(cluster, &clusters, next) {
-        if (cluster->id == cluster_id)
+        if (CPU_CLUSTER(cluster)->cluster_id == cluster_id)
             return cluster;
     }
     return NULL;
@@ -203,7 +203,7 @@ static int add_cpu_to_cluster(Object *obj, void *opaque)
                                                                TYPE_T8030_CPU);
 
     if (cpu) {
-        cpu->cluster_index = cluster->id;
+        cpu->cluster_index = CPU_CLUSTER(cluster)->cluster_id;
         if (tcpu) {
             cluster->base = tcpu->cluster_reg[0];
             cluster->size = tcpu->cluster_reg[1];
@@ -544,7 +544,10 @@ static void t8030_cpu_realize(DeviceState *dev, Error **errp)
     Object *obj = OBJECT(dev);
 
     object_property_set_link(OBJECT(tcpu), "memory", OBJECT(&tcpu->memory),
-                             &error_abort);
+                             errp);
+    if (*errp) {
+        return;
+    }
     t8030_add_cpregs(tcpu);
     tclass->parent_realize(dev, errp);
     if (*errp) {
@@ -554,7 +557,10 @@ static void t8030_cpu_realize(DeviceState *dev, Error **errp)
     fiq_or = qdev_new(TYPE_OR_IRQ);
     object_property_add_child(obj, "fiq-or", OBJECT(fiq_or));
     qdev_prop_set_uint16(fiq_or, "num-lines", 16);
-    qdev_realize_and_unref(fiq_or, NULL, &error_fatal);
+    qdev_realize_and_unref(fiq_or, NULL, errp);
+    if (*errp) {
+        return;
+    }
     qdev_connect_gpio_out(fiq_or, 0, qdev_get_gpio_in(dev, ARM_CPU_FIQ));
 
     qdev_connect_gpio_out(dev, GTIMER_VIRT, qdev_get_gpio_in(fiq_or, 0));
@@ -712,8 +718,7 @@ static Property t8030_cpu_properties[] = {
 };
 
 static Property t8030_cpu_cluster_properties[] = {
-    DEFINE_PROP_UINT8("cluster-id", T8030CPUCluster, id, 0),
-    DEFINE_PROP_UINT8("cluster-type", T8030CPUCluster, type, 0),
+    DEFINE_PROP_UINT32("cluster-type", T8030CPUCluster, cluster_type, 0),
     DEFINE_PROP_END_OF_LIST(),
 };
 
@@ -813,7 +818,7 @@ static const TypeInfo t8030_cpu_info = {
 
 static const TypeInfo t8030_cpu_cluster_info = {
     .name = TYPE_T8030_CPU_CLUSTER,
-    .parent = TYPE_DEVICE,
+    .parent = TYPE_CPU_CLUSTER,
     .instance_size = sizeof(T8030CPUCluster),
     .instance_init = t8030_cpu_cluster_instance_init,
     .class_init = t8030_cpu_cluster_class_init,

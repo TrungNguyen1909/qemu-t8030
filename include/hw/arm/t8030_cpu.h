@@ -6,6 +6,7 @@
 #include "exec/hwaddr.h"
 #include "qemu/queue.h"
 #include "hw/arm/xnu_dtb.h"
+#include "hw/cpu/cluster.h"
 
 #define T8030_MAX_CPU 6
 #define T8030_MAX_CLUSTER 2
@@ -85,11 +86,10 @@ typedef struct T8030CPUState {
 } T8030CPUState;
 
 typedef struct T8030CPUCluster {
-    DeviceState parent_obj;
+    CPUClusterState parent_obj;
     hwaddr base;
     hwaddr size;
-    uint8_t id;
-    uint8_t type;
+    uint32_t cluster_type;
     MemoryRegion mr;
     T8030CPUState *cpus[T8030_MAX_CPU];
     uint32_t deferredIPI[T8030_MAX_CPU][T8030_MAX_CPU];

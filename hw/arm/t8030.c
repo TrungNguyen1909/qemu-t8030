@@ -1105,16 +1105,24 @@ static void t8030_cpu_reset(void *opaque)
     CPUState *cpu;
     CPUState *cs;
     CPUARMState *env;
+    bool found_first = false;
 
     CPU_FOREACH(cpu) {
-        ARM_CPU(cpu)->rvbar = tms->bootinfo.entry & ~0xfff;
-        cpu_reset(cpu);
+        T8030CPUState *tcpu = (T8030CPUState *)object_dynamic_cast(OBJECT(cpu),
+                                                               TYPE_T8030_CPU);
+        if (tcpu) {
+            ARM_CPU(cpu)->rvbar = tms->bootinfo.entry & ~0xfff;
+            cpu_reset(cpu);
+            if (!found_first) {
+                found_first = true;
+                cs = CPU(first_cpu);
+                env = &ARM_CPU(cs)->env;
+                env->xregs[0] = tms->bootinfo.bootargs_pa;
+                env->pc = tms->bootinfo.entry;
+            }
+        }
     }
 
-    cs = CPU(first_cpu);
-    env = &ARM_CPU(cs)->env;
-    env->xregs[0] = tms->bootinfo.bootargs_pa;
-    env->pc = tms->bootinfo.entry;
 }
 
 static void t8030_machine_reset(MachineState* machine)
