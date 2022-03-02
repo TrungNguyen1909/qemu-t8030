@@ -12,6 +12,7 @@ arm_ss.add(when: 'CONFIG_APPLE_SOC', if_true: files(
 )
 
 arm_ss.add(when: 'CONFIG_APPLE_DART', if_true: files('apple_dart.c'))
+arm_ss.add(when: 'CONFIG_APPLE_SART', if_true: files('apple_sart.c'))
 arm_ss.add(when: 'TARGET_AARCH64', if_true: tasn1)
 arm_ss.add(when: 'CONFIG_PLATFORM_BUS', if_true: files('sysbus-fdt.c'))
 arm_ss.add(when: 'CONFIG_ARM_VIRT', if_true: files('virt.c'))

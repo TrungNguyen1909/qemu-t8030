@@ -45,6 +45,7 @@
 #include "hw/or-irq.h"
 #include "hw/intc/apple_aic.h"
 #include "hw/block/apple_ans.h"
+#include "hw/arm/apple_sart.h"
 #include "hw/gpio/apple_gpio.h"
 #include "hw/i2c/apple_i2c.h"
 #include "hw/usb/apple_otg.h"
@@ -357,23 +358,6 @@ static const MemoryRegionOps pmgr_reg_ops = {
     .read = pmgr_reg_read,
 };
 
-static void sart_reg_write(void *opaque, hwaddr addr, uint64_t data, unsigned size)
-{
-    qemu_log_mask(LOG_UNIMP, "SART reg WRITE @ 0x" TARGET_FMT_lx " value: 0x" TARGET_FMT_lx "\n", addr, data);
-}
-
-static uint64_t sart_reg_read(void *opaque, hwaddr addr, unsigned size)
-{
-    qemu_log_mask(LOG_UNIMP, "SART reg READ @ 0x" TARGET_FMT_lx "\n", addr);
-
-    return 0;
-}
-
-static const MemoryRegionOps sart_reg_ops = {
-    .write = sart_reg_write,
-    .read = sart_reg_read,
-};
-
 static void t8030_cluster_setup(MachineState *machine)
 {
     T8030MachineState *tms = T8030_MACHINE(machine);
@@ -577,25 +561,28 @@ static void t8030_create_dart(MachineState *machine, const char *name)
     sysbus_realize_and_unref(SYS_BUS_DEVICE(dart), &error_fatal);
 }
 
-static void t8030_sart_setup(MachineState* machine)
+static void t8030_create_sart(MachineState* machine)
 {
     uint64_t *reg;
     T8030MachineState *tms = T8030_MACHINE(machine);
     DTBNode *child = find_dtb_node(tms->device_tree, "arm-io");
     DTBProp *prop;
-    MemoryRegion *sart;
+    SysBusDevice *sart;
 
     assert(child != NULL);
     child = find_dtb_node(child, "sart-ans");
     assert(child != NULL);
 
+    sart = apple_sart_create(child);
+    assert(sart);
+    object_property_add_child(OBJECT(machine), "sart-ans", OBJECT(sart));
+
     prop = find_dtb_prop(child, "reg");
     assert(prop);
     reg = (uint64_t*)prop->value;
 
-    sart = g_new(MemoryRegion, 1);
-    memory_region_init_io(sart, OBJECT(machine), &sart_reg_ops, tms, "sart-reg", reg[1]);
-    memory_region_add_subregion(tms->sysmem, tms->soc_base_pa + reg[0], sart);
+    sysbus_mmio_map(sart, 0, tms->soc_base_pa + reg[0]);
+    sysbus_realize_and_unref(sart, &error_fatal);
 }
 
 static void t8030_create_ans(MachineState* machine)
@@ -605,6 +592,7 @@ static void t8030_create_ans(MachineState* machine)
     DTBProp *prop;
     uint64_t *reg;
     T8030MachineState *tms = T8030_MACHINE(machine);
+    SysBusDevice *sart;
     SysBusDevice *ans;
     DTBNode *child = find_dtb_node(tms->device_tree, "arm-io");
 
@@ -612,8 +600,14 @@ static void t8030_create_ans(MachineState* machine)
     child = find_dtb_node(child, "ans");
     assert(child != NULL);
 
+    t8030_create_sart(machine);
+    sart = SYS_BUS_DEVICE(object_property_get_link(OBJECT(machine),
+                          "sart-ans", &error_fatal));
+
     ans = apple_ans_create(child, tms->build_version);
     assert(ans);
+    assert(object_property_add_const_link(OBJECT(ans),
+          "dma-mr", OBJECT(sysbus_mmio_get_region(sart, 1))));
 
     object_property_add_child(OBJECT(machine), "ans", OBJECT(ans));
     prop = find_dtb_prop(child, "reg");
@@ -626,10 +620,10 @@ static void t8030_create_ans(MachineState* machine)
     2: AppleA7IOP autoBootRegMap
     3: NVMe BAR
     */
-    sysbus_mmio_map(ans, 0, tms->soc_base_pa + reg[0]);
-    sysbus_mmio_map(ans, 1, tms->soc_base_pa + reg[2]);
-    sysbus_mmio_map(ans, 2, tms->soc_base_pa + reg[4]);
-    sysbus_mmio_map(ans, 3, tms->soc_base_pa + reg[6]);
+
+    for (i = 0; i < 4; i++) {
+        sysbus_mmio_map(ans, i, tms->soc_base_pa + reg[i << 1]);
+    }
 
     prop = find_dtb_prop(child, "interrupts");
     assert(prop);
@@ -1186,8 +1180,6 @@ static void t8030_machine_init(MachineState *machine)
     t8030_create_s3c_uart(tms, serial_hd(0));
 
     t8030_pmgr_setup(machine);
-
-    t8030_sart_setup(machine);
 
     t8030_create_ans(machine);
 
