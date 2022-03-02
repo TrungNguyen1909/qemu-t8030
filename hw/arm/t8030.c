@@ -441,13 +441,17 @@ static void t8030_create_aic(MachineState *machine)
     hwaddr *reg;
     DTBProp *prop;
     T8030MachineState *tms = T8030_MACHINE(machine);
-    DTBNode *child = find_dtb_node(tms->device_tree, "arm-io");
+    DTBNode *soc = find_dtb_node(tms->device_tree, "arm-io");
+    DTBNode *child;
+    DTBNode *timebase; 
 
+    assert(soc != NULL);
+    child = find_dtb_node(soc, "aic");
     assert(child != NULL);
-    child = find_dtb_node(child, "aic");
-    assert(child != NULL);
+    timebase = find_dtb_node(soc, "aic-timebase");
+    assert(timebase);
 
-    tms->aic = apple_aic_create(machine->smp.cpus, child);
+    tms->aic = apple_aic_create(machine->smp.cpus, child, timebase);
     object_property_add_child(OBJECT(machine), "aic", OBJECT(tms->aic));
     assert(tms->aic);
     sysbus_realize(tms->aic, &error_fatal);
