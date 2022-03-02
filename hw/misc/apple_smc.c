@@ -457,6 +457,7 @@ SysBusDevice *apple_smc_create(DTBNode *node, uint32_t build_version)
      */
     s->mbox = apple_mbox_create("SMC", s, reg[1], protocol_version,
                                        &smc_mailbox_ops);
+    object_property_add_child(OBJECT(s), "mbox", OBJECT(s->mbox));
     apple_mbox_register_endpoint(s->mbox, kSMCKeyEndpoint,
                                  &apple_smc_handle_key_endpoint);
 

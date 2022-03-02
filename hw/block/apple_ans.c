@@ -177,6 +177,7 @@ SysBusDevice *apple_ans_create(DTBNode *node, uint32_t build_version)
      */
     s->mbox = apple_mbox_create("ANS2", s, reg[1], protocol_version,
                                 &ans_mailbox_ops);
+    object_property_add_child(OBJECT(s), "mbox", OBJECT(s->mbox));
     apple_mbox_register_endpoint(s->mbox, 1, apple_ans_ep_handler);
     sysbus_init_mmio(sbd, sysbus_mmio_get_region(SYS_BUS_DEVICE(s->mbox), 0));
 
