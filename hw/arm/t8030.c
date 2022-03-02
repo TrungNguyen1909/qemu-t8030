@@ -1145,6 +1145,8 @@ static void t8030_machine_init(MachineState *machine)
     struct mach_header_64 *hdr;
     uint64_t kernel_low = 0, kernel_high = 0;
     uint32_t build_version;
+    uint32_t data;
+    uint8_t buffer[0x40] = { 0 };
     DTBNode *child;
     DTBProp *prop;
     hwaddr *ranges;
@@ -1179,6 +1181,33 @@ static void t8030_machine_init(MachineState *machine)
     ranges = (hwaddr *)prop->value;
     tms->soc_base_pa = ranges[1];
     tms->soc_size = ranges[2];
+
+    memset(buffer, 0, sizeof(buffer));
+    memcpy(buffer, "MWCH2", 5);
+    set_dtb_prop(tms->device_tree, "model-number", 32, buffer);
+    memset(buffer, 0, sizeof(buffer));
+    memcpy(buffer, "LL/A", 4);
+    set_dtb_prop(tms->device_tree, "region-info", 32, buffer);
+    memset(buffer, 0, sizeof(buffer));
+    set_dtb_prop(tms->device_tree, "config-number", 0x40, buffer);
+    memset(buffer, 0, sizeof(buffer));
+    memcpy(buffer, "C39ZRMDEN72J", 12);
+    set_dtb_prop(tms->device_tree, "serial-number", 32, buffer);
+    memset(buffer, 0, sizeof(buffer));
+    memcpy(buffer, "C39948108J9N72J1F", 17);
+    set_dtb_prop(tms->device_tree, "mlb-serial-number", 32, buffer);
+    memset(buffer, 0, sizeof(buffer));
+    memcpy(buffer, "A2160", 5);
+    set_dtb_prop(tms->device_tree, "regulatory-model-number", 32, buffer);
+
+    child = get_dtb_node(tms->device_tree, "chosen");
+    data = 0x8030;
+    set_dtb_prop(child, "chip-id", 4, (uint8_t *)&data);
+    data = 0x4;
+    set_dtb_prop(child, "board-id", 4, (uint8_t *)&data);
+
+    uint64_t ecid = 0x1122334455667788;
+    set_dtb_prop(child, "unique-chip-id", 8, (uint8_t *)&ecid);
 
     t8030_cpu_setup(machine);
 
