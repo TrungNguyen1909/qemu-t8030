@@ -15,10 +15,16 @@
 #define TYPE_APPLE_SMC_IOP "apple.smc"
 OBJECT_DECLARE_SIMPLE_TYPE(AppleSMCState, APPLE_SMC_IOP)
 
+//#define DEBUG_SMC
+
+#ifdef DEBUG_SMC
 #define SMC_LOG_MSG(ep, msg) \
 do { qemu_log_mask(LOG_GUEST_ERROR, "SMC: message:" \
                    " ep=%u msg=0x" TARGET_FMT_plx "\n", \
                    ep, msg); } while (0)
+#else
+#define SMC_LOG_MSG(ep, msg) do {} while (0)
+#endif
 
 enum smc_command {
     SMC_READ_KEY = 0x10,
@@ -114,7 +120,6 @@ struct smc_key {
 struct AppleSMCState {
     SysBusDevice parent_obj;
     MemoryRegion *iomems[3];
-    qemu_irq irqs[1];
     AppleMboxState *mbox;
     QTAILQ_HEAD(, smc_key) keys;
     uint32_t key_count;
@@ -481,9 +486,6 @@ SysBusDevice *apple_smc_create(DTBNode *node, uint32_t build_version)
     sysbus_init_mmio(sbd, s->iomems[2]);
 
     sysbus_pass_irq(sbd, SYS_BUS_DEVICE(s->mbox));
-    for (i = 0; i < 1; i++) {
-        sysbus_init_irq(sbd, &s->irqs[i]);
-    }
 
     child = find_dtb_node(node, "iop-smc-nub");
     assert(child);

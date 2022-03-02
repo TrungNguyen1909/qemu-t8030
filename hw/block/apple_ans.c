@@ -41,7 +41,7 @@ struct AppleANSState {
     MemoryRegion io_ioport;
     MemoryRegion msix;
     AppleMboxState *mbox;
-    qemu_irq irqs[2];
+    qemu_irq irq;
 
     NvmeCtrl nvme;
     uint32_t nvme_interrupt_idx;
@@ -100,7 +100,7 @@ static const MemoryRegionOps iop_autoboot_reg_ops = {
 static void apple_ans_set_irq(void *opaque, int irq_num, int level)
 {
     AppleANSState *s = APPLE_ANS(opaque);
-    qemu_set_irq(s->irqs[s->nvme_interrupt_idx], level);
+    qemu_set_irq(s->irq, level);
 }
 
 static void apple_ans_start(void *opaque)
@@ -192,9 +192,7 @@ SysBusDevice *apple_ans_create(DTBNode *node, uint32_t build_version)
     sysbus_init_mmio(sbd, s->iomems[2]);
 
     sysbus_pass_irq(sbd, SYS_BUS_DEVICE(s->mbox));
-    for (i = 0; i < 2; i++) {
-        sysbus_init_irq(sbd, &s->irqs[i]);
-    }
+    sysbus_init_irq(sbd, &s->irq);
 
     child = get_dtb_node(node, "iop-ans-nub");
     assert(child);
@@ -224,10 +222,6 @@ SysBusDevice *apple_ans_create(DTBNode *node, uint32_t build_version)
     segrange[1].flag = 0x0;
     set_dtb_prop(child, "segment-ranges", 64, (uint8_t *)segrange);
 
-    prop = find_dtb_prop(node, "nvme-interrupt-idx");
-    assert(prop);
-
-    s->nvme_interrupt_idx = *(uint32_t *)prop->value - 3;
     object_initialize_child(OBJECT(dev), "nvme", &s->nvme, TYPE_NVME);
 
     object_property_set_str(OBJECT(&s->nvme), "serial",
