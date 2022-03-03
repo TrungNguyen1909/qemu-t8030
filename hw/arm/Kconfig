@@ -568,3 +568,4 @@ config APPLE_SOC
     select APPLE_SPMI_PMU
     select APPLE_DART
     select APPLE_SART
+    select APPLE_SPI
