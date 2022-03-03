@@ -212,6 +212,7 @@ uint32_t diepreg[DWC2_DIEPREG_SIZE / sizeof(uint32_t)];
     QEMUTimer *eof_timer;
     QEMUTimer *frame_timer;
     QEMUBH *async_bh;
+    QEMUBH *device_async_bh;
     int64_t sof_time;
     int64_t usb_frame_time;
     int64_t usb_bit_time;

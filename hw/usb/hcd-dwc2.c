@@ -1175,18 +1175,10 @@ static void dwc2_update_in_ep(DWC2State *s, int ep)
         s->diepint(ep) &= ~DXEPINT_INEPNAKEFF;
     }
     if (s->diepctl(ep) & DXEPCTL_EPDIS) {
-        USBEndpoint *uep = usb_ep_get(USB_DEVICE(s->device), USB_TOKEN_IN, ep);
-        USBPacket *p = QTAILQ_FIRST(&uep->queue);
-
         s->diepctl(ep) &= ~(DXEPCTL_EPDIS | DXEPCTL_EPENA);
-
-        if (p) {
-            p->status = USB_RET_STALL;
-            usb_packet_complete(USB_DEVICE(s->device), p);
-        }
-
         s->diepint(ep) |= DXEPINT_EPDISBLD;
     }
+    qemu_bh_schedule(s->device_async_bh);
 }
 
 static void dwc2_update_out_ep(DWC2State *s, int ep)
@@ -1202,33 +1194,30 @@ static void dwc2_update_out_ep(DWC2State *s, int ep)
         s->doepint(ep) &= ~DXEPINT_INEPNAKEFF;
     }
     if (s->doepctl(ep) & DXEPCTL_EPDIS) {
-        USBEndpoint *uep = usb_ep_get(USB_DEVICE(s->device), USB_TOKEN_OUT, ep);
-        USBPacket *p = QTAILQ_FIRST(&uep->queue);
-
         s->doepctl(ep) &= ~(DXEPCTL_EPDIS | DXEPCTL_EPENA);
-
-        if (p) {
-            p->status = USB_RET_STALL;
-            usb_packet_complete(USB_DEVICE(s->device), p);
-        }
-
         s->doepint(ep) |= DXEPINT_EPDISBLD;
     }
+    qemu_bh_schedule(s->device_async_bh);
 }
 
 static void dwc2_device_process_packet(DWC2State *s, USBPacket *p)
 {
     int ep = p->ep->nr;
     assert(qemu_mutex_iothread_locked());
+    int pktsize = p->iov.size - p->actual_length;
 
     switch (p->pid) {
     case USB_TOKEN_IN:
         if (s->diepctl(ep) & DXEPCTL_STALL) {
             p->status = USB_RET_STALL;
-        } else if ((s->diepctl(ep) & DXEPCTL_EPENA)
-                   && !(s->diepctl(ep) & DXEPCTL_NAKSTS)
-                   && !(s->gintsts & GINTSTS_GINNAKEFF)) {
-            int sz, amtDone, pktsize, pktcnt, txfz, mps, fifo;
+            break;
+        }
+        if ((s->diepctl(ep) & DXEPCTL_EPENA)
+            && (s->diepctl(ep) & DXEPCTL_USBACTEP)
+            && !(s->diepctl(ep) & DXEPCTL_NAKSTS)
+            && !(s->gintsts & GINTSTS_GINNAKEFF)) {
+            int sz, amtDone, pktcnt, txfz, mps, fifo;
+            g_autofree void *buffer = NULL;
             // IN transfer
             fifo = DXEPCTL_TXFNUM_GET(s->diepctl(ep));
             if (ep == 0) {
@@ -1257,13 +1246,10 @@ static void dwc2_device_process_packet(DWC2State *s, USBPacket *p)
                 mps = DXEPCTL_MPS_GET(s->diepctl(ep));
             }
 
-            pktsize = p->iov.size - p->actual_length;
-
             if (s->dcfg & DCFG_DESCDMA_EN) {
                 struct dwc2_dma_desc desc;
                 QEMUSGList sglist;
                 bool ioc = false;
-                g_autofree void *buffer = NULL;
                 qemu_sglist_init(&sglist, DEVICE(s),
                                  MAX_DMA_DESC_NUM_GENERIC, &s->dma_as);
                 while (dma_memory_read(&s->dma_as, s->diepdma(ep), &desc,
@@ -1295,7 +1281,7 @@ static void dwc2_device_process_packet(DWC2State *s, USBPacket *p)
                     }
                 }
                 #if 0
-                fprintf(stderr, "%s: starting IN transfer on EP %d (%zu/%d)...\n",
+                qemu_log_mask(LOG_UNIMP, "%s: starting IN transfer on EP %d (%zu/%d)...\n",
                                 __func__, ep, sglist.size, pktsize);
                 #endif
                 buffer = g_malloc0(sglist.size);
@@ -1305,11 +1291,6 @@ static void dwc2_device_process_packet(DWC2State *s, USBPacket *p)
                 #if 0
                 qemu_hexdump(stderr, __func__, buffer, sglist.size);
                 #endif
-                if (amtDone < pktsize && amtDone % mps == 0 && amtDone > 0) {
-                    p->status = USB_RET_ASYNC;
-                } else {
-                    p->status = USB_RET_SUCCESS;
-                }
                 s->diepctl(ep) &= ~DXEPCTL_EPENA;
                 s->diepint(ep) |= DXEPINT_XFERCOMPL;
                 qemu_sglist_destroy(&sglist);
@@ -1319,24 +1300,15 @@ static void dwc2_device_process_packet(DWC2State *s, USBPacket *p)
                 if (amtDone > pktsize) {
                     amtDone = pktsize;
                 }
-                #if 0
-                if (amtDone > txfz) {
-                    amtDone = txfz;
-                }
-                #endif
 
                 if (pktsize != 0 && amtDone == 0) {
                     s->diepint(ep) |= DXEPINT_INTKNTXFEMP;
                     p->status = USB_RET_NAK;
                     break;
                 }
-                #if 0
-                txfs = dwc2_tx_fifo_start(s, fifo);
-                assert(txfs + txfz <= DWC2_MAX_XFER_SIZE);
-                #endif
 
                 #if 0
-                    fprintf(stderr, "%s: starting IN transfer on EP %d "
+                    qemu_log_mask(LOG_UNIMP, "%s: starting IN transfer on EP %d "
                                     "(%d/%d/%zu/%d/%d)...\n",
                                     __func__, ep, amtDone, pktsize,
                                     p->iov.size, sz, pktcnt);
@@ -1348,7 +1320,7 @@ static void dwc2_device_process_packet(DWC2State *s, USBPacket *p)
                         s->diepdma(ep) += amtDone;
                     }
                 #if 0
-                    if (ep) qemu_hexdump(stderr, __func__, buffer, amtDone);
+                    qemu_hexdump(stderr, __func__, buffer, amtDone);
                 #endif
                     usb_packet_copy(p, buffer, amtDone);
                     pktcnt -= (amtDone - 1 + mps) / mps;
@@ -1372,11 +1344,11 @@ static void dwc2_device_process_packet(DWC2State *s, USBPacket *p)
                     s->diepctl(ep) &= ~DXEPCTL_EPENA;
                     s->diepint(ep) |= DXEPINT_XFERCOMPL;
                 }
-                if (amtDone < pktsize && amtDone % mps == 0 && amtDone > 0) {
-                    p->status = USB_RET_ASYNC;
-                } else {
-                    p->status = USB_RET_SUCCESS;
-                }
+            }
+            if (amtDone < pktsize && amtDone % mps == 0 && amtDone > 0) {
+                p->status = USB_RET_ASYNC;
+            } else {
+                p->status = USB_RET_SUCCESS;
             }
         } else {
             p->status = USB_RET_NAK;
@@ -1391,10 +1363,19 @@ static void dwc2_device_process_packet(DWC2State *s, USBPacket *p)
     case USB_TOKEN_OUT:
         if (s->doepctl(ep) & DXEPCTL_STALL) {
             p->status = USB_RET_STALL;
-        } else if ((s->doepctl(ep) & DXEPCTL_EPENA)
-                   && !(s->doepctl(ep) & DXEPCTL_NAKSTS)
-                   && !(s->gintsts & GINTSTS_GOUTNAKEFF)) {
-            int sz, amtDone, pktsize, pktcnt, supcnt, mps;
+            break;
+        }
+        if (((s->doepctl(ep) & DXEPCTL_NAKSTS) != 0
+             && p->pid != USB_TOKEN_SETUP)
+            || !(s->doepctl(ep) & DXEPCTL_USBACTEP)
+            || (s->gintsts & GINTSTS_GOUTNAKEFF)) {
+            p->status = USB_RET_NAK;
+            break;
+        }
+        if (s->doepctl(ep) & DXEPCTL_EPENA) {
+            int sz, pktcnt, supcnt, mps;
+            uint32_t amtDone = 0;
+            g_autofree void *buffer = NULL;
 
             if (ep == 0) {
                 sz = DOEPTSIZ0_XFERSIZE_GET(s->doeptsiz(ep));
@@ -1424,13 +1405,10 @@ static void dwc2_device_process_packet(DWC2State *s, USBPacket *p)
                 mps = DXEPCTL_MPS_GET(s->doepctl(ep));
             }
 
-            pktsize = p->iov.size - p->actual_length;
-
             if (s->dcfg & DCFG_DESCDMA_EN) {
                 struct dwc2_dma_desc desc;
                 QEMUSGList sglist;
                 bool ioc = false;
-                g_autofree void *buffer = NULL;
                 qemu_sglist_init(&sglist, DEVICE(s),
                                  MAX_DMA_DESC_NUM_GENERIC, &s->dma_as);
                 while (dma_memory_read(&s->dma_as, s->doepdma(ep), &desc,
@@ -1470,7 +1448,7 @@ static void dwc2_device_process_packet(DWC2State *s, USBPacket *p)
                     }
                 }
                 #if 0
-                fprintf(stderr, "%s: starting OUT transfer on EP %d (%zu/%d)...\n",
+                qemu_log_mask(LOG_UNIMP, "%s: starting OUT transfer on EP %d (%zu/%d)...\n",
                                 __func__, ep, sglist.size, pktsize);
                 #endif
                 buffer = g_malloc0(sglist.size);
@@ -1480,55 +1458,19 @@ static void dwc2_device_process_packet(DWC2State *s, USBPacket *p)
                 #if 0
                 qemu_hexdump(stderr, __func__, buffer, sglist.size);
                 #endif
-                if (p->pid == USB_TOKEN_SETUP) {
-                    struct usb_control_packet setup;
-
-                    memcpy(&setup, buffer, sizeof(setup));
-
-                    #if 0
-                    fprintf(stderr, "%s: SETUP {%02x,%02x,%04x,%04x,%04x}\n",
-                            __func__, setup.bmRequestType, setup.bRequest,
-                            setup.wValue, setup.wIndex, setup.wLength);
-                    #endif
-
-                    if (setup.bRequest == USB_REQ_SET_ADDRESS && ep == 0) {
-                        s->dsts &= ~DSTS_ENUMSPD_MASK;
-                        s->dsts |= DSTS_ENUMSPD_HS << DSTS_ENUMSPD_SHIFT;
-                        dwc2_raise_global_irq(s, GINTSTS_ENUMDONE);
-                    }
-
-                    s->doepctl(ep) &= ~DXEPCTL_EPENA;
-                    s->doepint(ep) |= DXEPINT_SETUP;
-                } else {
-                    s->doepctl(ep) &= ~DXEPCTL_EPENA;
-                }
-                s->doepint(ep) |= DXEPINT_XFERCOMPL;
-                if (amtDone < pktsize && amtDone % mps == 0
-                    && amtDone > 0) {
-                    p->status = USB_RET_ASYNC;
-                } else {
-                    p->status = USB_RET_SUCCESS;
-                }
                 qemu_sglist_destroy(&sglist);
             } else {
                 amtDone = sz;
                 if (amtDone > pktsize) {
                     amtDone = pktsize;
                 }
-                #if 0
-                rxfz = s->grxfsiz;
-                if (amtDone > rxfz) {
-                    amtDone = rxfz;
-                }
-                assert(rxfz <= DWC2_MAX_XFER_SIZE);
-                #endif
 
                 #if 0
-                fprintf(stderr, "%s: starting OUT transfer on EP %d (%d/%d/%zu/%d/%d)...\n", __func__, ep, amtDone, pktsize, p->iov.size, sz, pktcnt);
+                qemu_log_mask(LOG_UNIMP, "%s: starting OUT transfer on EP %d (%d/%d/%zu/%d/%d)...\n", __func__, ep, amtDone, pktsize, p->iov.size, sz, pktcnt);
                 #endif
                 if (amtDone > 0) {
                     // TODO: is this copy correct?
-                    g_autofree void *buffer = g_malloc0(amtDone);
+                    buffer = g_malloc0(amtDone);
                     usb_packet_copy(p, buffer, amtDone);
 
                     if (s->doepdma(ep)) {
@@ -1536,7 +1478,7 @@ static void dwc2_device_process_packet(DWC2State *s, USBPacket *p)
                         s->doepdma(ep) += amtDone;
                     }
                     #if 0
-                    if (ep) qemu_hexdump(stderr, __func__, buffer, amtDone);
+                    qemu_hexdump(stderr, __func__, buffer, amtDone);
                     #endif
                     pktcnt -= (amtDone - 1 + mps) / mps;
                 } else if (pktsize == 0) {
@@ -1557,37 +1499,41 @@ static void dwc2_device_process_packet(DWC2State *s, USBPacket *p)
                     s->doeptsiz(ep) = (s->doeptsiz(ep) & ~DXEPTSIZ_XFERSIZE_MASK)
                                       | DXEPTSIZ_XFERSIZE(sz - amtDone);
                 }
-                if (p->pid == USB_TOKEN_SETUP) {
-                    struct usb_control_packet setup;
+            }
+            if (amtDone < pktsize && amtDone % mps == 0 && amtDone > 0) {
+                p->status = USB_RET_ASYNC;
+            } else {
+                p->status = USB_RET_SUCCESS;
+            }
+            if (p->pid == USB_TOKEN_SETUP && amtDone >= 8) {
+                struct usb_control_packet setup;
 
-                    memcpy(&setup, s->fifos_buf, sizeof(setup));
+                memcpy(&setup, buffer, sizeof(setup));
 
-                    #if 0
-                    fprintf(stderr, "%s: SETUP {%02x,%02x,%04x,%04x,%04x}\n",
-                            __func__, setup.bmRequestType, setup.bRequest,
-                            setup.wValue, setup.wIndex, setup.wLength);
-                    #endif
+                #if 0
+                qemu_log_mask(LOG_UNIMP, "%s: SETUP {%02x,%02x,%04x,%04x,%04x}\n",
+                        __func__, setup.bmRequestType, setup.bRequest,
+                        setup.wValue, setup.wIndex, setup.wLength);
+                #endif
 
-                    if (setup.bRequest == USB_REQ_SET_ADDRESS && ep == 0) {
-                        s->dsts &= ~DSTS_ENUMSPD_MASK;
-                        s->dsts |= DSTS_ENUMSPD_HS << DSTS_ENUMSPD_SHIFT;
-                        dwc2_raise_global_irq(s, GINTSTS_ENUMDONE);
-                    }
-
-                    s->doepctl(ep) &= ~DXEPCTL_EPENA;
-                    s->doepint(ep) |= DXEPINT_SETUP;
-                } else {
-                    s->doepctl(ep) &= ~DXEPCTL_EPENA;
-                    s->doepint(ep) |= DXEPINT_XFERCOMPL;
+                if (setup.bmRequestType == 0 &&
+                    setup.bRequest == USB_REQ_SET_ADDRESS && ep == 0) {
+                    s->dsts &= ~DSTS_ENUMSPD_MASK;
+                    s->dsts |= DSTS_ENUMSPD_HS << DSTS_ENUMSPD_SHIFT;
+                    dwc2_raise_global_irq(s, GINTSTS_ENUMDONE);
                 }
-                if (amtDone < pktsize && amtDone % mps == 0 && amtDone > 0) {
-                    p->status = USB_RET_ASYNC;
-                } else {
-                    p->status = USB_RET_SUCCESS;
+
+                s->doepint(ep) |= DXEPINT_SETUP;
+                s->doepint(ep) |= DXEPINT_SETUP_RCVD;
+                if (ep == 0) {
+                    s->diepctl(0) |= DXEPCTL_NAKSTS;
                 }
             }
+            s->doepctl(ep) &= ~DXEPCTL_EPENA;
+            s->doepint(ep) |= DXEPINT_XFERCOMPL;
+            s->doepctl(ep) |= DXEPCTL_NAKSTS;
         } else {
-            if (ep == 0 && ((s->doepctl(0) & DXEPCTL_EPENA) == 0)) {
+            if (ep == 0) {
                 s->doepint(ep) |= DXEPINT_OUTTKNEPDIS;
             }
             p->status = USB_RET_NAK;
@@ -1611,6 +1557,9 @@ static void dwc2_device_process_async(DWC2State *s, USBEndpoint *ep)
     if ((p = QTAILQ_FIRST(&ep->queue)) == NULL) {
         return;
     }
+    if (p->state != USB_PACKET_ASYNC) {
+        return;
+    }
 
     dwc2_device_process_packet(s, p);
 
@@ -1620,6 +1569,22 @@ static void dwc2_device_process_async(DWC2State *s, USBEndpoint *ep)
     if (p->status != USB_RET_ASYNC) {
         usb_packet_complete(USB_DEVICE(s->device), p);
     }
+}
+
+static void dwc2_device_work_bh(void *opaque)
+{
+    DWC2State *s = opaque;
+
+    dwc2_device_process_async(s, usb_ep_get(USB_DEVICE(s->device),
+                              USB_TOKEN_SETUP, 0));
+
+    for (int i = 1; i < DWC2_NB_EP; i++) {
+        dwc2_device_process_async(s, usb_ep_get(USB_DEVICE(s->device),
+                                  USB_TOKEN_OUT, i));
+        dwc2_device_process_async(s, usb_ep_get(USB_DEVICE(s->device),
+                                  USB_TOKEN_IN, i));
+    }
+
 }
 
 static const char *dregnm[] = {
@@ -1661,6 +1626,7 @@ static void dwc2_dreg_write(void *ptr, hwaddr addr, int index, uint64_t val,
     uint32_t *mmio;
     uint32_t old;
     int iflg = 0;
+    bool pflg = 0;
 
     if (addr < DCFG || addr > DTKNQR4) {
         qemu_log_mask(LOG_GUEST_ERROR, "%s: Bad offset 0x%"HWADDR_PRIx"\n",
@@ -1685,6 +1651,7 @@ static void dwc2_dreg_write(void *ptr, hwaddr addr, int index, uint64_t val,
         val &= ~(DCTL_GOUTNAKSTS | DCTL_GNPINNAKSTS);
         /* don't allow clearing of read-only bits */
         val |= old & (DCTL_GOUTNAKSTS | DCTL_GNPINNAKSTS);
+        pflg = 1;
         if (val & DCTL_CGNPINNAK) {
             dwc2_lower_global_irq(s, GINTSTS_GINNAKEFF);
             val &= ~DCTL_CGNPINNAK;
@@ -1710,6 +1677,7 @@ static void dwc2_dreg_write(void *ptr, hwaddr addr, int index, uint64_t val,
             if (USB_DEVICE(s->device)->attached) {
                 usb_device_detach(USB_DEVICE(s->device));
             }
+            pflg = 0;
         }
         iflg = 1;
         break;
@@ -1735,6 +1703,10 @@ static void dwc2_dreg_write(void *ptr, hwaddr addr, int index, uint64_t val,
             dwc2_update_ep_irq(s, i);
         }
         dwc2_update_irq(s);
+    }
+
+    if (pflg) {
+        qemu_bh_schedule(s->device_async_bh);
     }
 }
 
@@ -1797,7 +1769,11 @@ static void dwc2_diepreg_write(void *ptr, hwaddr addr, int index, uint64_t val,
 
         val &= ~DXEPCTL_NAKSTS;
         val |= old & DXEPCTL_NAKSTS;
+
+        val |= old & (DXEPCTL_EPENA | DXEPCTL_EPDIS | DXEPCTL_USBACTEP);
+
         if ((index >> 3) == 0) {
+            val |= old & DXEPCTL_STALL;
             val |= DXEPCTL_USBACTEP;
             val &= ~(DXEPCTL_EPTYPE_MASK);
             s->doepctl(0) &= ~D0EPCTL_MPS_MASK;
@@ -1823,7 +1799,7 @@ static void dwc2_diepreg_write(void *ptr, hwaddr addr, int index, uint64_t val,
     }
 
     if (pflg) {
-        dwc2_device_process_async(s, usb_ep_get(USB_DEVICE(s->device), USB_TOKEN_IN, index >> 3));
+        qemu_bh_schedule(s->device_async_bh);
     }
 
     if (iflg) {
@@ -1891,7 +1867,10 @@ static void dwc2_doepreg_write(void *ptr, hwaddr addr, int index, uint64_t val,
 
         val &= ~DXEPCTL_NAKSTS;
         val |= old & DXEPCTL_NAKSTS;
+        val |= old & (DXEPCTL_EPENA | DXEPCTL_USBACTEP | DXEPCTL_EPDIS);
         if ((index >> 3) == 0) {
+            val |= old & DXEPCTL_STALL;
+            val &= ~DXEPCTL_EPDIS;
             val |= DXEPCTL_USBACTEP;
             val &= ~(DXEPCTL_EPDIS | DXEPCTL_EPTYPE_MASK | D0EPCTL_MPS_MASK);
             val |= old & (D0EPCTL_MPS_MASK);
@@ -1916,7 +1895,7 @@ static void dwc2_doepreg_write(void *ptr, hwaddr addr, int index, uint64_t val,
     }
 
     if (pflg) {
-        dwc2_device_process_async(s, usb_ep_get(USB_DEVICE(s->device), USB_TOKEN_OUT, index >> 3));
+        qemu_bh_schedule(s->device_async_bh);
     }
 
     if (iflg) {
@@ -2155,7 +2134,7 @@ static void dwc2_reset_enter(Object *obj, ResetType type)
     s->gpvndctl = 0;
     s->ggpio = 0;
     s->guid = 0;
-    s->gsnpsid = 0x4f54294a;
+    s->gsnpsid = 0x4f54300a;
     s->ghwcfg1 = 0;
     s->ghwcfg2 = (8 << GHWCFG2_DEV_TOKEN_Q_DEPTH_SHIFT) |
                  (4 << GHWCFG2_HOST_PERIO_TX_Q_DEPTH_SHIFT) |
@@ -2283,6 +2262,7 @@ static void dwc2_realize(DeviceState *dev, Error **errp)
     s->eof_timer = timer_new_ns(QEMU_CLOCK_VIRTUAL, dwc2_frame_boundary, s);
     s->frame_timer = timer_new_ns(QEMU_CLOCK_VIRTUAL, dwc2_work_timer, s);
     s->async_bh = qemu_bh_new(dwc2_work_bh, s);
+    s->device_async_bh = qemu_bh_new(dwc2_device_work_bh, s);
 
     sysbus_init_irq(sbd, &s->irq);
 
@@ -2349,6 +2329,11 @@ static void dwc2_usb_device_handle_reset(USBDevice *dev)
     }
 
     dwc2_raise_global_irq(s, GINTSTS_USBRST);
+}
+
+static void dwc2_usb_device_cancel_packet(USBDevice *dev, USBPacket *p)
+{
+    qemu_log_mask(LOG_UNIMP, "%s\n", __func__);
 }
 
 static void dwc2_usb_device_handle_packet(USBDevice *dev, USBPacket *p)
@@ -2440,7 +2425,7 @@ static void dwc2_usb_device_class_initfn_common(ObjectClass *klass, void *data)
     uc->realize        = dwc2_usb_device_realize;
     uc->product_desc   = "DWC2 USB Device";
     uc->unrealize      = NULL;
-    uc->cancel_packet  = NULL;
+    uc->cancel_packet  = dwc2_usb_device_cancel_packet;
     uc->handle_attach  = dwc2_usb_device_handle_attach;
     uc->handle_detach  = dwc2_usb_device_handle_detach;
     uc->handle_reset   = dwc2_usb_device_handle_reset;
