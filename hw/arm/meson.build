@@ -4,6 +4,7 @@ arm_ss.add(when: 'CONFIG_APPLE_SOC', if_true: files(
     't8030.c',
     't8030_cpu.c',
     't8030_gxf.c',
+    'apple_sep.c',
     'xnu_dtb.c',
     'xnu_mem.c',
     'xnu.c',
