@@ -59,8 +59,10 @@
 
 #include "hw/arm/exynos4210.h"
 #include "hw/arm/xnu_pf.h"
+#include "hw/display/m1_fb.h"
 
 #define T8030_DRAM_BASE 0x800000000
+#define T8030_DISPLAY_SIZE (64 * 1024 * 1024)
 #define T8030_PANIC_LOG_SIZE (0x100000)
 #define T8030_USB_OTG_BASE 0x39000000
 #define NOP_INST 0xd503201f
@@ -277,7 +279,7 @@ static void t8030_memory_setup(MachineState *machine)
         }
     }
 
-    mem_size = machine->ram_size - T8030_PANIC_LOG_SIZE;
+    mem_size = machine->ram_size - T8030_DISPLAY_SIZE - T8030_PANIC_LOG_SIZE;
 
     DTBNode *pram = find_dtb_node(tms->device_tree, "pram");
     if (pram) {
@@ -1103,6 +1105,37 @@ static void t8030_create_smc(MachineState* machine)
     sysbus_realize_and_unref(smc, &error_fatal);
 }
 
+static void t8030_create_boot_display(MachineState *machine)
+{
+    T8030MachineState *tms = T8030_MACHINE(machine);
+    SysBusDevice *fb = NULL;
+    MemoryRegion *vram = NULL;
+    tms->video.v_baseAddr = T8030_DRAM_BASE + machine->ram_size - (T8030_DISPLAY_SIZE);
+    tms->video.v_rowBytes = 480 * 4;
+    tms->video.v_width = 480;
+    tms->video.v_height = 640;
+    tms->video.v_depth = 32 | ((2 - 1) << 16);
+    tms->video.v_display = 1;
+
+    if (xnu_contains_boot_arg(machine->kernel_cmdline, "-s", false)
+        || xnu_contains_boot_arg(machine->kernel_cmdline, "-v", false)) {
+        tms->video.v_display = 0;
+    }
+
+    fb = SYS_BUS_DEVICE(qdev_new(TYPE_M1_FB));
+    object_property_set_uint(OBJECT(fb), "width", 480, &error_fatal);
+    object_property_set_uint(OBJECT(fb), "height", 640, &error_fatal);
+
+    vram = g_new(MemoryRegion, 1);
+    memory_region_init_ram(vram, OBJECT(fb), "vram", T8030_DISPLAY_SIZE, &error_fatal);
+    memory_region_add_subregion_overlap(tms->sysmem, tms->video.v_baseAddr, vram, 1);
+
+    object_property_add_const_link(OBJECT(fb), "vram", OBJECT(vram));
+    object_property_add_child(OBJECT(machine), "fb", OBJECT(fb));
+
+    sysbus_realize_and_unref(fb, &error_fatal);
+}
+
 static void t8030_cpu_reset(void *opaque)
 {
     MachineState *machine = MACHINE(opaque);
@@ -1246,6 +1279,8 @@ static void t8030_machine_init(MachineState *machine)
     t8030_create_pmu(machine, "spmi0", "spmi-pmu");
 
     t8030_create_smc(machine);
+
+    t8030_create_boot_display(machine);
 }
 
 static void t8030_set_trustcache_filename(Object *obj, const char *value, Error **errp)
