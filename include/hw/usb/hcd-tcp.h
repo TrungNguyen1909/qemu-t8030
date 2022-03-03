@@ -7,6 +7,7 @@
 #include "hw/usb.h"
 #include "io/channel.h"
 #include "qemu/coroutine.h"
+#include "qapi/error.h"
 
 #define TYPE_USB_TCP_HOST "usb-tcp-host"
 OBJECT_DECLARE_SIMPLE_TYPE(USBTCPHostState, USB_TCP_HOST)
@@ -27,8 +28,9 @@ struct USBTCPHostState {
     USBPort uport2;
     QIOChannel *ioc;
     CoMutex write_mutex;
+    Error *migration_blocker;
     bool closed;
     bool stopped;
 };
 
-#endif //HW_USB_HCD_TCP_H
+#endif /* HW_USB_HCD_TCP_H */

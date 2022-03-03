@@ -9,7 +9,8 @@ static const char *socket_path = "/tmp/usbqemu";
 enum {
     TCP_USB_REQUEST  = (1 << 0),
     TCP_USB_RESPONSE = (1 << 1),
-    TCP_USB_RESET    = (1 << 2)
+    TCP_USB_RESET    = (1 << 2),
+    TCP_USB_CANCEL   = (1 << 3)
 };
 
 typedef struct QEMU_PACKED tcp_usb_header {
@@ -24,7 +25,7 @@ typedef struct QEMU_PACKED tcp_usb_request_header {
     uint64_t id;
     uint8_t short_not_ok;
     uint8_t int_req;
-    int length;
+    uint16_t length;
 } tcp_usb_request_header;
 
 typedef struct QEMU_PACKED tcp_usb_response_header {
@@ -33,7 +34,15 @@ typedef struct QEMU_PACKED tcp_usb_response_header {
     uint8_t ep;
     uint64_t id;
     uint32_t status;
-    int length;
+    uint16_t length;
 } tcp_usb_response_header;
+
+typedef struct QEMU_PACKED tcp_usb_cancel_header {
+    uint8_t addr;
+    int pid;
+    uint8_t ep;
+    uint64_t id;
+
+} tcp_usb_cancel_header;
 
 #endif //HW_USB_TCP_USB_H

@@ -13,10 +13,20 @@
 #include "qapi/error.h"
 #include "sysemu/iothread.h"
 #include "qemu/error-report.h"
+#include "migration/blocker.h"
+
+//#define DEBUG_HCD_TCP
+
+#ifdef DEBUG_HCD_TCP
+#define DPRINTF(fmt, ...) \
+do { fprintf(stderr, "hcd-tcp: " fmt , ## __VA_ARGS__); } while (0)
+#else
+#define DPRINTF(fmt, ...) do {} while(0)
+#endif
 
 static void usb_tcp_host_closed(USBTCPHostState *s)
 {
-    fprintf(stderr, "%s\n", __func__);
+    DPRINTF("%s\n", __func__);
     if (s->ioc) {
         qio_channel_detach_aio_context(s->ioc);
         qio_channel_shutdown(s->ioc, QIO_CHANNEL_SHUTDOWN_BOTH, NULL);
@@ -25,6 +35,7 @@ static void usb_tcp_host_closed(USBTCPHostState *s)
         s->ioc = NULL;
     }
     s->closed = true;
+    migrate_del_blocker(s->migration_blocker);
 }
 
 static ssize_t tcp_usb_read(QIOChannel *ioc, void *buf, size_t len)
@@ -178,10 +189,12 @@ static void coroutine_fn usb_tcp_host_msg_loop_co(void *opaque)
                     return;
                 }
 
-                /* fprintf(stderr, "%s: TCP_USB_REQUEST pid: 0x%x ep: %d\n", __func__, pkt_hdr.pid, pkt_hdr.ep); */
+                #if 0
+                DPRINTF("%s: TCP_USB_REQUEST pid: 0x%x ep: %d id: 0x%lx\n", __func__, pkt_hdr.pid, pkt_hdr.ep, pkt_hdr.id);
+                #endif
                 ep = usb_ep_get(s->uport.dev, pkt_hdr.pid, pkt_hdr.ep);
                 if (ep == NULL) {
-                    fprintf(stderr, "%s: TCP_USB_REQUEST unknown EP\n", __func__);
+                    DPRINTF("%s: TCP_USB_REQUEST unknown EP\n", __func__);
                     usb_tcp_host_closed(s);
                     return;
                 }
@@ -228,11 +241,55 @@ static void coroutine_fn usb_tcp_host_msg_loop_co(void *opaque)
                 fprintf(stderr, "%s: unexpected TCP_USB_RESPONSE\n", __func__);
                 usb_tcp_host_closed(s);
                 return;
+            case TCP_USB_CANCEL: {
+                /* DPRINTF("%s: TCP_USB_CANCEL\n", __func__); */
+                tcp_usb_cancel_header pkt_hdr = {0};
+                USBTCPPacket *pkt = NULL;
+                USBPacket *p = NULL;
+
+                if (unlikely(tcp_usb_read(ioc, &pkt_hdr, sizeof(pkt_hdr)) != sizeof(pkt_hdr))) {
+                    usb_tcp_host_closed(s);
+                    return;
+                }
+
+                #if 1
+                DPRINTF("%s: TCP_USB_CANCEL pid: 0x%x ep: %d\n", __func__, pkt_hdr.pid, pkt_hdr.ep);
+                #endif
+
+                if (pkt_hdr.addr != s->uport.dev->addr) {
+                    /*
+                     * fprintf(stderr,
+                     *         "%s: USB_RET_NODEV: pkt_hdr.addr != s->uport.dev->addr: %d != %d\n",
+                     *         __func__, pkt_hdr.addr, s->uport.dev->addr);
+                     */
+                    /* Can't enforce this check because dwc2 address transition time is slow */
+                }
+                assert(qemu_mutex_iothread_locked());
+                p = usb_ep_find_packet_by_id(s->uport.dev, pkt_hdr.pid,
+                                             pkt_hdr.ep, pkt_hdr.id);
+                if (p) {
+                    pkt = container_of(p, USBTCPPacket, p);
+                    usb_cancel_packet(&pkt->p);
+                    DPRINTF("%s: TCP_USB_CANCEL: packet"
+                                " pid: 0x%x ep: %d id: 0x%lx len: 0x%x\n",
+                                __func__, pkt_hdr.pid, pkt_hdr.ep, pkt_hdr.id, p->actual_length);
+                    usb_tcp_host_respond_packet(s, pkt);
+                } else {
+                    warn_report("%s: TCP_USB_CANCEL: packet"
+                                " pid: 0x%x ep: %d id: 0x%lx not found",
+                                __func__, pkt_hdr.pid, pkt_hdr.ep, pkt_hdr.id);
+                }
+                break;
+            }
             case TCP_USB_RESET:
                 /* fprintf(stderr, "%s: TCP_USB_RESET\n", __func__); */
+                DPRINTF("%s: TCP_USB_RESET\n", __func__);
                 assert(qemu_mutex_iothread_locked());
                 usb_device_reset(s->uport.dev);
                 break;;
+            default:
+                g_assert_not_reached();
+                break;
         }
     }
 
@@ -286,6 +343,7 @@ static void usb_tcp_host_attach(USBPort *uport)
     s->closed = 0;
     s->ioc = ioc;
 
+    migrate_add_blocker(s->migration_blocker, NULL);
     co = qemu_coroutine_create(usb_tcp_host_msg_loop_co, s);
     qemu_coroutine_enter(co);
 }
@@ -349,6 +407,8 @@ static void usb_tcp_host_init(Object *obj)
 {
     USBTCPHostState *s = USB_TCP_HOST(obj);
     s->closed = 1;
+    error_setg(&s->migration_blocker, "%s does not support migration "
+                                      "while connected", TYPE_USB_TCP_HOST);
 }
 
 static Property usb_tcp_host_properties[] = {
