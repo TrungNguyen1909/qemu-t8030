@@ -342,6 +342,12 @@ end:
     return tlb_entry;
 }
 
+static int apple_dart_attrs_to_index(IOMMUMemoryRegion *iommu,
+                                     MemTxAttrs attrs)
+{
+    return 0;
+}
+
 static IOMMUTLBEntry apple_dart_translate(IOMMUMemoryRegion *mr, hwaddr addr,
                                           IOMMUAccessFlags flag, int iommu_idx)
 {
@@ -425,6 +431,13 @@ static IOMMUTLBEntry apple_dart_translate(IOMMUMemoryRegion *mr, hwaddr addr,
     }
 
 end:
+    DPRINTF("%s[%d]: (%s) SID %u: 0x"
+            TARGET_FMT_plx " -> 0x" TARGET_FMT_plx " (%c%c)\n",
+            s->name, o->id, dart_instance_name[o->type],
+            iommu->sid, entry.iova,
+            entry.translated_addr,
+            (entry.perm & IOMMU_RO) ? 'r' : '-',
+            (entry.perm & IOMMU_WO) ? 'w' : '-');
     qemu_mutex_unlock(&o->mutex);
     apple_dart_update_irq(s);
     return entry;
@@ -490,7 +503,7 @@ AppleDARTState *apple_dart_create(DTBNode *node)
     sbd = SYS_BUS_DEVICE(dev);
 
     prop = find_dtb_prop(node, "name");
-    strlcpy(s->name, (char *)prop->value, sizeof(s->name));
+    g_strlcpy(s->name, (char *)prop->value, sizeof(s->name));
     dev->id = g_strdup((char *)prop->value);
 
     prop = find_dtb_prop(node, "page-size");
@@ -558,7 +571,7 @@ AppleDARTState *apple_dart_create(DTBNode *node)
 
             for (i = 0; i < DART_MAX_STREAMS; i++) {
                 if ((1 << i) & s->sids) {
-                    g_autofree char *name = g_strdup_printf("%s[%d][%d]",
+                    g_autofree char *name = g_strdup_printf("%s-%d-%d",
                                                             s->name, o->id, i);
                     o->iommus[i] = g_new0(AppleDARTIOMMUMemoryRegion, 1);
                     o->iommus[i]->sid = i;
@@ -633,6 +646,7 @@ static void apple_dart_iommu_memory_region_class_init(ObjectClass *klass,
     IOMMUMemoryRegionClass *imrc = IOMMU_MEMORY_REGION_CLASS(klass);
 
     imrc->translate = apple_dart_translate;
+    imrc->attrs_to_index = apple_dart_attrs_to_index;
 }
 
 static const TypeInfo apple_dart_info = {
