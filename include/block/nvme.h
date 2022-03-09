@@ -620,6 +620,7 @@ enum NvmeIoCommands {
     NVME_CMD_ZONE_MGMT_SEND     = 0x79,
     NVME_CMD_ZONE_MGMT_RECV     = 0x7a,
     NVME_CMD_ZONE_APPEND        = 0x7d,
+    NVME_CMD_REPRIORITIZE       = 0x81,
 };
 
 typedef struct QEMU_PACKED NvmeDeleteQ {
