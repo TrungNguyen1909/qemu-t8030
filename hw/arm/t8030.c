@@ -61,10 +61,16 @@
 #include "hw/arm/xnu_pf.h"
 #include "hw/display/m1_fb.h"
 
-#define T8030_DRAM_BASE 0x800000000
-#define T8030_DISPLAY_SIZE (64 * 1024 * 1024)
-#define T8030_PANIC_LOG_SIZE (0x100000)
-#define T8030_USB_OTG_BASE 0x39000000
+#define T8030_DRAM_BASE         (0x800000000)
+#define T8030_ANS_TEXT_BASE     (0x800024000)
+#define T8030_ANS_TEXT_SIZE     (0x124000)
+#define T8030_ANS_DATA_BASE     (0x8fc400000)
+#define T8030_ANS_DATA_SIZE     (0x3c00000)
+#define T8030_DISPLAY_BASE      (0x8f7fb4000)
+#define T8030_DISPLAY_SIZE      (67 * 1024 * 1024)
+#define T8030_PANIC_BASE        (0x8fc2b4000)
+#define T8030_PANIC_SIZE        (0x100000)
+#define T8030_USB_OTG_BASE      (0x39000000)
 #define NOP_INST 0xd503201f
 #define MOV_W0_01_INST 0x52800020
 #define MOV_X13_0_INST 0xd280000d
@@ -169,6 +175,17 @@ static void t8030_memory_setup(MachineState *machine)
     //After that we have the device tree
     //After that we have the rest of the RAM
 
+    /* TODO: Pass these addresses to ANS and SMC */
+    #if 0
+    The end of DRAM:
+    0x8f7fb4000, 0x4300000: VRAM
+    0x8fc2b4000, 0x100000: PRAM
+    0x8fc3b4000, 0x4000: GFX handoff
+    0x8fc3b8000, 0x40000: GFX shared region
+    0x8fc3f8000, 0x4000: GPU region
+    0x8fc400000, 0x3c00000: ANS
+    #endif
+
     if (t8030_check_panic(machine)) {
         qemu_system_guest_panicked(NULL);
         return;
@@ -176,13 +193,13 @@ static void t8030_memory_setup(MachineState *machine)
     hdr = tms->kernel;
     assert(hdr);
     macho_highest_lowest(hdr, NULL, &virt_end);
-    g_phys_base = phys_ptr = T8030_DRAM_BASE;
+    phys_ptr = T8030_DRAM_BASE;
 
     // //now account for the trustcache
     phys_ptr += align_16k_high(0x2000000);
+    g_phys_base = phys_ptr;
     info->trustcache_pa = phys_ptr;
     macho_load_trustcache(tms->trustcache_filename, nsas, sysmem, info->trustcache_pa, &info->trustcache_size);
-    phys_ptr += align_16k_high(info->trustcache_size);
 
     //now account for the loaded kernel
     info->entry = arm_load_macho(hdr, nsas, sysmem, "Kernel", g_phys_base, g_virt_base);
@@ -279,13 +296,18 @@ static void t8030_memory_setup(MachineState *machine)
         }
     }
 
-    mem_size = machine->ram_size - T8030_DISPLAY_SIZE - T8030_PANIC_LOG_SIZE;
+    mem_size = T8030_DISPLAY_BASE - g_phys_base;
 
     DTBNode *pram = find_dtb_node(tms->device_tree, "pram");
     if (pram) {
-        uint64_t panic_base = T8030_DRAM_BASE + mem_size;
-        uint64_t panic_size = T8030_PANIC_LOG_SIZE;
-        set_dtb_prop(pram, "reg", 8, (uint8_t *)&panic_base);
+        uint64_t panic_reg[2] = { 0 };
+        uint64_t panic_base = T8030_PANIC_BASE;
+        uint64_t panic_size = T8030_PANIC_SIZE;
+
+        panic_reg[0] = panic_base;
+        panic_reg[1] = panic_size;
+
+        set_dtb_prop(pram, "reg", 16, (uint8_t *)&panic_reg);
         DTBNode *chosen = find_dtb_node(tms->device_tree, "chosen");
         set_dtb_prop(chosen, "embedded-panic-log-size", 8,
                      (uint8_t *)&panic_size);
@@ -293,6 +315,15 @@ static void t8030_memory_setup(MachineState *machine)
         tms->panic_size = panic_size;
     }
 
+    DTBNode *vram = find_dtb_node(tms->device_tree, "vram");
+    if (vram) {
+        uint64_t vram_reg[2] = { 0 };
+        uint64_t vram_base = T8030_DISPLAY_BASE;
+        uint64_t vram_size = T8030_DISPLAY_SIZE;
+        vram_reg[0] = vram_base;
+        vram_reg[1] = vram_size;
+        set_dtb_prop(vram, "reg", 16, (uint8_t *)&vram_reg);
+    }
     macho_load_dtb(tms->device_tree, nsas, sysmem, "DeviceTree", info);
 
     phys_ptr += align_16k_high(info->dtb_size);
@@ -1110,7 +1141,7 @@ static void t8030_create_boot_display(MachineState *machine)
     T8030MachineState *tms = T8030_MACHINE(machine);
     SysBusDevice *fb = NULL;
     MemoryRegion *vram = NULL;
-    tms->video.v_baseAddr = T8030_DRAM_BASE + machine->ram_size - (T8030_DISPLAY_SIZE);
+    tms->video.v_baseAddr = T8030_DISPLAY_BASE;
     tms->video.v_rowBytes = 480 * 4;
     tms->video.v_width = 480;
     tms->video.v_height = 640;
