@@ -803,8 +803,8 @@ static uint64_t apple_mbox_iop_reg_read(void *opaque, hwaddr addr,
 
     WITH_QEMU_LOCK_GUARD(&s->mutex) {
         apple_mbox_msg_t m;
-        uint64_t ret = 0;
-        memcpy(&ret, &s->iop_regs[addr], size);
+        uint32_t ret = 0;
+        memcpy(&ret, &s->iop_regs[addr], sizeof(ret));
 
         switch (addr) {
         case REG_IOP_I2A_CTRL:
@@ -834,7 +834,7 @@ static uint64_t apple_mbox_iop_reg_read(void *opaque, hwaddr addr,
             break;
         default:
             qemu_log_mask(LOG_UNIMP, "%s: AppleA7IOP AKF unknown IOP reg READ @ 0x"
-                                     TARGET_FMT_plx " ret: 0x%08llx\n",
+                                     TARGET_FMT_plx " ret: 0x%08x\n",
                                      s->role, addr, ret);
             break;
         }
