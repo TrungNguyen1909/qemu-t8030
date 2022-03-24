@@ -88,7 +88,9 @@ static QCryptoCipherMode key_mode(block_mode_t mode) {
     case BLOCK_MODE_ECB: return QCRYPTO_CIPHER_MODE_ECB;
     case BLOCK_MODE_CBC: return QCRYPTO_CIPHER_MODE_CBC;
     case BLOCK_MODE_CTR: return QCRYPTO_CIPHER_MODE_CTR;
+    default: return QCRYPTO_CIPHER_MODE__MAX;
     }
+    return QCRYPTO_CIPHER_MODE__MAX;
 }
 
 static void apple_aes_reset(DeviceState *s);
