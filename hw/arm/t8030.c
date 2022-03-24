@@ -40,7 +40,7 @@
 #include "arm-powerctl.h"
 
 #include "hw/arm/t8030.h"
-#include "hw/arm/t8030_cpu.h"
+#include "hw/arm/apple_a13.h"
 
 #include "hw/irq.h"
 #include "hw/or-irq.h"
@@ -86,8 +86,8 @@ static void t8030_wake_up_cpus(MachineState* machine, uint64_t cpu_mask)
 
     for(i = 0; i < machine->smp.cpus; i++) {
         if (test_bit(i, (unsigned long*)&cpu_mask)
-            && t8030_cpu_is_sleep(tms->cpus[i])) {
-            t8030_cpu_wakeup(tms->cpus[i]);
+            && apple_a13_is_sleep(tms->cpus[i])) {
+            apple_a13_wakeup(tms->cpus[i]);
         }
     }
 }
@@ -397,12 +397,12 @@ static void t8030_cluster_setup(MachineState *machine)
 {
     T8030MachineState *tms = T8030_MACHINE(machine);
 
-    for (int i = 0; i < T8030_MAX_CLUSTER; i++) {
+    for (int i = 0; i < A13_MAX_CLUSTER; i++) {
         g_autofree char *name = NULL;
 
         name = g_strdup_printf("cluster%d", i);
         object_initialize_child(OBJECT(machine), name, &tms->clusters[i],
-                                TYPE_T8030_CPU_CLUSTER);
+                                TYPE_APPLE_A13_CLUSTER);
         qdev_prop_set_uint32(DEVICE(&tms->clusters[i]), "cluster-id", i);
     }
 }
@@ -410,7 +410,7 @@ static void t8030_cluster_setup(MachineState *machine)
 static void t8030_cluster_realize(MachineState *machine)
 {
     T8030MachineState *tms = T8030_MACHINE(machine);
-    for (int i = 0; i < T8030_MAX_CLUSTER; i++) {
+    for (int i = 0; i < A13_MAX_CLUSTER; i++) {
         qdev_realize(DEVICE(&tms->clusters[i]), NULL, &error_fatal);
         if (tms->clusters[i].base) {
             memory_region_add_subregion(tms->sysmem, tms->clusters[i].base,
@@ -443,7 +443,7 @@ static void t8030_cpu_setup(MachineState *machine)
             continue;
         }
 
-        tms->cpus[i] = t8030_cpu_create(node);
+        tms->cpus[i] = apple_a13_create(node);
         cluster_id = tms->cpus[i]->cluster_id;
 
         object_property_add_child(OBJECT(&tms->clusters[cluster_id]),
@@ -1179,8 +1179,8 @@ static void t8030_cpu_reset(void *opaque)
     bool found_first = false;
 
     CPU_FOREACH(cpu) {
-        T8030CPUState *tcpu = (T8030CPUState *)object_dynamic_cast(OBJECT(cpu),
-                                                               TYPE_T8030_CPU);
+        AppleA13State *tcpu = (AppleA13State *)object_dynamic_cast(OBJECT(cpu),
+                                                               TYPE_APPLE_A13);
         if (tcpu) {
             ARM_CPU(cpu)->rvbar = tms->bootinfo.entry & ~0xfff;
             cpu_reset(cpu);
@@ -1396,14 +1396,14 @@ static void t8030_machine_class_init(ObjectClass *oc, void *data)
     mc->desc = "T8030";
     mc->init = t8030_machine_init;
     mc->reset = t8030_machine_reset;
-    mc->max_cpus = T8030_MAX_CPU;
+    mc->max_cpus = A13_MAX_CPU;
     // this disables the error message "Failed to query for block devices!"
     // when starting qemu - must keep at least one device
     mc->no_sdcard = 1;
     mc->no_floppy = 1;
     mc->no_cdrom = 1;
     mc->no_parallel = 1;
-    mc->default_cpu_type = TYPE_T8030_CPU;
+    mc->default_cpu_type = TYPE_APPLE_A13;
     mc->minimum_page_bits = 14;
     mc->default_ram_size = T8030_DRAM_SIZE;
     mc->fixup_ram_size = t8030_machine_fixup_ram_size;

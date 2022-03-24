@@ -4,7 +4,7 @@
 #include "qemu-common.h"
 #include "target/arm/cpu.h"
 #include "target/arm/internals.h"
-#include "t8030_gxf.h"
+#include "apple_a13_gxf.h"
 #include "exec/exec-all.h"
 
 CPAccessResult access_tvm_trvm(CPUARMState *env, const ARMCPRegInfo *ri,
@@ -192,7 +192,7 @@ static void gxf_cpreg_raw_write(CPUARMState *env, const ARMCPRegInfo *ri,
     *(uint64_t *)((char *)(env) + (ri)->bank_fieldoffsets[0]) = value;
 }
 
-static const ARMCPRegInfo t8030gxf_cp_override_reginfo[] = {
+static const ARMCPRegInfo apple_a13_gxf_cp_override_reginfo[] = {
     { .name = "TPIDR_EL1", .state = ARM_CP_STATE_AA64,
       .opc0 = 3, .opc1 = 0, .opc2 = 4, .crn = 13, .crm = 0,
       .access = PL1_RW, .type = ARM_CP_OVERRIDE,
@@ -241,7 +241,7 @@ static const ARMCPRegInfo t8030gxf_cp_override_reginfo[] = {
     REGINFO_SENTINEL
 };
 
-static const ARMCPRegInfo t8030gxf_cp_reginfo[] = {
+static const ARMCPRegInfo apple_a13_gxf_cp_reginfo[] = {
     { .name = "GXF_CONFIG_EL1",
       .cp = CP_REG_ARM64_SYSREG_CP, .state = ARM_CP_STATE_AA64,
       .opc0 = 3, .opc1 = 6, .crn = 15, .crm = 1, .opc2 = 2,
@@ -367,13 +367,13 @@ static const ARMCPRegInfo t8030gxf_cp_reginfo[] = {
       REGINFO_SENTINEL,
 };
 
-void t8030cpu_init_gxf_override(T8030CPUState *cpu)
+void apple_a13_init_gxf_override(AppleA13State *cpu)
 {
-    define_arm_cp_regs(ARM_CPU(cpu), t8030gxf_cp_override_reginfo);
+    define_arm_cp_regs(ARM_CPU(cpu), apple_a13_gxf_cp_override_reginfo);
 }
 
-void t8030cpu_init_gxf(T8030CPUState *cpu)
+void apple_a13_init_gxf(AppleA13State *cpu)
 {
-    define_arm_cp_regs(ARM_CPU(cpu), t8030gxf_cp_reginfo);
+    define_arm_cp_regs(ARM_CPU(cpu), apple_a13_gxf_cp_reginfo);
     object_property_set_bool(OBJECT(cpu), "has_gxf", true, &error_abort);
 }

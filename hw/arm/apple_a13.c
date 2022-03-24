@@ -7,38 +7,38 @@
 #include "hw/irq.h"
 #include "hw/or-irq.h"
 #include "hw/arm/xnu_dtb.h"
-#include "hw/arm/t8030_cpu.h"
-#include "hw/arm/t8030_gxf.h"
+#include "hw/arm/apple_a13.h"
+#include "hw/arm/apple_a13_gxf.h"
 #include "arm-powerctl.h"
 #include "sysemu/reset.h"
 
-#define VMSTATE_T8030_CPREG(name) \
-        VMSTATE_UINT64(T8030_CPREG_VAR_NAME(name), T8030CPUState)
+#define VMSTATE_A13_CPREG(name) \
+        VMSTATE_UINT64(A13_CPREG_VAR_NAME(name), AppleA13State)
 
-#define T8030_CPREG_FUNCS(name)                                               \
-    static uint64_t t8030_cpreg_read_##name(CPUARMState *env,                 \
-                                            const ARMCPRegInfo *ri)           \
-    {                                                                         \
-        T8030CPUState *tcpu = T8030_CPU(env_archcpu(env));                    \
-        return tcpu->T8030_CPREG_VAR_NAME(name);                              \
-    }                                                                         \
-    static void t8030_cpreg_write_##name(CPUARMState *env,                    \
-                                         const ARMCPRegInfo *ri,              \
-                                         uint64_t value)                      \
-    {                                                                         \
-        T8030CPUState *tcpu = T8030_CPU(env_archcpu(env));                    \
-        tcpu->T8030_CPREG_VAR_NAME(name) = value;                             \
+#define A13_CPREG_FUNCS(name)                                               \
+    static uint64_t apple_a13_cpreg_read_##name(CPUARMState *env,           \
+                                                const ARMCPRegInfo *ri)     \
+    {                                                                       \
+        AppleA13State *tcpu = APPLE_A13(env_archcpu(env));                  \
+        return tcpu->A13_CPREG_VAR_NAME(name);                              \
+    }                                                                       \
+    static void apple_a13_cpreg_write_##name(CPUARMState *env,              \
+                                         const ARMCPRegInfo *ri,            \
+                                         uint64_t value)                    \
+    {                                                                       \
+        AppleA13State *tcpu = APPLE_A13(env_archcpu(env));                  \
+        tcpu->A13_CPREG_VAR_NAME(name) = value;                             \
         /* if (value != 0) fprintf(stderr, "%s value = 0x%llx at PC 0x%llx\n",\
                                            value, env->pc); */                \
     }
 
-#define T8030_CPREG_DEF(p_name, p_op0, p_op1, p_crn, p_crm, p_op2, p_access) \
+#define A13_CPREG_DEF(p_name, p_op0, p_op1, p_crn, p_crm, p_op2, p_access)   \
     {                                                                        \
         .cp = CP_REG_ARM64_SYSREG_CP,                                        \
         .name = #p_name, .opc0 = p_op0, .crn = p_crn, .crm = p_crm,          \
         .opc1 = p_op1, .opc2 = p_op2, .access = p_access, .type = ARM_CP_IO, \
-        .state = ARM_CP_STATE_AA64, .readfn = t8030_cpreg_read_##p_name,     \
-        .writefn = t8030_cpreg_write_##p_name,                               \
+        .state = ARM_CP_STATE_AA64, .readfn = apple_a13_cpreg_read_##p_name, \
+        .writefn = apple_a13_cpreg_write_##p_name,                           \
     }
 
 #define MPIDR_AFF0_SHIFT 0
@@ -95,52 +95,53 @@ nanoseconds_to_absolutetime(uint64_t nanosecs,
 }
 
 
-static QTAILQ_HEAD(, T8030CPUCluster) clusters = QTAILQ_HEAD_INITIALIZER(clusters);
+static QTAILQ_HEAD(, AppleA13Cluster) clusters = QTAILQ_HEAD_INITIALIZER(clusters);
 
 static uint64_t ipi_cr = kDeferredIPITimerDefault;
 static QEMUTimer *ipicr_timer = NULL;
 
-T8030_CPREG_FUNCS(ARM64_REG_EHID4)
-T8030_CPREG_FUNCS(ARM64_REG_EHID10)
-T8030_CPREG_FUNCS(ARM64_REG_HID0)
-T8030_CPREG_FUNCS(ARM64_REG_HID3)
-T8030_CPREG_FUNCS(ARM64_REG_HID4)
-T8030_CPREG_FUNCS(ARM64_REG_HID5)
-T8030_CPREG_FUNCS(ARM64_REG_HID7)
-T8030_CPREG_FUNCS(ARM64_REG_HID8)
-T8030_CPREG_FUNCS(ARM64_REG_HID9)
-T8030_CPREG_FUNCS(ARM64_REG_HID11)
-T8030_CPREG_FUNCS(ARM64_REG_HID13)
-T8030_CPREG_FUNCS(ARM64_REG_HID14)
-T8030_CPREG_FUNCS(ARM64_REG_HID16)
-T8030_CPREG_FUNCS(ARM64_REG_LSU_ERR_STS)
-T8030_CPREG_FUNCS(PMC0)
-T8030_CPREG_FUNCS(PMC1)
-T8030_CPREG_FUNCS(PMCR1)
-T8030_CPREG_FUNCS(PMSR)
-T8030_CPREG_FUNCS(ARM64_REG_APCTL_EL1)
-T8030_CPREG_FUNCS(ARM64_REG_KERNELKEYLO_EL1)
-T8030_CPREG_FUNCS(ARM64_REG_KERNELKEYHI_EL1)
-T8030_CPREG_FUNCS(S3_4_c15_c0_5)
-T8030_CPREG_FUNCS(AMX_STATUS_EL1)
-T8030_CPREG_FUNCS(AMX_CTL_EL1)
-T8030_CPREG_FUNCS(ARM64_REG_CYC_OVRD)
-T8030_CPREG_FUNCS(ARM64_REG_ACC_CFG)
-T8030_CPREG_FUNCS(S3_5_c15_c10_1)
-T8030_CPREG_FUNCS(UPMPCM)
-T8030_CPREG_FUNCS(UPMCR0)
-T8030_CPREG_FUNCS(UPMSR)
-T8030_CPREG_FUNCS(ARM64_REG_CTRR_A_LWR_EL1)
-T8030_CPREG_FUNCS(ARM64_REG_CTRR_A_UPR_EL1)
-T8030_CPREG_FUNCS(ARM64_REG_CTRR_CTL_EL1)
-T8030_CPREG_FUNCS(ARM64_REG_CTRR_LOCK_EL1)
+A13_CPREG_FUNCS(ARM64_REG_EHID4)
+A13_CPREG_FUNCS(ARM64_REG_EHID10)
+A13_CPREG_FUNCS(ARM64_REG_HID0)
+A13_CPREG_FUNCS(ARM64_REG_HID1)
+A13_CPREG_FUNCS(ARM64_REG_HID3)
+A13_CPREG_FUNCS(ARM64_REG_HID4)
+A13_CPREG_FUNCS(ARM64_REG_HID5)
+A13_CPREG_FUNCS(ARM64_REG_HID7)
+A13_CPREG_FUNCS(ARM64_REG_HID8)
+A13_CPREG_FUNCS(ARM64_REG_HID9)
+A13_CPREG_FUNCS(ARM64_REG_HID11)
+A13_CPREG_FUNCS(ARM64_REG_HID13)
+A13_CPREG_FUNCS(ARM64_REG_HID14)
+A13_CPREG_FUNCS(ARM64_REG_HID16)
+A13_CPREG_FUNCS(ARM64_REG_LSU_ERR_STS)
+A13_CPREG_FUNCS(PMC0)
+A13_CPREG_FUNCS(PMC1)
+A13_CPREG_FUNCS(PMCR1)
+A13_CPREG_FUNCS(PMSR)
+A13_CPREG_FUNCS(ARM64_REG_APCTL_EL1)
+A13_CPREG_FUNCS(ARM64_REG_KERNELKEYLO_EL1)
+A13_CPREG_FUNCS(ARM64_REG_KERNELKEYHI_EL1)
+A13_CPREG_FUNCS(S3_4_c15_c0_5)
+A13_CPREG_FUNCS(AMX_STATUS_EL1)
+A13_CPREG_FUNCS(AMX_CTL_EL1)
+A13_CPREG_FUNCS(ARM64_REG_CYC_OVRD)
+A13_CPREG_FUNCS(ARM64_REG_ACC_CFG)
+A13_CPREG_FUNCS(S3_5_c15_c10_1)
+A13_CPREG_FUNCS(UPMPCM)
+A13_CPREG_FUNCS(UPMCR0)
+A13_CPREG_FUNCS(UPMSR)
+A13_CPREG_FUNCS(ARM64_REG_CTRR_A_LWR_EL1)
+A13_CPREG_FUNCS(ARM64_REG_CTRR_A_UPR_EL1)
+A13_CPREG_FUNCS(ARM64_REG_CTRR_CTL_EL1)
+A13_CPREG_FUNCS(ARM64_REG_CTRR_LOCK_EL1)
 
-inline bool t8030_cpu_is_sleep(T8030CPUState *tcpu)
+inline bool apple_a13_is_sleep(AppleA13State *tcpu)
 {
     return CPU(tcpu)->halted;
 }
 
-void t8030_cpu_wakeup(T8030CPUState *tcpu)
+void apple_a13_wakeup(AppleA13State *tcpu)
 {
     int ret = QEMU_ARM_POWERCTL_RET_SUCCESS;
 
@@ -154,9 +155,9 @@ void t8030_cpu_wakeup(T8030CPUState *tcpu)
     }
 }
 
-static T8030CPUCluster *t8030_find_cluster(int cluster_id)
+static AppleA13Cluster *apple_a13_find_cluster(int cluster_id)
 {
-    T8030CPUCluster *cluster = NULL;
+    AppleA13Cluster *cluster = NULL;
     QTAILQ_FOREACH(cluster, &clusters, next) {
         if (CPU_CLUSTER(cluster)->cluster_id == cluster_id)
             return cluster;
@@ -165,10 +166,10 @@ static T8030CPUCluster *t8030_find_cluster(int cluster_id)
 }
 
 /* Deliver IPI */
-static void t8030_cluster_deliver_ipi(T8030CPUCluster *c, uint64_t cpu_id,
+static void apple_a13_cluster_deliver_ipi(AppleA13Cluster *c, uint64_t cpu_id,
                                       uint64_t src_cpu, uint64_t flag)
 {
-    t8030_cpu_wakeup(c->cpus[cpu_id]);
+    apple_a13_wakeup(c->cpus[cpu_id]);
 
     if (c->cpus[cpu_id]->ipi_sr)
         return;
@@ -177,30 +178,30 @@ static void t8030_cluster_deliver_ipi(T8030CPUCluster *c, uint64_t cpu_id,
     qemu_irq_raise(c->cpus[cpu_id]->fast_ipi);
 }
 
-static int t8030_cpu_cluster_pre_save(void *opaque) {
-    T8030CPUCluster *cluster = T8030_CPU_CLUSTER(opaque);
+static int apple_a13_cluster_pre_save(void *opaque) {
+    AppleA13Cluster *cluster = APPLE_A13_CLUSTER(opaque);
     cluster->ipi_cr = ipi_cr;
     return 0;
 }
 
-static int t8030_cpu_cluster_post_load(void *opaque, int version_id) {
-    T8030CPUCluster *cluster = T8030_CPU_CLUSTER(opaque);
+static int apple_a13_cluster_post_load(void *opaque, int version_id) {
+    AppleA13Cluster *cluster = APPLE_A13_CLUSTER(opaque);
     ipi_cr = cluster->ipi_cr;
     return 0;
 }
 
-static void t8030_cpu_cluster_reset(DeviceState *dev) {
-    T8030CPUCluster *cluster = T8030_CPU_CLUSTER(dev);
+static void apple_a13_cluster_reset(DeviceState *dev) {
+    AppleA13Cluster *cluster = APPLE_A13_CLUSTER(dev);
     memset(cluster->deferredIPI, 0, sizeof(cluster->deferredIPI));
     memset(cluster->noWakeIPI, 0, sizeof(cluster->noWakeIPI));
 }
 
 static int add_cpu_to_cluster(Object *obj, void *opaque)
 {
-    T8030CPUCluster *cluster = T8030_CPU_CLUSTER(opaque);
+    AppleA13Cluster *cluster = APPLE_A13_CLUSTER(opaque);
     CPUState *cpu = (CPUState *)object_dynamic_cast(obj, TYPE_CPU);
-    T8030CPUState *tcpu = (T8030CPUState *)object_dynamic_cast(obj,
-                                                               TYPE_T8030_CPU);
+    AppleA13State *tcpu = (AppleA13State *)object_dynamic_cast(obj,
+                                                               TYPE_APPLE_A13);
 
     if (cpu) {
         cpu->cluster_index = CPU_CLUSTER(cluster)->cluster_id;
@@ -213,87 +214,87 @@ static int add_cpu_to_cluster(Object *obj, void *opaque)
     return 0;
 }
 
-static void t8030_cpu_cluster_realize(DeviceState *dev, Error **errp)
+static void apple_a13_cluster_realize(DeviceState *dev, Error **errp)
 {
-    T8030CPUCluster *cluster = T8030_CPU_CLUSTER(dev);
+    AppleA13Cluster *cluster = APPLE_A13_CLUSTER(dev);
     object_child_foreach_recursive(OBJECT(cluster), add_cpu_to_cluster, dev);
 
     if (cluster->size) {
         memory_region_init_ram_device_ptr(&cluster->mr, OBJECT(cluster),
-                                          TYPE_T8030_CPU_CLUSTER ".cpm-impl-reg",
+                                          TYPE_APPLE_A13_CLUSTER ".cpm-impl-reg",
                                           cluster->size, g_malloc0(cluster->size));
     }
 }
 
-static void t8030_cpu_cluster_tick(T8030CPUCluster *c)
+static void apple_a13_cluster_tick(AppleA13Cluster *c)
 {
     int i, j;
 
-    for (i = 0; i < T8030_MAX_CPU; i++) { /* source */
-        for (j = 0; j < T8030_MAX_CPU; j++) { /* target */
+    for (i = 0; i < A13_MAX_CPU; i++) { /* source */
+        for (j = 0; j < A13_MAX_CPU; j++) { /* target */
             if (c->cpus[j] != NULL && c->deferredIPI[i][j]) {
-                t8030_cluster_deliver_ipi(c, j, i, IPI_RR_TYPE_DEFERRED);
+                apple_a13_cluster_deliver_ipi(c, j, i, IPI_RR_TYPE_DEFERRED);
                 break;
             }
         }
     }
 
-    for (i = 0; i < T8030_MAX_CPU; i++) { /* source */
-        for (j = 0; j < T8030_MAX_CPU; j++) { /* target */
+    for (i = 0; i < A13_MAX_CPU; i++) { /* source */
+        for (j = 0; j < A13_MAX_CPU; j++) { /* target */
             if (c->cpus[j] != NULL && c->noWakeIPI[i][j]
-                && !t8030_cpu_is_sleep(c->cpus[j])) {
-                t8030_cluster_deliver_ipi(c, j, i, IPI_RR_TYPE_NOWAKE);
+                && !apple_a13_is_sleep(c->cpus[j])) {
+                apple_a13_cluster_deliver_ipi(c, j, i, IPI_RR_TYPE_NOWAKE);
                 break;
             }
         }
     }
 }
 
-static void t8030_cpu_cluster_ipicr_tick(void* opaque)
+static void apple_a13_cluster_ipicr_tick(void* opaque)
 {
-    T8030CPUCluster *cluster;
+    AppleA13Cluster *cluster;
     QTAILQ_FOREACH(cluster, &clusters, next) {
-        t8030_cpu_cluster_tick(cluster);
+        apple_a13_cluster_tick(cluster);
     }
 
     timer_mod_ns(ipicr_timer, qemu_clock_get_ns(QEMU_CLOCK_VIRTUAL) + ipi_cr);
 }
 
 
-static void t8030_cpu_cluster_reset_handler(void *opaque)
+static void apple_a13_cluster_reset_handler(void *opaque)
 {
     if (ipicr_timer) {
         timer_del(ipicr_timer);
         ipicr_timer = NULL;
     }
     ipicr_timer = timer_new_ns(QEMU_CLOCK_VIRTUAL,
-                               t8030_cpu_cluster_ipicr_tick, NULL);
+                               apple_a13_cluster_ipicr_tick, NULL);
     timer_mod_ns(ipicr_timer, qemu_clock_get_ns(QEMU_CLOCK_VIRTUAL)
                               + kDeferredIPITimerDefault);
 }
 
-static void t8030_cpu_cluster_instance_init(Object *obj)
+static void apple_a13_cluster_instance_init(Object *obj)
 {
-    T8030CPUCluster *cluster = T8030_CPU_CLUSTER(obj);
+    AppleA13Cluster *cluster = APPLE_A13_CLUSTER(obj);
     QTAILQ_INSERT_TAIL(&clusters, cluster, next);
 
     if (ipicr_timer == NULL) {
-        qemu_register_reset(t8030_cpu_cluster_reset_handler, NULL);
+        qemu_register_reset(apple_a13_cluster_reset_handler, NULL);
     }
 }
 
 /* Deliver local IPI */
-static void t8030_ipi_rr_local(CPUARMState *env, const ARMCPRegInfo *ri,
+static void apple_a13_ipi_rr_local(CPUARMState *env, const ARMCPRegInfo *ri,
                                uint64_t value)
 {
-    T8030CPUState *tcpu = T8030_CPU(env_archcpu(env));
+    AppleA13State *tcpu = APPLE_A13(env_archcpu(env));
 
     uint32_t phys_id = MPIDR_CPU_ID(value) | (tcpu->cluster_id << 8);
-    T8030CPUCluster *c = t8030_find_cluster(tcpu->cluster_id);
+    AppleA13Cluster *c = apple_a13_find_cluster(tcpu->cluster_id);
     uint32_t cpu_id = -1;
     int i;
 
-    for(i = 0; i < T8030_MAX_CPU; i++) {
+    for(i = 0; i < A13_MAX_CPU; i++) {
         if (c->cpus[i]) {
             if (c->cpus[i]->phys_id == phys_id) {
                 cpu_id = i;
@@ -312,10 +313,10 @@ static void t8030_ipi_rr_local(CPUARMState *env, const ARMCPRegInfo *ri,
 
     switch (value & IPI_RR_TYPE_MASK) {
     case IPI_RR_TYPE_NOWAKE:
-        if (t8030_cpu_is_sleep(c->cpus[cpu_id])) {
+        if (apple_a13_is_sleep(c->cpus[cpu_id])) {
             c->noWakeIPI[tcpu->cpu_id][cpu_id] = 1;
         } else {
-            t8030_cluster_deliver_ipi(c, cpu_id, tcpu->cpu_id,
+            apple_a13_cluster_deliver_ipi(c, cpu_id, tcpu->cpu_id,
                                       IPI_RR_TYPE_IMMEDIATE);
         }
         break;
@@ -327,7 +328,7 @@ static void t8030_ipi_rr_local(CPUARMState *env, const ARMCPRegInfo *ri,
         c->noWakeIPI[tcpu->cpu_id][cpu_id] = 0;
         break;
     case IPI_RR_TYPE_IMMEDIATE:
-        t8030_cluster_deliver_ipi(c, cpu_id, tcpu->cpu_id,
+        apple_a13_cluster_deliver_ipi(c, cpu_id, tcpu->cpu_id,
                                   IPI_RR_TYPE_IMMEDIATE);
         break;
     default:
@@ -337,12 +338,12 @@ static void t8030_ipi_rr_local(CPUARMState *env, const ARMCPRegInfo *ri,
 }
 
 /* Deliver global IPI */
-static void t8030_ipi_rr_global(CPUARMState *env, const ARMCPRegInfo *ri,
+static void apple_a13_ipi_rr_global(CPUARMState *env, const ARMCPRegInfo *ri,
                                 uint64_t value)
 {
-    T8030CPUState *tcpu = T8030_CPU(env_archcpu(env));
+    AppleA13State *tcpu = APPLE_A13(env_archcpu(env));
     uint32_t cluster_id = MPIDR_CLUSTER_ID(value >> IPI_RR_TARGET_CLUSTER_SHIFT);
-    T8030CPUCluster *c = t8030_find_cluster(cluster_id);
+    AppleA13Cluster *c = apple_a13_find_cluster(cluster_id);
 
     if (!c) {
         return;
@@ -352,7 +353,7 @@ static void t8030_ipi_rr_global(CPUARMState *env, const ARMCPRegInfo *ri,
     uint32_t cpu_id = -1;
     int i;
 
-    for(i = 0; i < T8030_MAX_CPU; i++) {
+    for(i = 0; i < A13_MAX_CPU; i++) {
         if (c->cpus[i] != NULL) {
             if (c->cpus[i]->phys_id == phys_id) {
                 cpu_id = i;
@@ -371,10 +372,10 @@ static void t8030_ipi_rr_global(CPUARMState *env, const ARMCPRegInfo *ri,
 
     switch (value & IPI_RR_TYPE_MASK) {
     case IPI_RR_TYPE_NOWAKE:
-        if (t8030_cpu_is_sleep(c->cpus[cpu_id])) {
+        if (apple_a13_is_sleep(c->cpus[cpu_id])) {
             c->noWakeIPI[tcpu->cpu_id][cpu_id] = 1;
         } else {
-            t8030_cluster_deliver_ipi(c, cpu_id, tcpu->cpu_id,
+            apple_a13_cluster_deliver_ipi(c, cpu_id, tcpu->cpu_id,
                                       IPI_RR_TYPE_IMMEDIATE);
         }
         break;
@@ -386,7 +387,7 @@ static void t8030_ipi_rr_global(CPUARMState *env, const ARMCPRegInfo *ri,
         c->noWakeIPI[tcpu->cpu_id][cpu_id] = 0;
         break;
     case IPI_RR_TYPE_IMMEDIATE:
-        t8030_cluster_deliver_ipi(c, cpu_id, tcpu->cpu_id,
+        apple_a13_cluster_deliver_ipi(c, cpu_id, tcpu->cpu_id,
                                   IPI_RR_TYPE_IMMEDIATE);
         break;
     default:
@@ -396,20 +397,20 @@ static void t8030_ipi_rr_global(CPUARMState *env, const ARMCPRegInfo *ri,
 }
 
 /* Receiving IPI */
-static uint64_t t8030_ipi_read_sr(CPUARMState *env, const ARMCPRegInfo *ri)
+static uint64_t apple_a13_ipi_read_sr(CPUARMState *env, const ARMCPRegInfo *ri)
 {
-    T8030CPUState *tcpu = T8030_CPU(env_archcpu(env));
+    AppleA13State *tcpu = APPLE_A13(env_archcpu(env));
 
     assert(env_archcpu(env)->mp_affinity == tcpu->mpidr);
     return tcpu->ipi_sr;
 }
 
 /* Acknowledge received IPI */
-static void t8030_ipi_write_sr(CPUARMState *env, const ARMCPRegInfo *ri,
+static void apple_a13_ipi_write_sr(CPUARMState *env, const ARMCPRegInfo *ri,
                                uint64_t value)
 {
-    T8030CPUState *tcpu = T8030_CPU(env_archcpu(env));
-    T8030CPUCluster *c = t8030_find_cluster(tcpu->cluster_id);
+    AppleA13State *tcpu = APPLE_A13(env_archcpu(env));
+    AppleA13Cluster *c = apple_a13_find_cluster(tcpu->cluster_id);
     uint64_t src_cpu = IPI_SR_SRC_CPU(value);
 
     tcpu->ipi_sr = 0;
@@ -428,7 +429,7 @@ static void t8030_ipi_write_sr(CPUARMState *env, const ARMCPRegInfo *ri,
 }
 
 /* Read deferred interrupt timeout (global) */
-static uint64_t t8030_ipi_read_cr(CPUARMState *env, const ARMCPRegInfo *ri)
+static uint64_t apple_a13_ipi_read_cr(CPUARMState *env, const ARMCPRegInfo *ri)
 {
     uint64_t abstime;
 
@@ -437,7 +438,7 @@ static uint64_t t8030_ipi_read_cr(CPUARMState *env, const ARMCPRegInfo *ri)
 }
 
 /* Set deferred interrupt timeout (global) */
-static void t8030_ipi_write_cr(CPUARMState *env, const ARMCPRegInfo *ri,
+static void apple_a13_ipi_write_cr(CPUARMState *env, const ARMCPRegInfo *ri,
                                uint64_t value)
 {
     uint64_t nanosec = 0;
@@ -454,41 +455,42 @@ static void t8030_ipi_write_cr(CPUARMState *env, const ARMCPRegInfo *ri,
     ipi_cr = nanosec;
 }
 
-static const ARMCPRegInfo t8030_cp_reginfo_tcg[] = {
-    T8030_CPREG_DEF(ARM64_REG_EHID4, 3, 0, 15, 4, 1, PL1_RW),
-    T8030_CPREG_DEF(ARM64_REG_EHID10, 3, 0, 15, 10, 1, PL1_RW),
-    T8030_CPREG_DEF(ARM64_REG_HID0, 3, 0, 15, 0, 0, PL1_RW),
-    T8030_CPREG_DEF(ARM64_REG_HID3, 3, 0, 15, 3, 0, PL1_RW),
-    T8030_CPREG_DEF(ARM64_REG_HID4, 3, 0, 15, 4, 0, PL1_RW),
-    T8030_CPREG_DEF(ARM64_REG_HID5, 3, 0, 15, 5, 0, PL1_RW),
-    T8030_CPREG_DEF(ARM64_REG_HID7, 3, 0, 15, 7, 0, PL1_RW),
-    T8030_CPREG_DEF(ARM64_REG_HID8, 3, 0, 15, 8, 0, PL1_RW),
-    T8030_CPREG_DEF(ARM64_REG_HID9, 3, 0, 15, 9, 0, PL1_RW),
-    T8030_CPREG_DEF(ARM64_REG_HID11, 3, 0, 15, 11, 0, PL1_RW),
-    T8030_CPREG_DEF(ARM64_REG_HID13, 3, 0, 15, 14, 0, PL1_RW),
-    T8030_CPREG_DEF(ARM64_REG_HID14, 3, 0, 15, 15, 0, PL1_RW),
-    T8030_CPREG_DEF(ARM64_REG_HID16, 3, 0, 15, 15, 2, PL1_RW),
-    T8030_CPREG_DEF(ARM64_REG_LSU_ERR_STS, 3, 3, 15, 0, 0, PL1_RW),
-    T8030_CPREG_DEF(PMC0, 3, 2, 15, 0, 0, PL1_RW),
-    T8030_CPREG_DEF(PMC1, 3, 2, 15, 1, 0, PL1_RW),
-    T8030_CPREG_DEF(PMCR1, 3, 1, 15, 1, 0, PL1_RW),
-    T8030_CPREG_DEF(PMSR, 3, 1, 15, 13, 0, PL1_RW),
-    T8030_CPREG_DEF(ARM64_REG_APCTL_EL1, 3, 4, 15, 0, 4, PL1_RW),
-    T8030_CPREG_DEF(ARM64_REG_KERNELKEYLO_EL1, 3, 4, 15, 1, 0, PL1_RW),
-    T8030_CPREG_DEF(ARM64_REG_KERNELKEYHI_EL1, 3, 4, 15, 1, 1, PL1_RW),
-    T8030_CPREG_DEF(S3_4_c15_c0_5, 3, 4, 15, 0, 5, PL1_RW),
-    T8030_CPREG_DEF(AMX_STATUS_EL1, 3, 4, 15, 1, 3, PL1_R),
-    T8030_CPREG_DEF(AMX_CTL_EL1, 3, 4, 15, 1, 4, PL1_RW),
-    T8030_CPREG_DEF(ARM64_REG_CYC_OVRD, 3, 5, 15, 5, 0, PL1_RW),
-    T8030_CPREG_DEF(ARM64_REG_ACC_CFG, 3, 5, 15, 4, 0, PL1_RW),
-    T8030_CPREG_DEF(S3_5_c15_c10_1, 3, 5, 15, 10, 1, PL0_RW),
-    T8030_CPREG_DEF(UPMPCM, 3, 7, 15, 5, 4, PL1_RW),
-    T8030_CPREG_DEF(UPMCR0, 3, 7, 15, 0, 4, PL1_RW),
-    T8030_CPREG_DEF(UPMSR, 3, 7, 15, 6, 4, PL1_RW),
-    T8030_CPREG_DEF(ARM64_REG_CTRR_A_LWR_EL1, 3, 4, 15, 2, 3, PL1_RW),
-    T8030_CPREG_DEF(ARM64_REG_CTRR_A_UPR_EL1, 3, 4, 15, 2, 4, PL1_RW),
-    T8030_CPREG_DEF(ARM64_REG_CTRR_CTL_EL1, 3, 4, 15, 2, 5, PL1_RW),
-    T8030_CPREG_DEF(ARM64_REG_CTRR_LOCK_EL1, 3, 4, 15, 2, 2, PL1_RW),
+static const ARMCPRegInfo apple_a13_cp_reginfo_tcg[] = {
+    A13_CPREG_DEF(ARM64_REG_EHID4, 3, 0, 15, 4, 1, PL1_RW),
+    A13_CPREG_DEF(ARM64_REG_EHID10, 3, 0, 15, 10, 1, PL1_RW),
+    A13_CPREG_DEF(ARM64_REG_HID0, 3, 0, 15, 0, 0, PL1_RW),
+    A13_CPREG_DEF(ARM64_REG_HID1, 3, 0, 15, 1, 0, PL1_RW),
+    A13_CPREG_DEF(ARM64_REG_HID3, 3, 0, 15, 3, 0, PL1_RW),
+    A13_CPREG_DEF(ARM64_REG_HID4, 3, 0, 15, 4, 0, PL1_RW),
+    A13_CPREG_DEF(ARM64_REG_HID5, 3, 0, 15, 5, 0, PL1_RW),
+    A13_CPREG_DEF(ARM64_REG_HID7, 3, 0, 15, 7, 0, PL1_RW),
+    A13_CPREG_DEF(ARM64_REG_HID8, 3, 0, 15, 8, 0, PL1_RW),
+    A13_CPREG_DEF(ARM64_REG_HID9, 3, 0, 15, 9, 0, PL1_RW),
+    A13_CPREG_DEF(ARM64_REG_HID11, 3, 0, 15, 11, 0, PL1_RW),
+    A13_CPREG_DEF(ARM64_REG_HID13, 3, 0, 15, 14, 0, PL1_RW),
+    A13_CPREG_DEF(ARM64_REG_HID14, 3, 0, 15, 15, 0, PL1_RW),
+    A13_CPREG_DEF(ARM64_REG_HID16, 3, 0, 15, 15, 2, PL1_RW),
+    A13_CPREG_DEF(ARM64_REG_LSU_ERR_STS, 3, 3, 15, 0, 0, PL1_RW),
+    A13_CPREG_DEF(PMC0, 3, 2, 15, 0, 0, PL1_RW),
+    A13_CPREG_DEF(PMC1, 3, 2, 15, 1, 0, PL1_RW),
+    A13_CPREG_DEF(PMCR1, 3, 1, 15, 1, 0, PL1_RW),
+    A13_CPREG_DEF(PMSR, 3, 1, 15, 13, 0, PL1_RW),
+    A13_CPREG_DEF(ARM64_REG_APCTL_EL1, 3, 4, 15, 0, 4, PL1_RW),
+    A13_CPREG_DEF(ARM64_REG_KERNELKEYLO_EL1, 3, 4, 15, 1, 0, PL1_RW),
+    A13_CPREG_DEF(ARM64_REG_KERNELKEYHI_EL1, 3, 4, 15, 1, 1, PL1_RW),
+    A13_CPREG_DEF(S3_4_c15_c0_5, 3, 4, 15, 0, 5, PL1_RW),
+    A13_CPREG_DEF(AMX_STATUS_EL1, 3, 4, 15, 1, 3, PL1_R),
+    A13_CPREG_DEF(AMX_CTL_EL1, 3, 4, 15, 1, 4, PL1_RW),
+    A13_CPREG_DEF(ARM64_REG_CYC_OVRD, 3, 5, 15, 5, 0, PL1_RW),
+    A13_CPREG_DEF(ARM64_REG_ACC_CFG, 3, 5, 15, 4, 0, PL1_RW),
+    A13_CPREG_DEF(S3_5_c15_c10_1, 3, 5, 15, 10, 1, PL0_RW),
+    A13_CPREG_DEF(UPMPCM, 3, 7, 15, 5, 4, PL1_RW),
+    A13_CPREG_DEF(UPMCR0, 3, 7, 15, 0, 4, PL1_RW),
+    A13_CPREG_DEF(UPMSR, 3, 7, 15, 6, 4, PL1_RW),
+    A13_CPREG_DEF(ARM64_REG_CTRR_A_LWR_EL1, 3, 4, 15, 2, 3, PL1_RW),
+    A13_CPREG_DEF(ARM64_REG_CTRR_A_UPR_EL1, 3, 4, 15, 2, 4, PL1_RW),
+    A13_CPREG_DEF(ARM64_REG_CTRR_CTL_EL1, 3, 4, 15, 2, 5, PL1_RW),
+    A13_CPREG_DEF(ARM64_REG_CTRR_LOCK_EL1, 3, 4, 15, 2, 2, PL1_RW),
 
     {
         .cp = CP_REG_ARM64_SYSREG_CP,
@@ -497,7 +499,7 @@ static const ARMCPRegInfo t8030_cp_reginfo_tcg[] = {
         .access = PL1_W, .type = ARM_CP_IO | ARM_CP_NO_RAW,
         .state = ARM_CP_STATE_AA64,
         .readfn = arm_cp_read_zero,
-        .writefn = t8030_ipi_rr_local
+        .writefn = apple_a13_ipi_rr_local
     },
     {
         .cp = CP_REG_ARM64_SYSREG_CP,
@@ -506,7 +508,7 @@ static const ARMCPRegInfo t8030_cp_reginfo_tcg[] = {
         .access = PL1_W, .type = ARM_CP_IO | ARM_CP_NO_RAW,
         .state = ARM_CP_STATE_AA64,
         .readfn = arm_cp_read_zero,
-        .writefn = t8030_ipi_rr_global
+        .writefn = apple_a13_ipi_rr_global
     },
     {
         .cp = CP_REG_ARM64_SYSREG_CP,
@@ -514,8 +516,8 @@ static const ARMCPRegInfo t8030_cp_reginfo_tcg[] = {
         .opc0 = 3, .opc1 = 5, .crn = 15, .crm = 1, .opc2 = 1,
         .access = PL1_RW, .type = ARM_CP_IO | ARM_CP_NO_RAW,
         .state = ARM_CP_STATE_AA64,
-        .readfn = t8030_ipi_read_sr,
-        .writefn = t8030_ipi_write_sr
+        .readfn = apple_a13_ipi_read_sr,
+        .writefn = apple_a13_ipi_write_sr
     },
     {
         .cp = CP_REG_ARM64_SYSREG_CP,
@@ -523,23 +525,23 @@ static const ARMCPRegInfo t8030_cp_reginfo_tcg[] = {
         .opc0 = 3, .opc1 = 5, .crn = 15, .crm = 3, .opc2 = 1,
         .access = PL1_RW, .type = ARM_CP_IO,
         .state = ARM_CP_STATE_AA64,
-        .readfn = t8030_ipi_read_cr,
-        .writefn = t8030_ipi_write_cr
+        .readfn = apple_a13_ipi_read_cr,
+        .writefn = apple_a13_ipi_write_cr
     },
     REGINFO_SENTINEL,
 };
 
-static void t8030_add_cpregs(T8030CPUState *tcpu)
+static void apple_a13_add_cpregs(AppleA13State *tcpu)
 {
     ARMCPU *cpu = ARM_CPU(tcpu);
-    define_arm_cp_regs(cpu, t8030_cp_reginfo_tcg);
-    t8030cpu_init_gxf(tcpu);
+    define_arm_cp_regs(cpu, apple_a13_cp_reginfo_tcg);
+    apple_a13_init_gxf(tcpu);
 }
 
-static void t8030_cpu_realize(DeviceState *dev, Error **errp)
+static void apple_a13_realize(DeviceState *dev, Error **errp)
 {
-    T8030CPUState *tcpu = T8030_CPU(dev);
-    T8030CPUClass *tclass = T8030_CPU_GET_CLASS(dev);
+    AppleA13State *tcpu = APPLE_A13(dev);
+    AppleA13Class *tclass = APPLE_A13_GET_CLASS(dev);
     DeviceState *fiq_or;
     Object *obj = OBJECT(dev);
 
@@ -548,12 +550,12 @@ static void t8030_cpu_realize(DeviceState *dev, Error **errp)
     if (*errp) {
         return;
     }
-    t8030_add_cpregs(tcpu);
+    apple_a13_add_cpregs(tcpu);
     tclass->parent_realize(dev, errp);
     if (*errp) {
         return;
     }
-    t8030cpu_init_gxf_override(tcpu);
+    apple_a13_init_gxf_override(tcpu);
     fiq_or = qdev_new(TYPE_OR_IRQ);
     object_property_add_child(obj, "fiq-or", OBJECT(fiq_or));
     qdev_prop_set_uint16(fiq_or, "num-lines", 16);
@@ -567,33 +569,33 @@ static void t8030_cpu_realize(DeviceState *dev, Error **errp)
     tcpu->fast_ipi = qdev_get_gpio_in(fiq_or, 1);
 }
 
-static void t8030_cpu_reset(DeviceState *dev)
+static void apple_a13_reset(DeviceState *dev)
 {
-    T8030CPUState *tcpu = T8030_CPU(dev);
-    T8030CPUClass *tclass = T8030_CPU_GET_CLASS(dev);
+    AppleA13State *tcpu = APPLE_A13(dev);
+    AppleA13Class *tclass = APPLE_A13_GET_CLASS(dev);
     tclass->parent_reset(dev);
 
-    tcpu->T8030_CPREG_VAR_NAME(ARM64_REG_LSU_ERR_STS) = 0;
-    tcpu->T8030_CPREG_VAR_NAME(PMC0) = 0;
-    tcpu->T8030_CPREG_VAR_NAME(PMC1) = 0;
-    tcpu->T8030_CPREG_VAR_NAME(PMCR1) = 0;
-    tcpu->T8030_CPREG_VAR_NAME(PMSR) = 0;
-    tcpu->T8030_CPREG_VAR_NAME(ARM64_REG_APCTL_EL1) = 2;
-    tcpu->T8030_CPREG_VAR_NAME(ARM64_REG_KERNELKEYLO_EL1) = 0;
-    tcpu->T8030_CPREG_VAR_NAME(ARM64_REG_KERNELKEYHI_EL1) = 0;
-    tcpu->T8030_CPREG_VAR_NAME(AMX_STATUS_EL1) = 0;
-    tcpu->T8030_CPREG_VAR_NAME(AMX_CTL_EL1) = 0;
+    tcpu->A13_CPREG_VAR_NAME(ARM64_REG_LSU_ERR_STS) = 0;
+    tcpu->A13_CPREG_VAR_NAME(PMC0) = 0;
+    tcpu->A13_CPREG_VAR_NAME(PMC1) = 0;
+    tcpu->A13_CPREG_VAR_NAME(PMCR1) = 0;
+    tcpu->A13_CPREG_VAR_NAME(PMSR) = 0;
+    tcpu->A13_CPREG_VAR_NAME(ARM64_REG_APCTL_EL1) = 2;
+    tcpu->A13_CPREG_VAR_NAME(ARM64_REG_KERNELKEYLO_EL1) = 0;
+    tcpu->A13_CPREG_VAR_NAME(ARM64_REG_KERNELKEYHI_EL1) = 0;
+    tcpu->A13_CPREG_VAR_NAME(AMX_STATUS_EL1) = 0;
+    tcpu->A13_CPREG_VAR_NAME(AMX_CTL_EL1) = 0;
 }
 
-static void t8030_cpu_instance_init(Object *obj)
+static void apple_a13_instance_init(Object *obj)
 {
     object_property_set_uint(obj, "cntfrq", 24000000, &error_fatal);
 }
 
-T8030CPUState *t8030_cpu_create(DTBNode *node)
+AppleA13State *apple_a13_create(DTBNode *node)
 {
     DeviceState  *dev;
-    T8030CPUState *tcpu;
+    AppleA13State *tcpu;
     ARMCPU *cpu;
     Object *obj;
     DTBProp *prop;
@@ -601,9 +603,9 @@ T8030CPUState *t8030_cpu_create(DTBNode *node)
     uint64_t freq;
     uint64_t *reg;
 
-    obj = object_new(TYPE_T8030_CPU);
+    obj = object_new(TYPE_APPLE_A13);
     dev = DEVICE(obj);
-    tcpu = T8030_CPU(dev);
+    tcpu = APPLE_A13(dev);
     cpu = ARM_CPU(tcpu);
 
     prop = find_dtb_prop(node, "name");
@@ -660,6 +662,9 @@ T8030CPUState *t8030_cpu_create(DTBNode *node)
     } else {
         object_property_set_bool(obj, "start-powered-off", true, NULL);
     }
+    #if 0
+    object_property_set_bool(obj, "start-powered-off", true, NULL);
+    #endif
 
     prop = find_dtb_prop(node, "timebase-frequency");
     if (prop != NULL) {
@@ -690,7 +695,7 @@ T8030CPUState *t8030_cpu_create(DTBNode *node)
     reg = (uint64_t*)prop->value;
 
     memory_region_init_ram_device_ptr(&tcpu->impl_reg, obj,
-                                      TYPE_T8030_CPU ".impl-reg",
+                                      TYPE_APPLE_A13 ".impl-reg",
                                       reg[1], g_malloc0(reg[1]));
     memory_region_add_subregion(get_system_memory(),
                                 reg[0], &tcpu->impl_reg);
@@ -702,7 +707,7 @@ T8030CPUState *t8030_cpu_create(DTBNode *node)
     reg = (uint64_t*)prop->value;
 
     memory_region_init_ram_device_ptr(&tcpu->coresight_reg, obj,
-                                      TYPE_T8030_CPU ".coresight-reg",
+                                      TYPE_APPLE_A13 ".coresight-reg",
                                       reg[1], g_malloc0(reg[1]));
     memory_region_add_subregion(get_system_memory(),
                                 reg[0], &tcpu->coresight_reg);
@@ -713,121 +718,122 @@ T8030CPUState *t8030_cpu_create(DTBNode *node)
     return tcpu;
 }
 
-static Property t8030_cpu_properties[] = {
+static Property apple_a13_properties[] = {
     DEFINE_PROP_END_OF_LIST(),
 };
 
-static Property t8030_cpu_cluster_properties[] = {
-    DEFINE_PROP_UINT32("cluster-type", T8030CPUCluster, cluster_type, 0),
+static Property apple_a13_cluster_properties[] = {
+    DEFINE_PROP_UINT32("cluster-type", AppleA13Cluster, cluster_type, 0),
     DEFINE_PROP_END_OF_LIST(),
 };
 
-static const VMStateDescription vmstate_t8030_cpu = {
-    .name = "t8030_cpu",
+static const VMStateDescription vmstate_apple_a13 = {
+    .name = "apple_a13",
     .version_id = 1,
     .minimum_version_id = 1,
     .fields = (VMStateField[]) {
-        VMSTATE_T8030_CPREG(ARM64_REG_EHID4),
-        VMSTATE_T8030_CPREG(ARM64_REG_EHID10),
-        VMSTATE_T8030_CPREG(ARM64_REG_HID0),
-        VMSTATE_T8030_CPREG(ARM64_REG_HID3),
-        VMSTATE_T8030_CPREG(ARM64_REG_HID4),
-        VMSTATE_T8030_CPREG(ARM64_REG_HID5),
-        VMSTATE_T8030_CPREG(ARM64_REG_HID7),
-        VMSTATE_T8030_CPREG(ARM64_REG_HID8),
-        VMSTATE_T8030_CPREG(ARM64_REG_HID9),
-        VMSTATE_T8030_CPREG(ARM64_REG_HID11),
-        VMSTATE_T8030_CPREG(ARM64_REG_HID13),
-        VMSTATE_T8030_CPREG(ARM64_REG_HID14),
-        VMSTATE_T8030_CPREG(ARM64_REG_HID16),
-        VMSTATE_T8030_CPREG(ARM64_REG_LSU_ERR_STS),
-        VMSTATE_T8030_CPREG(PMC0),
-        VMSTATE_T8030_CPREG(PMC1),
-        VMSTATE_T8030_CPREG(PMCR1),
-        VMSTATE_T8030_CPREG(PMSR),
-        VMSTATE_T8030_CPREG(ARM64_REG_APCTL_EL1),
-        VMSTATE_T8030_CPREG(ARM64_REG_KERNELKEYLO_EL1),
-        VMSTATE_T8030_CPREG(ARM64_REG_KERNELKEYHI_EL1),
-        VMSTATE_T8030_CPREG(S3_4_c15_c0_5),
-        VMSTATE_T8030_CPREG(AMX_STATUS_EL1),
-        VMSTATE_T8030_CPREG(AMX_CTL_EL1),
-        VMSTATE_T8030_CPREG(ARM64_REG_CYC_OVRD),
-        VMSTATE_T8030_CPREG(ARM64_REG_ACC_CFG),
-        VMSTATE_T8030_CPREG(S3_5_c15_c10_1),
-        VMSTATE_T8030_CPREG(UPMPCM),
-        VMSTATE_T8030_CPREG(UPMCR0),
-        VMSTATE_T8030_CPREG(UPMSR),
-        VMSTATE_T8030_CPREG(ARM64_REG_CTRR_A_LWR_EL1),
-        VMSTATE_T8030_CPREG(ARM64_REG_CTRR_A_UPR_EL1),
-        VMSTATE_T8030_CPREG(ARM64_REG_CTRR_CTL_EL1),
-        VMSTATE_T8030_CPREG(ARM64_REG_CTRR_LOCK_EL1),
+        VMSTATE_A13_CPREG(ARM64_REG_EHID4),
+        VMSTATE_A13_CPREG(ARM64_REG_EHID10),
+        VMSTATE_A13_CPREG(ARM64_REG_HID0),
+        VMSTATE_A13_CPREG(ARM64_REG_HID1),
+        VMSTATE_A13_CPREG(ARM64_REG_HID3),
+        VMSTATE_A13_CPREG(ARM64_REG_HID4),
+        VMSTATE_A13_CPREG(ARM64_REG_HID5),
+        VMSTATE_A13_CPREG(ARM64_REG_HID7),
+        VMSTATE_A13_CPREG(ARM64_REG_HID8),
+        VMSTATE_A13_CPREG(ARM64_REG_HID9),
+        VMSTATE_A13_CPREG(ARM64_REG_HID11),
+        VMSTATE_A13_CPREG(ARM64_REG_HID13),
+        VMSTATE_A13_CPREG(ARM64_REG_HID14),
+        VMSTATE_A13_CPREG(ARM64_REG_HID16),
+        VMSTATE_A13_CPREG(ARM64_REG_LSU_ERR_STS),
+        VMSTATE_A13_CPREG(PMC0),
+        VMSTATE_A13_CPREG(PMC1),
+        VMSTATE_A13_CPREG(PMCR1),
+        VMSTATE_A13_CPREG(PMSR),
+        VMSTATE_A13_CPREG(ARM64_REG_APCTL_EL1),
+        VMSTATE_A13_CPREG(ARM64_REG_KERNELKEYLO_EL1),
+        VMSTATE_A13_CPREG(ARM64_REG_KERNELKEYHI_EL1),
+        VMSTATE_A13_CPREG(S3_4_c15_c0_5),
+        VMSTATE_A13_CPREG(AMX_STATUS_EL1),
+        VMSTATE_A13_CPREG(AMX_CTL_EL1),
+        VMSTATE_A13_CPREG(ARM64_REG_CYC_OVRD),
+        VMSTATE_A13_CPREG(ARM64_REG_ACC_CFG),
+        VMSTATE_A13_CPREG(S3_5_c15_c10_1),
+        VMSTATE_A13_CPREG(UPMPCM),
+        VMSTATE_A13_CPREG(UPMCR0),
+        VMSTATE_A13_CPREG(UPMSR),
+        VMSTATE_A13_CPREG(ARM64_REG_CTRR_A_LWR_EL1),
+        VMSTATE_A13_CPREG(ARM64_REG_CTRR_A_UPR_EL1),
+        VMSTATE_A13_CPREG(ARM64_REG_CTRR_CTL_EL1),
+        VMSTATE_A13_CPREG(ARM64_REG_CTRR_LOCK_EL1),
         VMSTATE_END_OF_LIST()
     }
 };
 
-static const VMStateDescription vmstate_t8030_cpu_cluster = {
-    .name = "t8030_cpu_cluster",
+static const VMStateDescription vmstate_apple_a13_cluster = {
+    .name = "apple_a13_cluster",
     .version_id = 1,
     .minimum_version_id = 1,
-    .pre_save = t8030_cpu_cluster_pre_save,
-    .post_load = t8030_cpu_cluster_post_load,
+    .pre_save = apple_a13_cluster_pre_save,
+    .post_load = apple_a13_cluster_post_load,
     .fields = (VMStateField[]) {
-        VMSTATE_UINT32_2DARRAY(deferredIPI, T8030CPUCluster,
-                               T8030_MAX_CPU, T8030_MAX_CPU),
-        VMSTATE_UINT32_2DARRAY(noWakeIPI, T8030CPUCluster,
-                               T8030_MAX_CPU, T8030_MAX_CPU),
-        VMSTATE_UINT64(tick, T8030CPUCluster),
-        VMSTATE_UINT64(ipi_cr, T8030CPUCluster),
+        VMSTATE_UINT32_2DARRAY(deferredIPI, AppleA13Cluster,
+                               A13_MAX_CPU, A13_MAX_CPU),
+        VMSTATE_UINT32_2DARRAY(noWakeIPI, AppleA13Cluster,
+                               A13_MAX_CPU, A13_MAX_CPU),
+        VMSTATE_UINT64(tick, AppleA13Cluster),
+        VMSTATE_UINT64(ipi_cr, AppleA13Cluster),
         VMSTATE_END_OF_LIST()
     }
 };
 
-static void t8030_cpu_class_init(ObjectClass *klass, void *data)
+static void apple_a13_class_init(ObjectClass *klass, void *data)
 {
     DeviceClass *dc = DEVICE_CLASS(klass);
-    T8030CPUClass *tc = T8030_CPU_CLASS(klass);
+    AppleA13Class *tc = APPLE_A13_CLASS(klass);
 
-    device_class_set_parent_realize(dc, t8030_cpu_realize, &tc->parent_realize);
-    device_class_set_parent_reset(dc, t8030_cpu_reset, &tc->parent_reset);
-    dc->desc = "Apple T8030 CPU";
-    dc->vmsd = &vmstate_t8030_cpu;
+    device_class_set_parent_realize(dc, apple_a13_realize, &tc->parent_realize);
+    device_class_set_parent_reset(dc, apple_a13_reset, &tc->parent_reset);
+    dc->desc = "Apple A13 CPU";
+    dc->vmsd = &vmstate_apple_a13;
     set_bit(DEVICE_CATEGORY_CPU, dc->categories);
-    device_class_set_props(dc, t8030_cpu_properties);
+    device_class_set_props(dc, apple_a13_properties);
 }
 
-static void t8030_cpu_cluster_class_init(ObjectClass *klass, void *data)
+static void apple_a13_cluster_class_init(ObjectClass *klass, void *data)
 {
     DeviceClass *dc = DEVICE_CLASS(klass);
 
-    dc->realize = t8030_cpu_cluster_realize;
-    dc->reset = t8030_cpu_cluster_reset;
-    dc->desc = "Apple T8030 CPU Cluster";
+    dc->realize = apple_a13_cluster_realize;
+    dc->reset = apple_a13_cluster_reset;
+    dc->desc = "Apple A13 CPU Cluster";
     dc->user_creatable = false;
-    dc->vmsd = &vmstate_t8030_cpu_cluster;
-    device_class_set_props(dc, t8030_cpu_cluster_properties);
+    dc->vmsd = &vmstate_apple_a13_cluster;
+    device_class_set_props(dc, apple_a13_cluster_properties);
 }
 
-static const TypeInfo t8030_cpu_info = {
-    .name = TYPE_T8030_CPU,
+static const TypeInfo apple_a13_info = {
+    .name = TYPE_APPLE_A13,
     .parent = ARM_CPU_TYPE_NAME("max"),
-    .instance_size = sizeof(T8030CPUState),
-    .instance_init = t8030_cpu_instance_init,
-    .class_size = sizeof(T8030CPUClass),
-    .class_init = t8030_cpu_class_init,
+    .instance_size = sizeof(AppleA13State),
+    .instance_init = apple_a13_instance_init,
+    .class_size = sizeof(AppleA13Class),
+    .class_init = apple_a13_class_init,
 };
 
-static const TypeInfo t8030_cpu_cluster_info = {
-    .name = TYPE_T8030_CPU_CLUSTER,
+static const TypeInfo apple_a13_cluster_info = {
+    .name = TYPE_APPLE_A13_CLUSTER,
     .parent = TYPE_CPU_CLUSTER,
-    .instance_size = sizeof(T8030CPUCluster),
-    .instance_init = t8030_cpu_cluster_instance_init,
-    .class_init = t8030_cpu_cluster_class_init,
+    .instance_size = sizeof(AppleA13Cluster),
+    .instance_init = apple_a13_cluster_instance_init,
+    .class_init = apple_a13_cluster_class_init,
 };
 
-static void t8030_cpu_register_types(void)
+static void apple_a13_register_types(void)
 {
-    type_register_static(&t8030_cpu_info);
-    type_register_static(&t8030_cpu_cluster_info);
+    type_register_static(&apple_a13_info);
+    type_register_static(&apple_a13_cluster_info);
 }
 
-type_init(t8030_cpu_register_types);
+type_init(apple_a13_register_types);

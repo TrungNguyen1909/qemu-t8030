@@ -1,5 +1,5 @@
 /*
- * iPhone 11 - t8030
+ * iPhone 11 - T8030
  *
  * Copyright (c) 2019 Jonathan Afek <jonyafek@me.com>
  * Copyright (c) 2021 Nguyen Hoang Trung (TrungNguyen1909)
@@ -34,7 +34,7 @@
 #include "exec/memory.h"
 #include "cpu.h"
 #include "sysemu/kvm.h"
-#include "hw/arm/t8030_cpu.h"
+#include "hw/arm/apple_a13.h"
 
 #define TYPE_T8030 "t8030"
 
@@ -62,8 +62,8 @@ typedef struct
     hwaddr soc_size;
 
     unsigned long dram_size;
-    T8030CPUState *cpus[T8030_MAX_CPU];
-    T8030CPUCluster clusters[T8030_MAX_CLUSTER];
+    AppleA13State *cpus[A13_MAX_CPU];
+    AppleA13Cluster clusters[A13_MAX_CLUSTER];
     SysBusDevice *aic;
     MemoryRegion *sysmem;
     struct mach_header_64 *kernel;
