@@ -25,6 +25,7 @@
 
 #include "qemu/osdep.h"
 #include "qemu/log.h"
+#include "qemu/units.h"
 #include "qapi/error.h"
 #include "qemu-common.h"
 #include "hw/arm/boot.h"
@@ -62,6 +63,7 @@
 #include "hw/display/m1_fb.h"
 
 #define T8030_DRAM_BASE         (0x800000000)
+#define T8030_DRAM_SIZE         (4 * GiB)
 #define T8030_ANS_TEXT_BASE     (0x800024000)
 #define T8030_ANS_TEXT_SIZE     (0x124000)
 #define T8030_ANS_DATA_BASE     (0x8fc400000)
@@ -225,7 +227,7 @@ static void t8030_memory_setup(MachineState *machine)
 
     //now account for device tree
     info->dram_base = T8030_DRAM_BASE;
-    info->dram_size = machine->ram_size;
+    info->dram_size = T8030_DRAM_SIZE;
     info->dtb_pa = phys_ptr;
 
     dtb_va = ptov_static(info->dtb_pa);
@@ -1216,7 +1218,7 @@ static void t8030_machine_init(MachineState *machine)
     hwaddr *ranges;
 
     tms->sysmem = get_system_memory();
-    allocate_ram(tms->sysmem, "DRAM", T8030_DRAM_BASE, machine->ram_size, 0);
+    allocate_ram(tms->sysmem, "DRAM", T8030_DRAM_BASE, T8030_DRAM_SIZE, 0);
 
     hdr = macho_load_file(machine->kernel_filename);
     assert(hdr);
@@ -1379,6 +1381,14 @@ static char *t8030_get_boot_mode(Object *obj, Error **errp)
     }
 }
 
+static ram_addr_t t8030_machine_fixup_ram_size(ram_addr_t size)
+{
+    if (size != T8030_DRAM_SIZE) {
+        warn_report("The T8030 machine only supports 4 GiB RAM. Overriding");
+    }
+    return T8030_DRAM_SIZE;
+}
+
 static void t8030_machine_class_init(ObjectClass *oc, void *data)
 {
     MachineClass *mc = MACHINE_CLASS(oc);
@@ -1395,6 +1405,8 @@ static void t8030_machine_class_init(ObjectClass *oc, void *data)
     mc->no_parallel = 1;
     mc->default_cpu_type = TYPE_T8030_CPU;
     mc->minimum_page_bits = 14;
+    mc->default_ram_size = T8030_DRAM_SIZE;
+    mc->fixup_ram_size = t8030_machine_fixup_ram_size;
 
     object_class_property_add_str(oc, "trustcache-filename",
                                   t8030_get_trustcache_filename,
