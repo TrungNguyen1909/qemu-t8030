@@ -5,3 +5,10 @@ cmsdk_apb_watchdog_read(uint64_t offset, uint64_t data, unsigned size) "CMSDK AP
 cmsdk_apb_watchdog_write(uint64_t offset, uint64_t data, unsigned size) "CMSDK APB watchdog write: offset 0x%" PRIx64 " data 0x%" PRIx64 " size %u"
 cmsdk_apb_watchdog_reset(void) "CMSDK APB watchdog: reset"
 cmsdk_apb_watchdog_lock(uint32_t lock) "CMSDK APB watchdog: lock %" PRIu32
+
+# apple_wdt.c
+apple_wdt_read(uint64_t addr, uint32_t val) "0x%04" PRIx64 " val 0x%08x"
+apple_wdt_write(uint64_t addr, uint64_t orig, uint32_t old, uint32_t val) "0x%04" PRIx64 " orig 0x%04" PRIx64 " old 0x%08x val 0x%08x"
+apple_wdt_chip_reset(void) "Apple Watch Dog Timer: chip reset"
+apple_wdt_system_reset(void) "Apple Watch Dog Timer: system reset"
+apple_wdt_set_irq(int level) "level: %d"

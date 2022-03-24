@@ -10,6 +10,7 @@
 #include "hw/arm/xnu.h"
 #include "hw/arm/xnu_dtb.h"
 #include "sysemu/watchdog.h"
+#include "trace.h"
 
 #define TYPE_APPLE_WDT "apple.wdt"
 OBJECT_DECLARE_SIMPLE_TYPE(AppleWDTState, APPLE_WDT)
@@ -69,11 +70,12 @@ static void apple_wdt_reset(DeviceState *dev);
 
 static void wdt_set_irq(AppleWDTState *s, int level)
 {
-   if (level) {
-        qemu_set_irq(s->irqs[0], 1);
-   } else {
-        qemu_set_irq(s->irqs[0], 0);
-   }
+    trace_apple_wdt_set_irq(level != 0);
+    if (level) {
+         qemu_set_irq(s->irqs[0], 1);
+    } else {
+         qemu_set_irq(s->irqs[0], 0);
+    }
 }
 
 static inline uint32_t wdt_get_clock(AppleWDTState *s)
@@ -100,7 +102,7 @@ static void wdt_update(void *opaque)
 
     if (s->reg.chip_control & WDOG_CTL_EN_RESET) {
         if (chip_tmr >= s->reg.chip_reset_counter) {
-            fprintf(stderr, "%s: wdog reset chip\n", __func__);
+            trace_apple_wdt_chip_reset();
             watchdog_perform_action();
             apple_wdt_reset(DEVICE(s));
             return;
@@ -112,7 +114,7 @@ static void wdt_update(void *opaque)
 
     if (s->reg.sys_control & WDOG_CTL_EN_RESET) {
         if (sys_tmr >= s->reg.sys_reset_counter) {
-            fprintf(stderr, "%s: wdog reset system\n", __func__);
+            trace_apple_wdt_system_reset();
             watchdog_perform_action();
             apple_wdt_reset(DEVICE(s));
             return;
@@ -142,7 +144,6 @@ static void wdt_reg_write(void *opaque, hwaddr addr,
                           unsigned size)
 {
     AppleWDTState *s = APPLE_WDT(opaque);
-    uint32_t __unused orig = data;
     uint32_t index = addr >> 2;
     uint32_t *mmio;
     uint32_t old;
@@ -179,7 +180,7 @@ static void wdt_reg_write(void *opaque, hwaddr addr,
         *mmio = val;
     }
 
-
+    trace_apple_wdt_write(addr, data, old, val);
     wdt_update(s);
 }
 
@@ -212,13 +213,14 @@ static uint64_t wdt_reg_read(void *opaque,
         break;
     }
 
+    trace_apple_wdt_read(addr, val);
     return val;
 }
 
 static void apple_wdt_reset(DeviceState *dev)
 {
     AppleWDTState *s = APPLE_WDT(dev);
-    memset(s->reg.raw, 0 , REG_SIZE);
+    memset(s->reg.raw, 0, REG_SIZE);
 }
 
 static const MemoryRegionOps wdt_reg_ops = {
