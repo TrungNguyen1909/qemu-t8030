@@ -68,6 +68,12 @@
 #define T8030_ANS_TEXT_SIZE     (0x124000)
 #define T8030_ANS_DATA_BASE     (0x8fc400000)
 #define T8030_ANS_DATA_SIZE     (0x3c00000)
+#define T8030_SMC_TEXT_BASE     (0x23fe00000)
+#define T8030_SMC_TEXT_SIZE     (0x30000)
+#define T8030_SMC_DATA_BASE     (0x23fe30000)
+#define T8030_SMC_DATA_SIZE     (0x30000)
+#define T8030_SMC_SRAM_BASE     (0x23fe60000)
+#define T8030_SMC_SRAM_SIZE     (0x4000)
 #define T8030_DISPLAY_BASE      (0x8f7fb4000)
 #define T8030_DISPLAY_SIZE      (67 * 1024 * 1024)
 #define T8030_PANIC_BASE        (0x8fc2b4000)
@@ -630,10 +636,36 @@ static void t8030_create_ans(MachineState* machine)
     SysBusDevice *sart;
     SysBusDevice *ans;
     DTBNode *child = find_dtb_node(tms->device_tree, "arm-io");
+    DTBNode *iop_nub;
+    struct xnu_iop_segment_range segranges[2] = { 0 };
 
     assert(child != NULL);
     child = find_dtb_node(child, "ans");
     assert(child != NULL);
+    iop_nub = find_dtb_node(child, "iop-ans-nub");
+    assert(iop_nub != NULL);
+
+    prop = find_dtb_prop(iop_nub, "region-base");
+    *(uint64_t *)prop->value = T8030_ANS_DATA_BASE;
+
+    prop = find_dtb_prop(iop_nub, "region-size");
+    *(uint64_t *)prop->value = T8030_ANS_DATA_SIZE;
+
+    set_dtb_prop(iop_nub, "segment-names", 14, (uint8_t *)"__TEXT;__DATA");
+
+    segranges[0].phys = T8030_ANS_TEXT_BASE;
+    segranges[0].virt = 0x0;
+    segranges[0].remap = T8030_ANS_TEXT_BASE;
+    segranges[0].size = T8030_ANS_TEXT_SIZE;
+    segranges[0].flag = 0x1;
+
+    segranges[1].phys = T8030_ANS_DATA_BASE;
+    segranges[1].virt = T8030_ANS_TEXT_SIZE;
+    segranges[1].remap = T8030_ANS_DATA_BASE;
+    segranges[1].size = T8030_ANS_DATA_SIZE;
+    segranges[1].flag = 0x0;
+
+    set_dtb_prop(iop_nub, "segment-ranges", 64, (uint8_t *)segranges);
 
     t8030_create_sart(machine);
     sart = SYS_BUS_DEVICE(object_property_get_link(OBJECT(machine),
@@ -1106,10 +1138,30 @@ static void t8030_create_smc(MachineState* machine)
     T8030MachineState *tms = T8030_MACHINE(machine);
     SysBusDevice *smc;
     DTBNode *child = find_dtb_node(tms->device_tree, "arm-io");
+    DTBNode *iop_nub;
+    struct xnu_iop_segment_range segranges[2] = { 0 };
 
     assert(child != NULL);
     child = find_dtb_node(child, "smc");
     assert(child != NULL);
+    iop_nub = find_dtb_node(child, "iop-smc-nub");
+    assert(iop_nub != NULL);
+
+    set_dtb_prop(iop_nub, "segment-names", 14, (uint8_t *)"__TEXT;__DATA");
+
+    segranges[0].phys = T8030_SMC_TEXT_BASE;
+    segranges[0].virt = 0x0;
+    segranges[0].remap = T8030_SMC_TEXT_BASE;
+    segranges[0].size = T8030_SMC_TEXT_SIZE;
+    segranges[0].flag = 0x1;
+
+    segranges[1].phys = T8030_SMC_DATA_BASE;
+    segranges[1].virt = T8030_SMC_TEXT_SIZE;
+    segranges[1].remap = T8030_SMC_DATA_BASE;
+    segranges[1].size = T8030_SMC_DATA_SIZE;
+    segranges[1].flag = 0x0;
+
+    set_dtb_prop(iop_nub, "segment-ranges", 64, (uint8_t *)segranges);
 
     smc = apple_smc_create(child, tms->build_version);
     assert(smc);
@@ -1126,6 +1178,8 @@ static void t8030_create_smc(MachineState* machine)
     for (int i = 0; i < prop->length / 16; i++) {
         sysbus_mmio_map(smc, i, tms->soc_base_pa + reg[i * 2]);
     }
+    /* 2: SRAM */
+    sysbus_mmio_map(smc, 2, T8030_SMC_SRAM_BASE);
 
     prop = find_dtb_prop(child, "interrupts");
     assert(prop);

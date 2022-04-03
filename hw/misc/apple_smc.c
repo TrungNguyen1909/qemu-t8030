@@ -452,14 +452,8 @@ SysBusDevice *apple_smc_create(DTBNode *node, uint32_t build_version)
     uint64_t *reg;
     uint32_t protocol_version = 0;
     uint32_t data;
-    struct segment_range {
-        uint64_t phys;
-        uint64_t virt;
-        uint64_t remap;
-        uint32_t size;
-        uint32_t flag;
-    };
-    struct segment_range segrange[2] = { 0 };
+    xnu_iop_segment_range *segment_ranges = NULL;
+    xnu_iop_segment_range *last_segment = NULL;
 
     dev = qdev_new(TYPE_APPLE_SMC_IOP);
     s = APPLE_SMC_IOP(dev);
@@ -475,6 +469,9 @@ SysBusDevice *apple_smc_create(DTBNode *node, uint32_t build_version)
         default:
             break;
     }
+
+    child = find_dtb_node(node, "iop-smc-nub");
+    assert(child);
 
     prop = find_dtb_prop(node, "reg");
     assert(prop);
@@ -498,12 +495,12 @@ SysBusDevice *apple_smc_create(DTBNode *node, uint32_t build_version)
                           TYPE_APPLE_SMC_IOP ".ascv2-core-reg", reg[3]);
     sysbus_init_mmio(sbd, s->iomems[1]);
 
-    prop->value = g_realloc(prop->value, prop->length + 16);
-    prop->length += 16;
-    reg = (uint64_t *)prop->value;
-    s->sram_addr = 0x23fe60000; /* size: 0x4000 */
-    reg[4] = 0x3fe60000;
-    reg[5] = 0x4000;
+    prop = find_dtb_prop(child, "segment-ranges");
+    assert(prop != NULL);
+    segment_ranges = (xnu_iop_segment_range *)prop->value;
+
+    last_segment = &segment_ranges[prop->length / sizeof(*segment_ranges) - 1];
+    s->sram_addr = last_segment->phys + last_segment->size; /* size: 0x4000 */
     s->iomems[2] = g_new(MemoryRegion, 1);
     memory_region_init_ram_device_ptr(s->iomems[2], OBJECT(dev),
                                       TYPE_APPLE_SMC_IOP ".sram",
@@ -512,34 +509,10 @@ SysBusDevice *apple_smc_create(DTBNode *node, uint32_t build_version)
 
     sysbus_pass_irq(sbd, SYS_BUS_DEVICE(s->mbox));
 
-    child = find_dtb_node(node, "iop-smc-nub");
-    assert(child);
-
     data = 1;
     set_dtb_prop(child, "pre-loaded", 4, (uint8_t *)&data);
     set_dtb_prop(child, "running", 4, (uint8_t *)&data);
 
-    prop = find_dtb_prop(child, "region-base");
-    *(uint64_t *)prop->value = 0x23fe00000;
-
-    prop = find_dtb_prop(child, "region-size");
-    *(uint64_t *)prop->value = 0x80000;
-
-    set_dtb_prop(child, "segment-names", 14, (uint8_t *)"__TEXT;__DATA");
-
-    segrange[0].phys = 0x23fe00000;
-    segrange[0].virt = 0x0;
-    segrange[0].remap = 0x23fe00000;
-    segrange[0].size = 0x30000;
-    segrange[0].flag = 0x1;
-
-    segrange[1].phys = 0x23fe30000;
-    segrange[1].virt = 0x30000;
-    segrange[1].remap = 0x23fe30000;
-    segrange[1].size = 0x30000;
-    segrange[1].flag = 0x0;
-
-    set_dtb_prop(child, "segment-ranges", 64, (uint8_t *)segrange);
     QTAILQ_INIT(&s->keys);
 
     return sbd;

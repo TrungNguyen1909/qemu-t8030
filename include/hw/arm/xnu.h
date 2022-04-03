@@ -164,7 +164,7 @@ struct xnu_arm64_boot_args {
 
 #define EMBEDDED_PANIC_HEADER_CURRENT_VERSION 2
 #define EMBEDDED_PANIC_MAGIC 0x46554E4B /* FUNK */
-struct xnu_embedded_panic_header {
+struct QEMU_PACKED xnu_embedded_panic_header {
     uint32_t eph_magic;                /* EMBEDDED_PANIC_MAGIC if valid */
     uint32_t eph_crc;                  /* CRC of everything following the ph_crc in the header and the contents */
     uint32_t eph_version;              /* embedded_panic_header version */
@@ -186,7 +186,15 @@ struct xnu_embedded_panic_header {
     };
     char eph_os_version[EMBEDDED_PANIC_HEADER_OSVERSION_LEN];
     char eph_macos_version[EMBEDDED_PANIC_HEADER_OSVERSION_LEN];
-} __attribute__((packed));
+};
+
+typedef struct QEMU_PACKED xnu_iop_segment_range {
+    uint64_t phys;
+    uint64_t virt;
+    uint64_t remap;
+    uint32_t size;
+    uint32_t flag;
+} xnu_iop_segment_range;
 
 #define XNU_MAX_NVRAM_SIZE  (0xFFFF * 0x10)
 

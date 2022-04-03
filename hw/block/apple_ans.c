@@ -138,16 +138,7 @@ SysBusDevice *apple_ans_create(DTBNode *node, uint32_t build_version)
     DTBProp *prop;
     uint64_t *reg;
     uint32_t protocol_version = 0;
-    int i;
     uint32_t data;
-    struct segment_range {
-        uint64_t phys;
-        uint64_t virt;
-        uint64_t remap;
-        uint32_t size;
-        uint32_t flag;
-    };
-    struct segment_range segrange[2] = { 0 };
 
     dev = qdev_new(TYPE_APPLE_ANS);
     s = APPLE_ANS(dev);
@@ -200,27 +191,6 @@ SysBusDevice *apple_ans_create(DTBNode *node, uint32_t build_version)
     data = 1;
     set_dtb_prop(child, "pre-loaded", 4, (uint8_t *)&data);
     set_dtb_prop(child, "running", 4, (uint8_t *)&data);
-
-    prop = find_dtb_prop(child, "region-base");
-    *(uint64_t *)prop->value = 0x8fc400000;
-
-    prop = find_dtb_prop(child, "region-size");
-    *(uint64_t *)prop->value = 0x3c00000;
-
-    set_dtb_prop(child, "segment-names", 14, (uint8_t *)"__TEXT;__DATA");
-
-    segrange[0].phys = 0x800024000;
-    segrange[0].virt = 0x0;
-    segrange[0].remap = 0x800024000;
-    segrange[0].size = 0x124000;
-    segrange[0].flag = 0x1;
-
-    segrange[1].phys = 0x8fc400000;
-    segrange[1].virt = 0x124000;
-    segrange[1].remap = 0x8fc400000;
-    segrange[1].size = 0x3c00000;
-    segrange[1].flag = 0x0;
-    set_dtb_prop(child, "segment-ranges", 64, (uint8_t *)segrange);
 
     object_initialize_child(OBJECT(dev), "nvme", &s->nvme, TYPE_NVME);
 
