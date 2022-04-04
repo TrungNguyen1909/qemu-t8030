@@ -1369,6 +1369,8 @@ static void t8030_machine_init(MachineState *machine)
     uint32_t build_version;
     uint32_t data;
     uint8_t buffer[0x40] = { 0 };
+    uint32_t display_rotation = 0;
+    uint32_t display_scale = 2;
     DTBNode *child;
     DTBProp *prop;
     hwaddr *ranges;
@@ -1430,6 +1432,13 @@ static void t8030_machine_init(MachineState *machine)
 
     uint64_t ecid = 0x1122334455667788;
     set_dtb_prop(child, "unique-chip-id", 8, (uint8_t *)&ecid);
+
+    /* update the display parameters */
+    set_dtb_prop(child, "display-rotation", sizeof(display_rotation),
+                    (uint8_t *)&display_rotation);
+
+    set_dtb_prop(child, "display-scale", sizeof(display_scale),
+                    (uint8_t *)&display_scale);
 
     t8030_cpu_setup(machine);
 

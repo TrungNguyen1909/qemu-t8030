@@ -334,8 +334,6 @@ void macho_load_dtb(DTBNode *root, AddressSpace *as, MemoryRegion *mem,
     DTBNode *child = NULL;
     DTBProp *prop = NULL;
     uint32_t data;
-    uint32_t display_rotation = 0;
-    uint32_t display_scale = 1;
     uint64_t memmap[2] = {0};
     g_autofree uint8_t *buf = NULL;
     // need to set the random seed insread of iboot
@@ -370,13 +368,6 @@ void macho_load_dtb(DTBNode *root, AddressSpace *as, MemoryRegion *mem,
     data = 1;
     set_dtb_prop(child, "research-enabled", sizeof(data), (uint8_t *)&data);
     prop = set_dtb_prop(child, "effective-production-status-ap", sizeof(data), (uint8_t *)&data);
-
-    //update the display parameters
-    set_dtb_prop(child, "display-rotation", sizeof(display_rotation),
-                    (uint8_t *)&display_rotation);
-
-    set_dtb_prop(child, "display-scale", sizeof(display_scale),
-                    (uint8_t *)&display_scale);
 
     //these are needed by the image4 parser module$
     set_dtb_prop(child, "security-domain", sizeof(data), (uint8_t *)&data);
