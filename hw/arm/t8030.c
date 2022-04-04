@@ -390,27 +390,34 @@ static const MemoryRegionOps pmgr_unk_reg_ops = {
 static void pmgr_reg_write(void *opaque, hwaddr addr, uint64_t data, unsigned size)
 {
     MachineState *machine = MACHINE(opaque);
+    T8030MachineState *tms = T8030_MACHINE(opaque);
+    uint32_t value = data;
 
+    if (addr >= 0x80000 && addr <= 0x8c000) {
+        value = (value & 0xf) << 4 | (value & 0xf);
+    }
     // fprintf(stderr, "PMGR reg WRITE @ 0x" TARGET_FMT_lx " value: 0x" TARGET_FMT_lx "\n", addr, data);
     switch (addr) {
     case 0xd4004:
         t8030_wake_up_cpus(machine, data);
         return;
     }
+    memcpy(tms->pmgr_reg + addr, &value, size);
 }
 
 static uint64_t pmgr_reg_read(void *opaque, hwaddr addr, unsigned size)
 {
+    T8030MachineState *tms = T8030_MACHINE(opaque);
     // fprintf(stderr, "PMGR reg READ @ 0x" TARGET_FMT_lx "\n", addr);
+    uint64_t result = 0;
     switch(addr) {
     case 0xf0010: /* AppleT8030PMGR::commonSramCheck */
         return 0x5000;
-    case 0x80100 ... 0x803b8:
-        return 0xf0;
     default:
         break;
     }
-    return 0;
+    memcpy(&result, tms->pmgr_reg + addr, size);
+    return result;
 }
 
 static const MemoryRegionOps pmgr_reg_ops = {

@@ -76,6 +76,7 @@ typedef struct
     uint32_t build_version;
     hwaddr panic_base;
     hwaddr panic_size;
+    uint8_t pmgr_reg[0x100000];
     MemoryRegion amcc;
     uint8_t amcc_reg[0x100000];
 } T8030MachineState;
