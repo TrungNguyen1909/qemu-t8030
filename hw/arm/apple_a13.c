@@ -15,6 +15,9 @@
 #define VMSTATE_A13_CPREG(name) \
         VMSTATE_UINT64(A13_CPREG_VAR_NAME(name), AppleA13State)
 
+#define VMSTATE_A13_CLUSTER_CPREG(name) \
+        VMSTATE_UINT64(A13_CPREG_VAR_NAME(name), AppleA13Cluster)
+
 #define A13_CPREG_FUNCS(name)                                               \
     static uint64_t apple_a13_cpreg_read_##name(CPUARMState *env,           \
                                                 const ARMCPRegInfo *ri)     \
@@ -32,13 +35,25 @@
                                            value, env->pc); */                \
     }
 
-#define A13_CPREG_DEF(p_name, p_op0, p_op1, p_crn, p_crm, p_op2, p_access)   \
+
+#define A13_CPREG_DEF(p_name, p_op0, p_op1, p_crn, p_crm, p_op2, p_access, p_reset) \
+    {                                                                               \
+        .cp = CP_REG_ARM64_SYSREG_CP,                                               \
+        .name = #p_name, .opc0 = p_op0, .crn = p_crn, .crm = p_crm,                 \
+        .opc1 = p_op1, .opc2 = p_op2, .access = p_access, .resetvalue = p_reset,    \
+        .state = ARM_CP_STATE_AA64,                                                 \
+        .fieldoffset = offsetof(AppleA13State, A13_CPREG_VAR_NAME(p_name))          \
+                       - offsetof(ARMCPU, env)                                      \
+    }
+
+#define A13_CLUSTER_CPREG_DEF(p_name, p_op0, p_op1, p_crn, p_crm, p_op2, p_access)   \
     {                                                                        \
         .cp = CP_REG_ARM64_SYSREG_CP,                                        \
         .name = #p_name, .opc0 = p_op0, .crn = p_crn, .crm = p_crm,          \
         .opc1 = p_op1, .opc2 = p_op2, .access = p_access, .type = ARM_CP_IO, \
-        .state = ARM_CP_STATE_AA64, .readfn = apple_a13_cpreg_read_##p_name, \
-        .writefn = apple_a13_cpreg_write_##p_name,                           \
+        .state = ARM_CP_STATE_AA64, .readfn = apple_a13_cluster_cpreg_read,  \
+        .writefn = apple_a13_cluster_cpreg_write,                            \
+        .fieldoffset = offsetof(AppleA13Cluster, A13_CPREG_VAR_NAME(p_name)) \
     }
 
 #define MPIDR_AFF0_SHIFT 0
@@ -100,42 +115,6 @@ static QTAILQ_HEAD(, AppleA13Cluster) clusters = QTAILQ_HEAD_INITIALIZER(cluster
 static uint64_t ipi_cr = kDeferredIPITimerDefault;
 static QEMUTimer *ipicr_timer = NULL;
 
-A13_CPREG_FUNCS(ARM64_REG_EHID4)
-A13_CPREG_FUNCS(ARM64_REG_EHID10)
-A13_CPREG_FUNCS(ARM64_REG_HID0)
-A13_CPREG_FUNCS(ARM64_REG_HID1)
-A13_CPREG_FUNCS(ARM64_REG_HID3)
-A13_CPREG_FUNCS(ARM64_REG_HID4)
-A13_CPREG_FUNCS(ARM64_REG_HID5)
-A13_CPREG_FUNCS(ARM64_REG_HID7)
-A13_CPREG_FUNCS(ARM64_REG_HID8)
-A13_CPREG_FUNCS(ARM64_REG_HID9)
-A13_CPREG_FUNCS(ARM64_REG_HID11)
-A13_CPREG_FUNCS(ARM64_REG_HID13)
-A13_CPREG_FUNCS(ARM64_REG_HID14)
-A13_CPREG_FUNCS(ARM64_REG_HID16)
-A13_CPREG_FUNCS(ARM64_REG_LSU_ERR_STS)
-A13_CPREG_FUNCS(PMC0)
-A13_CPREG_FUNCS(PMC1)
-A13_CPREG_FUNCS(PMCR1)
-A13_CPREG_FUNCS(PMSR)
-A13_CPREG_FUNCS(ARM64_REG_APCTL_EL1)
-A13_CPREG_FUNCS(ARM64_REG_KERNELKEYLO_EL1)
-A13_CPREG_FUNCS(ARM64_REG_KERNELKEYHI_EL1)
-A13_CPREG_FUNCS(S3_4_c15_c0_5)
-A13_CPREG_FUNCS(AMX_STATUS_EL1)
-A13_CPREG_FUNCS(AMX_CTL_EL1)
-A13_CPREG_FUNCS(ARM64_REG_CYC_OVRD)
-A13_CPREG_FUNCS(ARM64_REG_ACC_CFG)
-A13_CPREG_FUNCS(S3_5_c15_c10_1)
-A13_CPREG_FUNCS(UPMPCM)
-A13_CPREG_FUNCS(UPMCR0)
-A13_CPREG_FUNCS(UPMSR)
-A13_CPREG_FUNCS(ARM64_REG_CTRR_A_LWR_EL1)
-A13_CPREG_FUNCS(ARM64_REG_CTRR_A_UPR_EL1)
-A13_CPREG_FUNCS(ARM64_REG_CTRR_CTL_EL1)
-A13_CPREG_FUNCS(ARM64_REG_CTRR_LOCK_EL1)
-
 inline bool apple_a13_is_sleep(AppleA13State *tcpu)
 {
     return CPU(tcpu)->halted;
@@ -163,6 +142,32 @@ static AppleA13Cluster *apple_a13_find_cluster(int cluster_id)
             return cluster;
     }
     return NULL;
+}
+
+static uint64_t apple_a13_cluster_cpreg_read(CPUARMState *env,
+                                             const ARMCPRegInfo *ri)
+{
+    AppleA13State *tcpu = APPLE_A13(env_archcpu(env));
+    AppleA13Cluster *c = apple_a13_find_cluster(tcpu->cluster_id);
+
+    if (unlikely(!c)) {
+        return 0;
+    }
+
+    return *(uint64_t *)((char *)(c) + (ri)->fieldoffset);
+}
+
+static void apple_a13_cluster_cpreg_write(CPUARMState *env,
+                                          const ARMCPRegInfo *ri,
+                                          uint64_t value)
+{
+    AppleA13State *tcpu = APPLE_A13(env_archcpu(env));
+    AppleA13Cluster *c = apple_a13_find_cluster(tcpu->cluster_id);
+
+    if (unlikely(!c)) {
+        return;
+    }
+    *(uint64_t *)((char *)(c) + (ri)->fieldoffset) = value;
 }
 
 /* Deliver IPI */
@@ -456,41 +461,41 @@ static void apple_a13_ipi_write_cr(CPUARMState *env, const ARMCPRegInfo *ri,
 }
 
 static const ARMCPRegInfo apple_a13_cp_reginfo_tcg[] = {
-    A13_CPREG_DEF(ARM64_REG_EHID4, 3, 0, 15, 4, 1, PL1_RW),
-    A13_CPREG_DEF(ARM64_REG_EHID10, 3, 0, 15, 10, 1, PL1_RW),
-    A13_CPREG_DEF(ARM64_REG_HID0, 3, 0, 15, 0, 0, PL1_RW),
-    A13_CPREG_DEF(ARM64_REG_HID1, 3, 0, 15, 1, 0, PL1_RW),
-    A13_CPREG_DEF(ARM64_REG_HID3, 3, 0, 15, 3, 0, PL1_RW),
-    A13_CPREG_DEF(ARM64_REG_HID4, 3, 0, 15, 4, 0, PL1_RW),
-    A13_CPREG_DEF(ARM64_REG_HID5, 3, 0, 15, 5, 0, PL1_RW),
-    A13_CPREG_DEF(ARM64_REG_HID7, 3, 0, 15, 7, 0, PL1_RW),
-    A13_CPREG_DEF(ARM64_REG_HID8, 3, 0, 15, 8, 0, PL1_RW),
-    A13_CPREG_DEF(ARM64_REG_HID9, 3, 0, 15, 9, 0, PL1_RW),
-    A13_CPREG_DEF(ARM64_REG_HID11, 3, 0, 15, 11, 0, PL1_RW),
-    A13_CPREG_DEF(ARM64_REG_HID13, 3, 0, 15, 14, 0, PL1_RW),
-    A13_CPREG_DEF(ARM64_REG_HID14, 3, 0, 15, 15, 0, PL1_RW),
-    A13_CPREG_DEF(ARM64_REG_HID16, 3, 0, 15, 15, 2, PL1_RW),
-    A13_CPREG_DEF(ARM64_REG_LSU_ERR_STS, 3, 3, 15, 0, 0, PL1_RW),
-    A13_CPREG_DEF(PMC0, 3, 2, 15, 0, 0, PL1_RW),
-    A13_CPREG_DEF(PMC1, 3, 2, 15, 1, 0, PL1_RW),
-    A13_CPREG_DEF(PMCR1, 3, 1, 15, 1, 0, PL1_RW),
-    A13_CPREG_DEF(PMSR, 3, 1, 15, 13, 0, PL1_RW),
-    A13_CPREG_DEF(ARM64_REG_APCTL_EL1, 3, 4, 15, 0, 4, PL1_RW),
-    A13_CPREG_DEF(ARM64_REG_KERNELKEYLO_EL1, 3, 4, 15, 1, 0, PL1_RW),
-    A13_CPREG_DEF(ARM64_REG_KERNELKEYHI_EL1, 3, 4, 15, 1, 1, PL1_RW),
-    A13_CPREG_DEF(S3_4_c15_c0_5, 3, 4, 15, 0, 5, PL1_RW),
-    A13_CPREG_DEF(AMX_STATUS_EL1, 3, 4, 15, 1, 3, PL1_R),
-    A13_CPREG_DEF(AMX_CTL_EL1, 3, 4, 15, 1, 4, PL1_RW),
-    A13_CPREG_DEF(ARM64_REG_CYC_OVRD, 3, 5, 15, 5, 0, PL1_RW),
-    A13_CPREG_DEF(ARM64_REG_ACC_CFG, 3, 5, 15, 4, 0, PL1_RW),
-    A13_CPREG_DEF(S3_5_c15_c10_1, 3, 5, 15, 10, 1, PL0_RW),
-    A13_CPREG_DEF(UPMPCM, 3, 7, 15, 5, 4, PL1_RW),
-    A13_CPREG_DEF(UPMCR0, 3, 7, 15, 0, 4, PL1_RW),
-    A13_CPREG_DEF(UPMSR, 3, 7, 15, 6, 4, PL1_RW),
-    A13_CPREG_DEF(ARM64_REG_CTRR_A_LWR_EL1, 3, 4, 15, 2, 3, PL1_RW),
-    A13_CPREG_DEF(ARM64_REG_CTRR_A_UPR_EL1, 3, 4, 15, 2, 4, PL1_RW),
-    A13_CPREG_DEF(ARM64_REG_CTRR_CTL_EL1, 3, 4, 15, 2, 5, PL1_RW),
-    A13_CPREG_DEF(ARM64_REG_CTRR_LOCK_EL1, 3, 4, 15, 2, 2, PL1_RW),
+    A13_CPREG_DEF(ARM64_REG_EHID4, 3, 0, 15, 4, 1, PL1_RW, 0),
+    A13_CPREG_DEF(ARM64_REG_EHID10, 3, 0, 15, 10, 1, PL1_RW, 0),
+    A13_CPREG_DEF(ARM64_REG_HID0, 3, 0, 15, 0, 0, PL1_RW, 0),
+    A13_CPREG_DEF(ARM64_REG_HID1, 3, 0, 15, 1, 0, PL1_RW, 0),
+    A13_CPREG_DEF(ARM64_REG_HID3, 3, 0, 15, 3, 0, PL1_RW, 0),
+    A13_CPREG_DEF(ARM64_REG_HID4, 3, 0, 15, 4, 0, PL1_RW, 0),
+    A13_CPREG_DEF(ARM64_REG_HID5, 3, 0, 15, 5, 0, PL1_RW, 0),
+    A13_CPREG_DEF(ARM64_REG_HID7, 3, 0, 15, 7, 0, PL1_RW, 0),
+    A13_CPREG_DEF(ARM64_REG_HID8, 3, 0, 15, 8, 0, PL1_RW, 0),
+    A13_CPREG_DEF(ARM64_REG_HID9, 3, 0, 15, 9, 0, PL1_RW, 0),
+    A13_CPREG_DEF(ARM64_REG_HID11, 3, 0, 15, 11, 0, PL1_RW, 0),
+    A13_CPREG_DEF(ARM64_REG_HID13, 3, 0, 15, 14, 0, PL1_RW, 0),
+    A13_CPREG_DEF(ARM64_REG_HID14, 3, 0, 15, 15, 0, PL1_RW, 0),
+    A13_CPREG_DEF(ARM64_REG_HID16, 3, 0, 15, 15, 2, PL1_RW, 0),
+    A13_CPREG_DEF(ARM64_REG_LSU_ERR_STS, 3, 3, 15, 0, 0, PL1_RW, 0),
+    A13_CPREG_DEF(PMC0, 3, 2, 15, 0, 0, PL1_RW, 0),
+    A13_CPREG_DEF(PMC1, 3, 2, 15, 1, 0, PL1_RW, 0),
+    A13_CPREG_DEF(PMCR1, 3, 1, 15, 1, 0, PL1_RW, 0),
+    A13_CPREG_DEF(PMSR, 3, 1, 15, 13, 0, PL1_RW, 0),
+    A13_CPREG_DEF(ARM64_REG_APCTL_EL1, 3, 4, 15, 0, 4, PL1_RW, 2),
+    A13_CPREG_DEF(ARM64_REG_KERNELKEYLO_EL1, 3, 4, 15, 1, 0, PL1_RW, 0),
+    A13_CPREG_DEF(ARM64_REG_KERNELKEYHI_EL1, 3, 4, 15, 1, 1, PL1_RW, 0),
+    A13_CPREG_DEF(S3_4_c15_c0_5, 3, 4, 15, 0, 5, PL1_RW, 0),
+    A13_CPREG_DEF(AMX_STATUS_EL1, 3, 4, 15, 1, 3, PL1_R, 0),
+    A13_CPREG_DEF(AMX_CTL_EL1, 3, 4, 15, 1, 4, PL1_RW, 0),
+    A13_CPREG_DEF(ARM64_REG_CYC_OVRD, 3, 5, 15, 5, 0, PL1_RW, 0),
+    A13_CPREG_DEF(ARM64_REG_ACC_CFG, 3, 5, 15, 4, 0, PL1_RW, 0),
+    A13_CPREG_DEF(S3_5_c15_c10_1, 3, 5, 15, 10, 1, PL0_RW, 0),
+    A13_CPREG_DEF(UPMPCM, 3, 7, 15, 5, 4, PL1_RW, 0),
+    A13_CPREG_DEF(UPMCR0, 3, 7, 15, 0, 4, PL1_RW, 0),
+    A13_CPREG_DEF(UPMSR, 3, 7, 15, 6, 4, PL1_RW, 0),
+    A13_CLUSTER_CPREG_DEF(CTRR_A_LWR_EL1, 3, 4, 15, 2, 3, PL1_RW),
+    A13_CLUSTER_CPREG_DEF(CTRR_A_UPR_EL1, 3, 4, 15, 2, 4, PL1_RW),
+    A13_CLUSTER_CPREG_DEF(CTRR_CTL_EL1, 3, 4, 15, 2, 5, PL1_RW),
+    A13_CLUSTER_CPREG_DEF(CTRR_LOCK_EL1, 3, 4, 15, 2, 2, PL1_RW),
 
     {
         .cp = CP_REG_ARM64_SYSREG_CP,
@@ -574,17 +579,6 @@ static void apple_a13_reset(DeviceState *dev)
     AppleA13State *tcpu = APPLE_A13(dev);
     AppleA13Class *tclass = APPLE_A13_GET_CLASS(dev);
     tclass->parent_reset(dev);
-
-    tcpu->A13_CPREG_VAR_NAME(ARM64_REG_LSU_ERR_STS) = 0;
-    tcpu->A13_CPREG_VAR_NAME(PMC0) = 0;
-    tcpu->A13_CPREG_VAR_NAME(PMC1) = 0;
-    tcpu->A13_CPREG_VAR_NAME(PMCR1) = 0;
-    tcpu->A13_CPREG_VAR_NAME(PMSR) = 0;
-    tcpu->A13_CPREG_VAR_NAME(ARM64_REG_APCTL_EL1) = 2;
-    tcpu->A13_CPREG_VAR_NAME(ARM64_REG_KERNELKEYLO_EL1) = 0;
-    tcpu->A13_CPREG_VAR_NAME(ARM64_REG_KERNELKEYHI_EL1) = 0;
-    tcpu->A13_CPREG_VAR_NAME(AMX_STATUS_EL1) = 0;
-    tcpu->A13_CPREG_VAR_NAME(AMX_CTL_EL1) = 0;
 }
 
 static void apple_a13_instance_init(Object *obj)
@@ -763,10 +757,6 @@ static const VMStateDescription vmstate_apple_a13 = {
         VMSTATE_A13_CPREG(UPMPCM),
         VMSTATE_A13_CPREG(UPMCR0),
         VMSTATE_A13_CPREG(UPMSR),
-        VMSTATE_A13_CPREG(ARM64_REG_CTRR_A_LWR_EL1),
-        VMSTATE_A13_CPREG(ARM64_REG_CTRR_A_UPR_EL1),
-        VMSTATE_A13_CPREG(ARM64_REG_CTRR_CTL_EL1),
-        VMSTATE_A13_CPREG(ARM64_REG_CTRR_LOCK_EL1),
         VMSTATE_END_OF_LIST()
     }
 };
@@ -784,6 +774,10 @@ static const VMStateDescription vmstate_apple_a13_cluster = {
                                A13_MAX_CPU, A13_MAX_CPU),
         VMSTATE_UINT64(tick, AppleA13Cluster),
         VMSTATE_UINT64(ipi_cr, AppleA13Cluster),
+        VMSTATE_A13_CLUSTER_CPREG(CTRR_A_LWR_EL1),
+        VMSTATE_A13_CLUSTER_CPREG(CTRR_A_UPR_EL1),
+        VMSTATE_A13_CLUSTER_CPREG(CTRR_CTL_EL1),
+        VMSTATE_A13_CLUSTER_CPREG(CTRR_LOCK_EL1),
         VMSTATE_END_OF_LIST()
     }
 };

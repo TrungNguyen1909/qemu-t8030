@@ -79,11 +79,6 @@ typedef struct AppleA13State {
     A13_CPREG_VAR_DEF(UPMPCM);
     A13_CPREG_VAR_DEF(UPMCR0);
     A13_CPREG_VAR_DEF(UPMSR);
-    /* ktrr */
-    A13_CPREG_VAR_DEF(ARM64_REG_CTRR_A_LWR_EL1);
-    A13_CPREG_VAR_DEF(ARM64_REG_CTRR_A_UPR_EL1);
-    A13_CPREG_VAR_DEF(ARM64_REG_CTRR_CTL_EL1);
-    A13_CPREG_VAR_DEF(ARM64_REG_CTRR_LOCK_EL1);
 } AppleA13State;
 
 typedef struct AppleA13Cluster {
@@ -98,6 +93,10 @@ typedef struct AppleA13Cluster {
     uint64_t tick;
     uint64_t ipi_cr;
     QTAILQ_ENTRY(AppleA13Cluster) next;
+    A13_CPREG_VAR_DEF(CTRR_A_LWR_EL1);
+    A13_CPREG_VAR_DEF(CTRR_A_UPR_EL1);
+    A13_CPREG_VAR_DEF(CTRR_CTL_EL1);
+    A13_CPREG_VAR_DEF(CTRR_LOCK_EL1);
 } AppleA13Cluster;
 
 AppleA13State *apple_a13_create(DTBNode *node);
