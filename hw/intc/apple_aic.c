@@ -244,7 +244,7 @@ static void apple_aic_write(void *opaque, hwaddr addr, uint64_t data,
                 }
 
                 if (val & AIC_IPI_SELF) {
-                    set_bit(AIC_IPI_SELF, (unsigned long *)&o->pendingIPI);
+                    o->pendingIPI |= AIC_IPI_SELF;
                     if (~o->ipi_mask & AIC_IPI_SELF) {
                         qemu_irq_raise(o->irq);
                     }
@@ -263,7 +263,7 @@ static void apple_aic_write(void *opaque, hwaddr addr, uint64_t data,
                 }
 
                 if (val & AIC_IPI_SELF) {
-                    clear_bit(AIC_IPI_SELF, (unsigned long *)&o->pendingIPI);
+                    o->pendingIPI &= ~AIC_IPI_SELF;
                 }
             }
             break;
@@ -287,7 +287,7 @@ static void apple_aic_write(void *opaque, hwaddr addr, uint64_t data,
                 }
 
                 if (val & AIC_IPI_SELF) {
-                    set_bit(AIC_IPI_SELF, (unsigned long *)&o->deferredIPI);
+                    o->deferredIPI |= AIC_IPI_SELF;
                 }
             }
             break;
@@ -303,7 +303,7 @@ static void apple_aic_write(void *opaque, hwaddr addr, uint64_t data,
                 }
 
                 if (val & AIC_IPI_SELF) {
-                    clear_bit(AIC_IPI_SELF, (unsigned long *)&o->deferredIPI);
+                    o->deferredIPI &= ~AIC_IPI_SELF;
                 }
             }
             break;
@@ -366,7 +366,7 @@ static void apple_aic_write(void *opaque, hwaddr addr, uint64_t data,
                         }
                     }
                 }
-                s->eir_mask_once[eir] = s->eir_mask[eir];
+                s->eir_mask_once[eir] &= s->eir_mask[eir];
 #endif
             }
             break;
