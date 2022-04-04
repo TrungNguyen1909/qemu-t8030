@@ -385,41 +385,6 @@ void macho_load_dtb(DTBNode *root, AddressSpace *as, MemoryRegion *mem,
     data = 0;
     set_dtb_prop(child, "debug-enabled", sizeof(data), (uint8_t *)&data);
 
-    child = get_dtb_node(root, "chosen");
-    assert(child);
-    child = get_dtb_node(child, "lock-regs");
-    if (!child) {
-        child = get_dtb_node(root, "chosen");
-        child = get_dtb_node(child, "lock-regs");
-        get_dtb_node(child, "amcc");
-    }
-    child = get_dtb_node(child, "amcc");
-    assert(child);
-    data = 0;
-    set_dtb_prop(child, "aperture-count", 4, (uint8_t *)&data);
-    set_dtb_prop(child, "aperture-size", 4, (uint8_t *)&data);
-    set_dtb_prop(child, "plane-count", 4, (uint8_t *)&data);
-    set_dtb_prop(child, "aperture-phys-addr", 0, (uint8_t *)&data);
-    set_dtb_prop(child, "cache-status-reg-offset", 4, (uint8_t *)&data);
-    set_dtb_prop(child, "cache-status-reg-mask", 4, (uint8_t *)&data);
-    set_dtb_prop(child, "cache-status-reg-value", 4, (uint8_t *)&data);
-    child = get_dtb_node(child, "amcc-ctrr-a");
-    if (!child) {
-        child = get_dtb_node(child, "amcc-ctrr-a");
-    }
-
-    data = 14;
-    set_dtb_prop(child, "page-size-shift", 4, (uint8_t *)&data);
-
-    data = 0;
-    set_dtb_prop(child, "lower-limit-reg-offset", 4, (uint8_t *)&data);
-    set_dtb_prop(child, "lower-limit-reg-mask", 4, (uint8_t *)&data);
-    set_dtb_prop(child, "upper-limit-reg-offset", 4, (uint8_t *)&data);
-    set_dtb_prop(child, "upper-limit-reg-mask", 4, (uint8_t *)&data);
-    set_dtb_prop(child, "lock-reg-offset", 4, (uint8_t *)&data);
-    set_dtb_prop(child, "lock-reg-mask", 4, (uint8_t *)&data);
-    set_dtb_prop(child, "lock-reg-value", 4, (uint8_t *)&data);
-
     child = get_dtb_node(root, "filesystems");
     child = get_dtb_node(child, "fstab");
 
@@ -998,32 +963,28 @@ static bool xnu_is_slid(struct mach_header_64 *header)
 
 uint64_t xnu_slide_hdr_va(struct mach_header_64 *header, uint64_t hdr_va)
 {
-    uint64_t text_va_base, slide;
-
     if (xnu_is_slid(header)) {
         return hdr_va;
     }
 
-    text_va_base = ((uint64_t)header) - kCacheableView - g_phys_slide + g_virt_base;
-    slide = text_va_base - 0xFFFFFFF007004000ULL;
-    return hdr_va + slide;
+    return hdr_va + xnu_slide_value(header);
 }
 
 uint64_t xnu_slide_value(struct mach_header_64 *header)
 {
-    uint64_t text_va_base = ((uint64_t) header) - kCacheableView - g_phys_slide + g_virt_base;
+    uint64_t text_va_base = ((uint64_t) header) - g_phys_base + g_virt_base;
     uint64_t slide = text_va_base - 0xFFFFFFF007004000ULL;
     return slide;
 }
 
 void *xnu_va_to_ptr(uint64_t va)
 {
-    return (void*)(va - g_virt_base + g_phys_slide + kCacheableView);
+    return (void*)(va - g_virt_base + g_phys_base);
 }
 
 uint64_t xnu_ptr_to_va(void *ptr)
 {
-    return ((uint64_t)ptr) - kCacheableView + g_phys_slide + g_virt_base;
+    return ((uint64_t)ptr) + g_phys_base + g_virt_base;
 }
 
 // NOTE: iBoot-based rebase only applies to main XNU.

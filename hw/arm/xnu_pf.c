@@ -6,7 +6,7 @@ xnu_pf_range_t *xnu_pf_range_from_va(uint64_t va, uint64_t size)
     xnu_pf_range_t *range = g_malloc0(sizeof(xnu_pf_range_t));
     range->va = va;
     range->size = size;
-    range->cacheable_base = ((uint8_t *)(va - g_virt_base + g_phys_slide + kCacheableView));
+    range->cacheable_base = ((uint8_t *)(va - g_virt_base + g_phys_base));
 
     return range;
 }

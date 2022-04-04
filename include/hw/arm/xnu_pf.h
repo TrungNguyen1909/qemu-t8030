@@ -19,9 +19,6 @@ typedef struct xnu_pf_patch {
     struct xnu_pf_patch *next_patch;
     uint8_t pf_data[0];
     const char  *name;
-
-    //            patch->pf_match(XNU_PF_ACCESS_32BIT, reads, &stream[index], &dstream[index]);
-
 } xnu_pf_patch_t;
 
 typedef bool (*xnu_pf_patch_callback)(struct xnu_pf_patch *patch, void *cacheable_stream);

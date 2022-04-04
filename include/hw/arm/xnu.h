@@ -215,8 +215,6 @@ typedef struct macho_boot_info {
     uint64_t ticket_length;
 } *macho_boot_info_t;
 
-#define kCacheableView 0x400000000ULL
-
 struct mach_header_64 *macho_load_file(const char *filename);
 
 struct mach_header_64 *macho_parse(uint8_t *data, uint32_t len);

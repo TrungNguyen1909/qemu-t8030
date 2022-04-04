@@ -85,6 +85,14 @@
 #define RET_INST 0xd65f03c0
 #define RETAB_INST 0xd65f0fff
 
+#define T8030_AMCC_BASE         (0x200000000)
+#define T8030_AMCC_SIZE         (0x100000)
+#define AMCC_PLANE_COUNT        (4)
+#define AMCC_PLANE_STRIDE       (0x40000)
+#define AMCC_LOWER(_p)          (0x680 + (_p) * AMCC_PLANE_STRIDE)
+#define AMCC_UPPER(_p)          (0x684 + (_p) * AMCC_PLANE_STRIDE)
+#define AMCC_REG(_tms, _x)      *(uint32_t *)(&_tms->amcc_reg[_x])
+
 static void t8030_wake_up_cpus(MachineState* machine, uint64_t cpu_mask)
 {
     T8030MachineState* tms = T8030_MACHINE(machine);
@@ -166,12 +174,15 @@ static void t8030_memory_setup(MachineState *machine)
     hwaddr top_of_kernel_data_pa;
     hwaddr mem_size;
     hwaddr phys_ptr;
+    hwaddr amcc_lower;
+    hwaddr amcc_upper;
     T8030MachineState *tms = T8030_MACHINE(machine);
     MemoryRegion *sysmem = tms->sysmem;
     AddressSpace *nsas = &address_space_memory;
     AppleNvramState *nvram = NULL;
     macho_boot_info_t info = &tms->bootinfo;
     g_autofree char *cmdline = NULL;
+    g_autofree xnu_pf_range_t *last_range = NULL;
 
     //setup the memory layout:
 
@@ -201,6 +212,7 @@ static void t8030_memory_setup(MachineState *machine)
     hdr = tms->kernel;
     assert(hdr);
     macho_highest_lowest(hdr, NULL, &virt_end);
+    last_range = xnu_pf_segment(hdr, "__LAST");
     phys_ptr = T8030_DRAM_BASE;
 
     // //now account for the trustcache
@@ -217,6 +229,13 @@ static void t8030_memory_setup(MachineState *machine)
     fprintf(stderr, "entry: 0x" TARGET_FMT_lx "\n", info->entry);
 
     phys_ptr = vtop_static(align_16k_high(virt_end));
+
+    amcc_lower = g_phys_base;
+    amcc_upper = vtop_static(last_range->va) + last_range->size - 1;
+    for (int i = 0; i < 4; i++) {
+        AMCC_REG(tms, AMCC_LOWER(i)) = (amcc_lower - T8030_DRAM_BASE) >> 14;
+        AMCC_REG(tms, AMCC_UPPER(i)) = (amcc_upper - T8030_DRAM_BASE) >> 14;
+    }
 
     //now account for the ramdisk
 
@@ -399,6 +418,28 @@ static const MemoryRegionOps pmgr_reg_ops = {
     .read = pmgr_reg_read,
 };
 
+static void amcc_reg_write(void *opaque, hwaddr addr,
+                           uint64_t data, unsigned size)
+{
+    T8030MachineState *tms = T8030_MACHINE(opaque);
+    uint32_t value = data;
+
+    memcpy(tms->amcc_reg + addr, &value, size);
+}
+
+static uint64_t amcc_reg_read(void *opaque, hwaddr addr, unsigned size)
+{
+    T8030MachineState *tms = T8030_MACHINE(opaque);
+    uint64_t result = 0;
+    memcpy(&result, tms->amcc_reg + addr, size);
+    return result;
+}
+
+static const MemoryRegionOps amcc_reg_ops = {
+    .write = amcc_reg_write,
+    .read = amcc_reg_read,
+};
+
 static void t8030_cluster_setup(MachineState *machine)
 {
     T8030MachineState *tms = T8030_MACHINE(machine);
@@ -561,6 +602,60 @@ static void t8030_pmgr_setup(MachineState* machine)
     set_dtb_prop(child, "voltage-states5-sram", 64, (uint8_t*)"\x00\xbf\x2f\x20\xf1\x02\x00\x00\x00\x04\x5c\x36\xf1\x02\x00\x00\x00\x64\x3f\x4d\xf1\x02\x00\x00\x00\x59\xdd\x6e\x20\x03\x00\x00\x00\x32\x2d\x82\x87\x03\x00\x00\x00\x18\x0d\x8f\xe8\x03\x00\x00\x00\xc8\x7e\x9a\x48\x04\x00\x00\x00\x6a\xc9\x9e\x65\x04\x00\x00");
     set_dtb_prop(child, "voltage-states1-sram", 40, (uint8_t*)"\x00\x10\x55\x22\xf1\x02\x00\x00\x00\x98\x7f\x33\xf1\x02\x00\x00\x00\x20\xaa\x44\xf1\x02\x00\x00\x00\xa8\xd4\x55\x42\x03\x00\x00\x00\x30\xff\x66\xaf\x03\x00\x00");
     set_dtb_prop(child, "voltage-states9-sram", 56, (uint8_t*)"\x00\x00\x00\x00\xf1\x02\x00\x00\x00\x2a\x75\x15\xf1\x02\x00\x00\xc0\x4f\xef\x1e\xf1\x02\x00\x00\x00\xcd\x56\x27\xf1\x02\x00\x00\x00\x11\xec\x2f\xf1\x02\x00\x00\x00\x55\x81\x38\x16\x03\x00\x00\x80\xfe\x2a\x47\x96\x03\x00\x00");
+}
+
+static void t8030_amcc_setup(MachineState *machine)
+{
+    T8030MachineState *tms = T8030_MACHINE(machine);
+    DTBNode *child;
+    uint32_t data;
+    uint64_t data64;
+
+    child = get_dtb_node(tms->device_tree, "chosen");
+    assert(child);
+    child = get_dtb_node(child, "lock-regs");
+    assert(child);
+    child = get_dtb_node(child, "amcc");
+    assert(child);
+    data = 1;
+    set_dtb_prop(child, "aperture-count", 4, (uint8_t *)&data);
+    data = 0x100000;
+    set_dtb_prop(child, "aperture-size", 4, (uint8_t *)&data);
+    data = AMCC_PLANE_COUNT;
+    set_dtb_prop(child, "plane-count", 4, (uint8_t *)&data);
+    data = AMCC_PLANE_STRIDE;
+    set_dtb_prop(child, "plane-stride", 4, (uint8_t *)&data);
+    data64 = T8030_AMCC_BASE;
+    set_dtb_prop(child, "aperture-phys-addr", 8, (uint8_t *)&data64);
+    data = 0x1c00;
+    set_dtb_prop(child, "cache-status-reg-offset", 4, (uint8_t *)&data);
+    data = 0x1f;
+    set_dtb_prop(child, "cache-status-reg-mask", 4, (uint8_t *)&data);
+    data = 0;
+    set_dtb_prop(child, "cache-status-reg-value", 4, (uint8_t *)&data);
+    child = get_dtb_node(child, "amcc-ctrr-a");
+
+    data = 14;
+    set_dtb_prop(child, "page-size-shift", 4, (uint8_t *)&data);
+
+    data = AMCC_LOWER(0);
+    set_dtb_prop(child, "lower-limit-reg-offset", 4, (uint8_t *)&data);
+    data = 0xffffffff;
+    set_dtb_prop(child, "lower-limit-reg-mask", 4, (uint8_t *)&data);
+    data = AMCC_UPPER(0);
+    set_dtb_prop(child, "upper-limit-reg-offset", 4, (uint8_t *)&data);
+    data = 0xffffffff;
+    set_dtb_prop(child, "upper-limit-reg-mask", 4, (uint8_t *)&data);
+    data = 0x68c;
+    set_dtb_prop(child, "lock-reg-offset", 4, (uint8_t *)&data);
+    data = 1;
+    set_dtb_prop(child, "lock-reg-mask", 4, (uint8_t *)&data);
+    data = 1;
+    set_dtb_prop(child, "lock-reg-value", 4, (uint8_t *)&data);
+
+    memory_region_init_io(&tms->amcc, OBJECT(machine),
+                          &amcc_reg_ops, tms, "amcc", T8030_AMCC_SIZE);
+    memory_region_add_subregion(tms->sysmem, T8030_AMCC_BASE, &tms->amcc);
 }
 
 static void t8030_create_dart(MachineState *machine, const char *name)
@@ -1336,6 +1431,7 @@ static void t8030_machine_init(MachineState *machine)
     t8030_create_s3c_uart(tms, serial_hd(0));
 
     t8030_pmgr_setup(machine);
+    t8030_amcc_setup(machine);
 
     t8030_create_ans(machine);
 
