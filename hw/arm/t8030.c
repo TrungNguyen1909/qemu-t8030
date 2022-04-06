@@ -33,6 +33,7 @@
 #include "sysemu/block-backend.h"
 #include "sysemu/sysemu.h"
 #include "sysemu/reset.h"
+#include "sysemu/runstate.h"
 #include "qemu/error-report.h"
 #include "hw/platform-bus.h"
 #include "arm-powerctl.h"
@@ -57,6 +58,7 @@
 
 #include "hw/arm/exynos4210.h"
 #include "hw/arm/xnu_pf.h"
+#include "afl/trace.h"
 
 #define T8030_DRAM_BASE 0x800000000
 #define T8030_PANIC_LOG_SIZE (0x100000)
@@ -165,10 +167,6 @@ static void t8030_memory_setup(MachineState *machine)
     //After that we have the device tree
     //After that we have the rest of the RAM
 
-    if (t8030_check_panic(machine)) {
-        qemu_system_guest_panicked(NULL);
-        return;
-    }
     hdr = tms->kernel;
     assert(hdr);
     macho_highest_lowest(hdr, NULL, &virt_end);
@@ -234,12 +232,12 @@ static void t8030_memory_setup(MachineState *machine)
     switch (tms->boot_mode) {
     case kBootModeAuto:
         if (!env_get_bool(nvram, "auto-boot", false)) {
-            asprintf(&cmdline, "-restore rd=md0 nand-enable-reformat=1 -progress %s", machine->kernel_cmdline);
+            assert(asprintf(&cmdline, "-restore rd=md0 nand-enable-reformat=1 -progress %s", machine->kernel_cmdline) > 0);
             break;
         }
         QEMU_FALLTHROUGH;
     default:
-        asprintf(&cmdline, "%s", machine->kernel_cmdline);
+        assert(asprintf(&cmdline, "%s", machine->kernel_cmdline) > 0);
     }
 
     apple_nvram_save(nvram);
@@ -621,10 +619,10 @@ static void t8030_create_ans(MachineState* machine)
     2: AppleA7IOP autoBootRegMap
     3: NVMe BAR
     */
-    sysbus_mmio_map(ans, 0, tms->soc_base_pa + reg[0]);
-    sysbus_mmio_map(ans, 1, tms->soc_base_pa + reg[2]);
-    sysbus_mmio_map(ans, 2, tms->soc_base_pa + reg[4]);
-    sysbus_mmio_map(ans, 3, tms->soc_base_pa + reg[6]);
+
+    for (i = 0; i < 4; i++) {
+        sysbus_mmio_map(ans, i, tms->soc_base_pa + reg[i << 1]);
+    }
 
     prop = find_dtb_prop(child, "interrupts");
     assert(prop);
@@ -767,13 +765,68 @@ static void t8030_create_i2c(MachineState *machine, const char *name)
     sysbus_realize_and_unref(SYS_BUS_DEVICE(i2c), &error_fatal);
 }
 
+static const char *usb_kexts[] = {
+                             /*
+                             "com.apple.iokit.IOAccessoryManager",
+                             "com.apple.driver.AppleUSBHostMergeProperties",
+                             "com.apple.driver.usb.AppleUSBCommon",
+                             "com.apple.iokit.IOUSBHostFamily",
+                             "com.apple.driver.AppleTriStar",
+                             "com.apple.driver.usb.AppleUSBXHCI",
+                             "com.apple.driver.AppleTypeCPhy",
+                             "com.apple.driver.usb.AppleUSBHostCompositeDevice",
+                             "com.apple.driver.usb.AppleUSBHub",
+                             "com.apple.driver.usb.AppleUSBXHCIARM",
+                             "com.apple.driver.usb.IOUSBHostHIDDevice",
+                             "com.apple.driver.usb.AppleUSBHostT8030",
+                             "com.apple.driver.usb.networking",
+                             "com.apple.driver.usb.cdc",
+                             "com.apple.driver.usb.IOUSBHostHIDDevice",
+                             "com.apple.driver.usb.AppleUSBHostT8030",
+                             "com.apple.driver.usb.cdc.ncm",
+                             */
+                             "com.apple.driver.AppleEmbeddedUSB",
+                             "com.apple.driver.AppleEmbeddedUSBHost",
+                             "com.apple.iokit.IOUSBDeviceFamily",
+                             "com.apple.driver.AppleUSBEthernetDevice",
+                             "com.apple.driver.AppleUSBDeviceMux",
+                             /*
+                             "com.apple.driver.AppleT8027TypeCPhy",
+                             "com.apple.driver.AppleUSBDeviceAudioController",
+                             "com.apple.driver.AppleUSBAudio",
+                             "com.apple.iokit.IOUSBMassStorageDriver",
+                             "com.apple.driver.AppleUSBCardReader",
+                             "com.apple.driver.AppleUSBTopCaseDriver",
+                             "com.apple.driver.usb.AppleUSBHostiOSDevice",
+                             "com.apple.driver.AppleUSBMike",
+                             "com.apple.driver.usb.cdc.ecm",
+                             "com.apple.driver.usb.ethernet.asix",
+                             "com.apple.driver.AppleUSBXDCI",
+                             "com.apple.driver.AppleT8011USBXDCI",
+                             "com.apple.driver.AppleUSBXDCIARM",
+                             "com.apple.driver.AppleT8027USBXDCI",
+                             "com.apple.driver.AppleUSBDeviceNCM",
+                             "com.apple.driver.AppleS5L8960XUSB",
+                             "com.apple.driver.AppleT8011USB",
+                             "com.apple.driver.AppleT8027USB",
+                             "com.apple.iokit.IOAccessoryPortUSB",
+                             "com.apple.driver.AppleUSBEthernetHost",
+                             "com.apple.driver.AppleSynopsysOTGDevice"
+                             */
+                             };
+
 static void t8030_create_usb(MachineState *machine)
 {
     T8030MachineState *tms = T8030_MACHINE(machine);
     DTBNode *child = find_dtb_node(tms->device_tree, "arm-io");
     DTBNode *drd = find_dtb_node(child, "usb-drd");
+    DTBNode *dart_usb = find_dtb_node(child, "dart-usb");
+    DTBNode *dart_usb_mapper = find_dtb_node(dart_usb, "mapper-usb-drd");
     DTBNode *phy, *complex, *device;
+    DTBProp *prop;
     DeviceState *otg;
+    AppleDARTState *dart;
+    IOMMUMemoryRegion *iommu = NULL;
     uint32_t value;
 
     phy = get_dtb_node(child, "otgphyctrl");
@@ -828,8 +881,8 @@ static void t8030_create_usb(MachineState *machine)
     assert(prop);
     set_dtb_prop(device, "iommu-parent", prop->length, prop->value);
     set_dtb_prop(device, "AAPL,phandle", 4, (uint8_t*)&(uint32_t[]){ 0x8e });
-    set_dtb_prop(device, "host-mac-address", 6, (uint8_t*)"\0\0\0\0\0\0");
-    set_dtb_prop(device, "device-mac-address", 6, (uint8_t*)"\0\0\0\0\0\0");
+    set_dtb_prop(device, "host-mac-address", 6, (uint8_t*)"\xbc\xde\x48\x33\x44\x55");
+    set_dtb_prop(device, "device-mac-address", 6, (uint8_t*)"\xbc\xde\x48\x00\x11\x22");
     set_dtb_prop(device, "num-of-eps", 4, (uint8_t*)&(uint32_t[]){ 0x0e });
     set_dtb_prop(device, "interrupt-parent", 4, (uint8_t*)&(uint32_t[]){ APPLE_AIC(tms->aic)->phandle });
     set_dtb_prop(device, "compatible", 37, (uint8_t*)"usb-device,t7000\0usb-device,s5l8900x");
@@ -867,6 +920,25 @@ static void t8030_create_usb(MachineState *machine)
                     tms->soc_base_pa
                     + ((uint64_t*)find_dtb_prop(complex, "ranges")->value)[1]
                     + ((uint64_t*)find_dtb_prop(device, "reg")->value)[0]);
+
+    if (tms->usbfuzz) {
+        object_property_set_bool(OBJECT(otg), "usbfuzz", tms->usbfuzz,
+                                 &error_abort);
+        if (tms->usbfuzz_filename) {
+            qdev_prop_set_string(DEVICE(otg), "usbfuzz-input",
+                                 tms->usbfuzz_filename);
+        }
+        for (int i = 0; i < sizeof(usb_kexts) / sizeof(usb_kexts[0]); i++) {
+            struct mach_header_64 *kext_header;
+            g_autofree xnu_pf_range_t *kext_range = NULL;
+            kext_header = xnu_pf_get_kext_header(tms->kernel, usb_kexts[i]);
+            assert(kext_header);
+            kext_range = xnu_pf_section(kext_header, "__TEXT_EXEC", "__text");
+            assert(kext_range);
+            afl_add_range(ptov_static((uint64_t)kext_range->cacheable_base),
+                          kext_range->size);
+        }
+    }
     sysbus_realize_and_unref(SYS_BUS_DEVICE(otg), &error_fatal);
 
     prop = find_dtb_prop(device, "interrupts");
@@ -876,7 +948,7 @@ static void t8030_create_usb(MachineState *machine)
                        ((uint32_t *)prop->value)[0]));
 }
 
-static void t8030_create_wdt(MachineState* machine)
+static void t8030_create_wdt(MachineState *machine)
 {
     int i;
     uint32_t *ints;
@@ -1121,7 +1193,25 @@ static void t8030_machine_reset(MachineState* machine)
     T8030MachineState *tms = T8030_MACHINE(machine);
 
     qemu_devices_reset();
-    t8030_memory_setup(machine);
+    if (t8030_check_panic(machine)) {
+        qemu_system_guest_panicked(NULL);
+        return;
+    }
+    if (!runstate_check(RUN_STATE_RESTORE_VM)
+        && !runstate_check(RUN_STATE_PRELAUNCH)) {
+        if (!runstate_check(RUN_STATE_PAUSED)
+            || qemu_reset_requested_get() != SHUTDOWN_CAUSE_NONE) {
+            t8030_memory_setup(MACHINE(tms));
+        }
+    }
+    t8030_cpu_reset(tms);
+}
+
+static void t8030_machine_init_done(Notifier *notifier, void *data)
+{
+    T8030MachineState *tms = container_of(notifier, T8030MachineState,
+                                          init_done_notifier);
+    t8030_memory_setup(MACHINE(tms));
     t8030_cpu_reset(tms);
 }
 
@@ -1205,6 +1295,47 @@ static void t8030_machine_init(MachineState *machine)
     t8030_create_pmu(machine, "spmi0", "spmi-pmu");
 
     t8030_create_smc(machine);
+
+    tms->init_done_notifier.notify = t8030_machine_init_done;
+    qemu_add_machine_init_done_notifier(&tms->init_done_notifier);
+
+    
+    g_autofree xnu_pf_range_t *text_exec_range = xnu_pf_section(hdr, "__TEXT_EXEC", "__text");
+    afl_add_range(ptov_static((uint64_t)text_exec_range->cacheable_base), text_exec_range->size);
+}
+
+static void t8030_set_usbfuzz_filename(Object *obj, const char *value, Error **errp)
+{
+    T8030MachineState *tms = T8030_MACHINE(obj);
+
+    g_free(tms->usbfuzz_filename);
+    tms->usbfuzz_filename = g_strdup(value);
+}
+
+static char *t8030_get_usbfuzz_filename(Object *obj, Error **errp)
+{
+    T8030MachineState *tms = T8030_MACHINE(obj);
+
+    return g_strdup(tms->usbfuzz_filename);
+}
+
+static void t8030_set_usbfuzz(Object *obj, const char *value, Error **errp)
+{
+    T8030MachineState *tms = T8030_MACHINE(obj);
+    
+    if (!strcmp(value, "true")
+        || strtoul(value, NULL, 0)) {
+        tms->usbfuzz = true;
+    } else {
+        tms->usbfuzz = false;
+    }
+}
+
+static char *t8030_get_usbfuzz(Object *obj, Error **errp)
+{
+    T8030MachineState *tms = T8030_MACHINE(obj);
+
+    return g_strdup(tms->usbfuzz ? "true" : "false");
 }
 
 static void t8030_set_trustcache_filename(Object *obj, const char *value, Error **errp)
@@ -1283,6 +1414,16 @@ static void t8030_instance_init(Object *obj)
     object_property_add_str(obj, "boot-mode", t8030_get_boot_mode, t8030_set_boot_mode);
     object_property_set_description(obj, "boot-mode",
                                     "Set boot mode of the machine");
+    object_property_add_str(obj, "usbfuzz",
+                            t8030_get_usbfuzz,
+                            t8030_set_usbfuzz);
+    object_property_set_description(obj, "usbfuzz",
+                                    "Enable the USBFuzzHost");
+    object_property_add_str(obj, "usbfuzz-filename",
+                            t8030_get_usbfuzz_filename,
+                            t8030_set_usbfuzz_filename);
+    object_property_set_description(obj, "usbfuzz-filename",
+                                    "Set the USBFuzzHost input filename");
 }
 
 static void t8030_machine_class_init(ObjectClass *klass, void *data)

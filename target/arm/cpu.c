@@ -460,11 +460,11 @@ static inline bool arm_excp_unmasked(CPUState *cs, unsigned int excp_idx,
 
     switch (excp_idx) {
     case EXCP_FIQ:
-        pstate_unmasked = !(env->daif & PSTATE_F);
+        pstate_unmasked = !((env->daif | env->daif_fuzz_mask) & PSTATE_F);
         break;
 
     case EXCP_IRQ:
-        pstate_unmasked = !(env->daif & PSTATE_I);
+        pstate_unmasked = !((env->daif | env->daif_fuzz_mask) & PSTATE_I);
         break;
 
     case EXCP_VFIQ:

@@ -342,6 +342,7 @@ static const ARMCPRegInfo t8030gxf_cp_reginfo[] = {
       .access = PL0_RW, .resetvalue = 0,
       .readfn = raw_read,
       .writefn = sprr_perm_el0_write,
+      .raw_writefn = raw_write,
       .fieldoffset = offsetof(CPUARMState, sprr.sprr_perm_el[0]) },
     { .name = "SPRR_UNK_EL0",
       .cp = CP_REG_ARM64_SYSREG_CP, .state = ARM_CP_STATE_AA64,

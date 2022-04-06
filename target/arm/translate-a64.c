@@ -1515,9 +1515,19 @@ static void handle_hint(DisasContext *s, uint32_t insn,
             gen_helper_autib(cpu_X[30], cpu_env, cpu_X[30], cpu_X[31]);
         }
         break;
-    default:
+    default: {
         /* default specified as NOP equivalent */
+        TCGv_i32 tcg_sel;
+        tcg_sel = tcg_const_i32(selector);
+
+        gen_a64_set_pc_im(s->base.pc_next);
+        gen_helper_hint(cpu_env, tcg_sel);
+        tcg_temp_free_i32(tcg_sel);
+        if (selector == 0x33) {
+            s->base.is_jmp = DISAS_EXIT;
+        }
         break;
+    }
     }
 }
 

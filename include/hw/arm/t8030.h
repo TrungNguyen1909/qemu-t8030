@@ -72,8 +72,11 @@ typedef struct
     video_boot_args video;
     char *trustcache_filename;
     char *ticket_filename;
+    char *usbfuzz_filename;
+    bool usbfuzz;
     BootMode boot_mode;
     uint32_t build_version;
+    Notifier init_done_notifier;
     hwaddr panic_base;
     hwaddr panic_size;
 } T8030MachineState;

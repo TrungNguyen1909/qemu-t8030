@@ -11,6 +11,7 @@
 #include "hw/usb/hcd-dwc2.h"
 #include "qapi/error.h"
 #include "qemu/error-report.h"
+#include "hw/qdev-properties.h"
 
 #define rAUSB_USB20PHY_CTL		(0x00)
 #define rAUSB_USB20PHY_OTGSIG	(0x04)
@@ -43,9 +44,23 @@ static void apple_otg_realize(DeviceState *dev, Error **errp)
     assert(object_property_add_const_link(OBJECT(s->dwc2), "dma-mr",
                                           OBJECT(s->dma_mr)));
     sysbus_realize(SYS_BUS_DEVICE(s->dwc2), errp);
-    sysbus_realize(SYS_BUS_DEVICE(s->usbtcp), errp);
     sysbus_pass_irq(SYS_BUS_DEVICE(s), SYS_BUS_DEVICE(s->dwc2));
-    qdev_realize(DEVICE(s->dwc2->device), &s->usbtcp->bus.qbus, errp);
+
+    if (!s->fuzz) {
+        s->usbtcp = USB_TCP_HOST(qdev_new(TYPE_USB_TCP_HOST));
+    } else {
+        s->usbfuzz = USB_FUZZ_HOST(qdev_new(TYPE_USB_FUZZ_HOST));
+        if (s->fuzz_input) {
+            qdev_prop_set_string(DEVICE(s->usbfuzz), "usbfuzz-input",
+                                 s->fuzz_input);
+        }
+    }
+    sysbus_realize(SYS_BUS_DEVICE(s->usbhcd), errp);
+    if (!s->fuzz) {
+        qdev_realize(DEVICE(&s->dwc2->device), &s->usbtcp->bus.qbus, errp);
+    } else {
+        qdev_realize(DEVICE(&s->dwc2->device), &s->usbfuzz->bus.qbus, errp);
+    }
 }
 
 static void apple_otg_reset(DeviceState *dev)
@@ -143,10 +158,23 @@ DeviceState *apple_otg_create(DTBNode *node)
     sysbus_init_mmio(sbd, &s->dwc2_mr);
     s->dwc2 = dwc2;
 
-    s->usbtcp = USB_TCP_HOST(qdev_new(TYPE_USB_TCP_HOST));
-
     return dev;
 }
+
+static Property apple_otg_properties[] = {
+    DEFINE_PROP_BOOL("usbfuzz", AppleOTGState, fuzz, false),
+    DEFINE_PROP_STRING("usbfuzz-input", AppleOTGState, fuzz_input),
+    DEFINE_PROP_END_OF_LIST(),
+};
+
+static const VMStateDescription vmstate_apple_otg = {
+    .name = "apple_otg",
+    .fields = (VMStateField[]) {
+        VMSTATE_UINT8_ARRAY(phy_reg, AppleOTGState, 0x20),
+        VMSTATE_UINT8_ARRAY(usbctl_reg, AppleOTGState, 0x1000),
+        VMSTATE_END_OF_LIST()
+    }
+};
 
 static void apple_otg_class_init(ObjectClass *klass, void *data)
 {
@@ -154,6 +182,8 @@ static void apple_otg_class_init(ObjectClass *klass, void *data)
     dc->realize = apple_otg_realize;
     dc->reset = apple_otg_reset;
     dc->desc = "Apple Synopsys USB OTG Controller";
+    dc->vmsd = &vmstate_apple_otg;
+    device_class_set_props(dc, apple_otg_properties);
 }
 
 static const TypeInfo apple_otg_info = {

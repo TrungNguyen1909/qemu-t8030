@@ -34,6 +34,10 @@
 #if defined(TARGET_I386) && !defined(CONFIG_USER_ONLY)
 #include "hw/i386/apic.h"
 #endif
+#if defined(TARGET_AARCH64) && !defined(CONFIG_USER_ONLY)
+#include "target/arm/cpu.h"
+#include "target/arm/internals.h"
+#endif
 #include "sysemu/cpus.h"
 #include "exec/cpu-all.h"
 #include "sysemu/cpu-timers.h"
@@ -42,6 +46,8 @@
 #include "tb-hash.h"
 #include "tb-context.h"
 #include "internal.h"
+
+#include "afl/trace.h"
 
 /* -icount align implementation. */
 
@@ -227,6 +233,22 @@ static inline void log_cpu_exec(target_ulong pc, CPUState *cpu,
     }
 }
 
+static inline bool afl_log_tb(target_ulong pc, target_ulong tid,
+                              const TranslationBlock *tb,
+                              const char *prefix)
+{
+#if defined(TARGET_AARCH64) && !defined(CONFIG_USER_ONLY)
+    int core_mmu_idx, mmu_idx;
+    CPUARMTBFlags tb_flags = (CPUARMTBFlags){ tb->flags, tb->cs_base };
+    core_mmu_idx = EX_TBFLAG_ANY(tb_flags, MMUIDX);
+    mmu_idx = core_to_aa64_mmu_idx(core_mmu_idx);
+    if (arm_mmu_idx_to_el(mmu_idx) != 0) {
+        return afl_maybe_log(pc, tb->pc + tb->size, tid, prefix);
+    }
+#endif
+    return 0;
+}
+
 static bool check_for_breakpoints(CPUState *cpu, target_ulong pc,
                                   uint32_t *cflags)
 {
@@ -325,6 +347,9 @@ const void *HELPER(lookup_tb_ptr)(CPUArchState *env)
     }
 
     log_cpu_exec(pc, cpu, tb);
+#if defined(TARGET_AARCH64) && !defined(CONFIG_USER_ONLY)
+    afl_log_tb(pc, env->cp15.tpidr_el[1], tb, __func__);
+#endif
 
     return tb->tc.ptr;
 }
@@ -346,8 +371,12 @@ cpu_tb_exec(CPUState *cpu, TranslationBlock *itb, int *tb_exit)
     uintptr_t ret;
     TranslationBlock *last_tb;
     const void *tb_ptr = itb->tc.ptr;
+    target_ulong pc = itb->pc;
 
     log_cpu_exec(itb->pc, cpu, itb);
+#if defined(TARGET_AARCH64) && !defined(CONFIG_USER_ONLY)
+    afl_log_tb(pc, env->cp15.tpidr_el[1], itb, __func__);
+#endif
 
     qemu_thread_jit_execute();
     ret = tcg_qemu_tb_exec(env, tb_ptr);
@@ -376,6 +405,16 @@ cpu_tb_exec(CPUState *cpu, TranslationBlock *itb, int *tb_exit)
                                TARGET_FMT_lx "] %s\n",
                                last_tb->tc.ptr, last_tb->pc,
                                lookup_symbol(last_tb->pc));
+
+#if defined(TARGET_AARCH64) && !defined(CONFIG_USER_ONLY)
+        if (afl_addr_in_ranges(last_tb->pc)) {
+            //afl_cancel_log(__func__);
+            afl_interrupt(last_tb->pc);
+            if (afl_log_file) {
+                fprintf(afl_log_file, "*tb_exit: 0x%x\n", *tb_exit);
+            }
+        }
+#endif
         if (cc->tcg_ops->synchronize_from_tb) {
             cc->tcg_ops->synchronize_from_tb(cpu, last_tb);
         } else {
@@ -579,6 +618,7 @@ static inline void tb_add_jump(TranslationBlock *tb, int n,
                            "] index %d -> %p [" TARGET_FMT_lx "]\n",
                            tb->tc.ptr, tb->pc, n,
                            tb_next->tc.ptr, tb_next->pc);
+    afl_link(tb->pc, tb_next->pc);
     return;
 
  out_unlock_next:
@@ -856,6 +896,7 @@ static inline void cpu_loop_exec_tb(CPUState *cpu, TranslationBlock *tb,
 int cpu_exec(CPUState *cpu)
 {
     int ret;
+    target_ulong last_pc = -1;
     SyncClocks sc = { 0 };
 
     /* replay_interrupt may need current_cpu */
@@ -921,6 +962,12 @@ int cpu_exec(CPUState *cpu)
 
             cpu_get_tb_cpu_state(cpu->env_ptr, &pc, &cs_base, &flags);
 
+#if 0
+            if (last_pc != -1 && last_pc != pc) {
+                afl_interrupt(last_pc);
+            }
+#endif
+
             /*
              * When requested, use an exact setting for cflags for the next
              * execution.  This is used for icount, precise smc, and stop-
@@ -968,6 +1015,8 @@ int cpu_exec(CPUState *cpu)
             }
 
             cpu_loop_exec_tb(cpu, tb, &last_tb, &tb_exit);
+
+            cpu_get_tb_cpu_state(cpu->env_ptr, &last_pc, &cs_base, &flags);
 
             /* Try to align the host and virtual clocks
                if the guest is in advance */

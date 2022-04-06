@@ -6,6 +6,7 @@
 #include "hw/arm/xnu_dtb.h"
 #include "hw/usb/hcd-dwc2.h"
 #include "hw/usb/hcd-tcp.h"
+#include "hw/usb/hcd-fuzz.h"
 
 #define TYPE_APPLE_OTG "apple.otg"
 OBJECT_DECLARE_SIMPLE_TYPE(AppleOTGState, APPLE_OTG)
@@ -19,7 +20,13 @@ struct AppleOTGState {
     MemoryRegion dwc2_mr;
     MemoryRegion *dma_mr;
     DWC2State    *dwc2;
-    struct USBTCPHostState *usbtcp;
+    union {
+        struct USBTCPHostState *usbtcp;
+        struct USBFuzzHostState *usbfuzz;
+        DeviceState *usbhcd;
+    };
+    bool fuzz;
+    char *fuzz_input;
 };
 
 DeviceState *apple_otg_create(DTBNode *node);

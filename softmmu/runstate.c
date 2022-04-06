@@ -342,6 +342,7 @@ static pid_t shutdown_pid;
 static int powerdown_requested;
 static int debug_requested;
 static int suspend_requested;
+static int exit_requested;
 static WakeupReason wakeup_reason;
 static NotifierList powerdown_notifiers =
     NOTIFIER_LIST_INITIALIZER(powerdown_notifiers);
@@ -425,6 +426,13 @@ static int qemu_debug_requested(void)
 {
     int r = debug_requested;
     debug_requested = 0;
+    return r;
+}
+
+static int qemu_exit_requested(void)
+{
+    int r = exit_requested;
+    exit_requested = 0;
     return r;
 }
 
@@ -661,11 +669,20 @@ void qemu_system_debug_request(void)
     qemu_notify_event();
 }
 
+void qemu_system_exit_request(void)
+{
+    exit_requested = 1;
+    qemu_notify_event();
+}
+
 static bool main_loop_should_exit(void)
 {
     RunState r;
     ShutdownCause request;
 
+    if (qemu_exit_requested()) {
+        return true;
+    }
     if (qemu_debug_requested()) {
         vm_stop(RUN_STATE_DEBUG);
     }

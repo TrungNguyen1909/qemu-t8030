@@ -35,6 +35,9 @@
 #include "tcg/tcg.h"
 #include "fpu/softfloat.h"
 #include <zlib.h> /* For crc32 */
+#include "afl/config.h"
+#include "afl/trace.h"
+#include "sysemu/runstate.h"
 
 /* C2.4.7 Multiply and divide */
 /* special cases for 0 and LLONG_MIN are mandated by the standard */
@@ -1168,4 +1171,59 @@ void HELPER(dc_zva)(CPUARMState *env, uint64_t vaddr_in)
 #endif
 
     memset(mem, 0, blocklen);
+}
+
+void HELPER(hint)(CPUARMState *env, uint32_t selector)
+{
+    CPUState *cs = env_cpu(env);
+    ARMCPU *cpu = ARM_CPU(cs);
+    if (selector < 0x30) return;
+    #if 0
+    printf("HINT 0x%x\n", selector);
+    #endif
+    /* We can use selectors that are >= 0x30 */
+    switch(selector) {
+    case 0x30: {
+        env->xregs[0] = getenv(SHM_ENV_VAR) != 0;
+        break;
+    }
+    case 0x31: {
+        afl_filter_tid(env->cp15.tpidr_el[1]);
+        env->daif_fuzz_mask = PSTATE_F;
+        break;
+    }
+    case 0x32: { /* read input */
+        hwaddr buf = env->xregs[1];
+        size_t nbyte = env->xregs[2];
+        ssize_t n = -1;
+        g_autofree void *buffer = g_malloc0(nbyte);
+        if (!buffer) {
+            env->xregs[0] = -ENOBUFS;
+            break;
+        }
+        /* AFL input fd is 9 */
+        n = read(9, buffer, nbyte);
+        if (n >= 0) {
+            if (cpu_memory_rw_debug(cs, buf, buffer, n, 1) < 0) {
+                n = -1;
+            }
+        }
+        env->xregs[0] = n;
+        break;
+    }
+    case 0x33: {
+        if (getenv(SHM_ENV_VAR)) {
+            qemu_system_exit_request();
+        } else {
+            vm_stop(RUN_STATE_PAUSED);
+        }
+        cpu->power_state = PSCI_OFF; 
+        cs->halted = true;
+        cpu_loop_exit(cs);
+        break;
+    }
+    default:
+        break;
+    }
+
 }

@@ -783,6 +783,7 @@ typedef struct CPUARMState {
     /* Store GICv3CPUState to access from this struct */
     void *gicv3state;
 
+    uint64_t daif_fuzz_mask;
 #ifdef TARGET_TAGGED_ADDRESSES
     /* Linux syscall tagged address support */
     bool tagged_addr_enable;

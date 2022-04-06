@@ -61,7 +61,6 @@ struct DWC2Packet {
 
 struct DWC2DeviceState {
     USBDevice parent_obj;
-    DWC2State *dwc2;
 };
 
 struct DWC2State {
@@ -71,7 +70,7 @@ struct DWC2State {
     /*< public >*/
     USBBus bus;
     /* This device in device mode */
-    DWC2DeviceState *device;
+    DWC2DeviceState device;
     qemu_irq irq;
     MemoryRegion *dma_mr;
     AddressSpace dma_as;

@@ -109,7 +109,7 @@ static inline uint32_t syn_aa64_smc(uint32_t imm16)
     return (EC_AA64_SMC << ARM_EL_EC_SHIFT) | ARM_EL_IL | (imm16 & 0xffff);
 }
 
-static inline uint32_t syn_aa64_genter()
+static inline uint32_t syn_aa64_genter(void)
 {
     return (EC_AA64_APPLE << ARM_EL_EC_SHIFT) | ARM_EL_IL | (1 << 16);
 }
