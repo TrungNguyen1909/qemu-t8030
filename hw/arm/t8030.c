@@ -68,6 +68,7 @@
 #define T8030_ANS_TEXT_SIZE     (0x124000)
 #define T8030_ANS_DATA_BASE     (0x8fc400000)
 #define T8030_ANS_DATA_SIZE     (0x3c00000)
+#define T8030_SMC_REGION_SIZE   (0x80000)
 #define T8030_SMC_TEXT_BASE     (0x23fe00000)
 #define T8030_SMC_TEXT_SIZE     (0x30000)
 #define T8030_SMC_DATA_BASE     (0x23fe30000)
@@ -1237,6 +1238,7 @@ static void t8030_create_smc(MachineState* machine)
     uint32_t *ints;
     DTBProp *prop;
     uint64_t *reg;
+    uint64_t data;
     T8030MachineState *tms = T8030_MACHINE(machine);
     SysBusDevice *smc;
     DTBNode *child = find_dtb_node(tms->device_tree, "arm-io");
@@ -1264,6 +1266,11 @@ static void t8030_create_smc(MachineState* machine)
     segranges[1].flag = 0x0;
 
     set_dtb_prop(iop_nub, "segment-ranges", 64, (uint8_t *)segranges);
+
+    data = T8030_SMC_REGION_SIZE;
+    set_dtb_prop(iop_nub, "region-size", 8, (uint8_t *)&data);
+    data = T8030_SMC_SRAM_BASE;
+    set_dtb_prop(iop_nub, "sram-addr", 8, (uint8_t *)&data);
 
     smc = apple_smc_create(child, tms->build_version);
     assert(smc);

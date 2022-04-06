@@ -452,8 +452,6 @@ SysBusDevice *apple_smc_create(DTBNode *node, uint32_t build_version)
     uint64_t *reg;
     uint32_t protocol_version = 0;
     uint32_t data;
-    xnu_iop_segment_range *segment_ranges = NULL;
-    xnu_iop_segment_range *last_segment = NULL;
 
     dev = qdev_new(TYPE_APPLE_SMC_IOP);
     s = APPLE_SMC_IOP(dev);
@@ -495,12 +493,11 @@ SysBusDevice *apple_smc_create(DTBNode *node, uint32_t build_version)
                           TYPE_APPLE_SMC_IOP ".ascv2-core-reg", reg[3]);
     sysbus_init_mmio(sbd, s->iomems[1]);
 
-    prop = find_dtb_prop(child, "segment-ranges");
+    prop = find_dtb_prop(child, "sram-addr");
     assert(prop != NULL);
-    segment_ranges = (xnu_iop_segment_range *)prop->value;
+    assert(prop->length = 8);
 
-    last_segment = &segment_ranges[prop->length / sizeof(*segment_ranges) - 1];
-    s->sram_addr = last_segment->phys + last_segment->size; /* size: 0x4000 */
+    s->sram_addr = *(uint64_t *)prop->value;
     s->iomems[2] = g_new(MemoryRegion, 1);
     memory_region_init_ram_device_ptr(s->iomems[2], OBJECT(dev),
                                       TYPE_APPLE_SMC_IOP ".sram",
