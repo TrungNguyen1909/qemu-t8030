@@ -21,9 +21,6 @@
 #include <net/if.h>
 #include <net/ethernet.h>
 
-#define STOP_ON_ATTACH           (0)
-#define STOP_ON_END              (0)
-
 #define PACKET_DELAY            (100 * SCALE_US)
 #define PACKET_RETRY_DELAY      (50 * SCALE_MS)
 #define END_DELAY               (50 * SCALE_MS)
@@ -714,14 +711,14 @@ static void usb_fuzz_bh(void *opaque)
     if (s->fd < 0) {
         usb_fuzz_host_reset(DEVICE(s));
         /* This will stop the main loop once so we can load_snapshot */
-        #if !STOP_ON_END
-        qemu_system_exit_request();
-        timer_mod_ns(s->timer, qemu_clock_get_ns(QEMU_CLOCK_VIRTUAL)
-                               + PACKET_RETRY_DELAY);
-        #else
-        vm_stop(RUN_STATE_DEBUG);
-        migrate_del_blocker(s->migration_blocker);
-        #endif
+        if (getenv(SHM_ENV_VAR)) {
+            qemu_system_exit_request();
+            timer_mod_ns(s->timer, qemu_clock_get_ns(QEMU_CLOCK_VIRTUAL)
+                                   + PACKET_RETRY_DELAY);
+        } else {
+            vm_stop(RUN_STATE_DEBUG);
+            migrate_del_blocker(s->migration_blocker);
+        }
         return;
     }
 
@@ -809,13 +806,13 @@ static void usb_fuzz_host_attach(USBPort *uport)
         return;
     }
     s->state = STATE_NONE;
-    #if !STOP_ON_ATTACH
-    migrate_add_blocker(s->migration_blocker, NULL);
-    timer_mod_ns(s->timer, qemu_clock_get_ns(QEMU_CLOCK_VIRTUAL)
-                           + PACKET_DELAY);
-    #else
-    vm_stop(RUN_STATE_DEBUG);
-    #endif
+    if (getenv(SHM_ENV_VAR)) {
+        migrate_add_blocker(s->migration_blocker, NULL);
+        timer_mod_ns(s->timer, qemu_clock_get_ns(QEMU_CLOCK_VIRTUAL)
+                               + PACKET_DELAY);
+    } else {
+        vm_stop(RUN_STATE_DEBUG);
+    }
 }
 
 static void usb_fuzz_host_detach(USBPort *uport)
