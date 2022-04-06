@@ -15,6 +15,7 @@
 #include "migration/blocker.h"
 #include "migration/vmstate.h"
 #include "sysemu/runstate.h"
+#include "afl/config.h"
 #include "afl/trace.h"
 
 #include <arpa/inet.h>
