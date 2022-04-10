@@ -696,32 +696,36 @@ AppleA13State *apple_a13_create(DTBNode *node)
     memory_region_add_subregion_overlap(&tcpu->memory, 0, &tcpu->sysmem, -2);
 
     prop = find_dtb_prop(node, "cpu-impl-reg");
-    assert(prop);
-    assert(prop->length == 16);
+    if (prop) {
+        assert(prop->length == 16);
 
-    reg = (uint64_t*)prop->value;
+        reg = (uint64_t*)prop->value;
 
-    memory_region_init_ram_device_ptr(&tcpu->impl_reg, obj,
-                                      TYPE_APPLE_A13 ".impl-reg",
-                                      reg[1], g_malloc0(reg[1]));
-    memory_region_add_subregion(get_system_memory(),
-                                reg[0], &tcpu->impl_reg);
+        memory_region_init_ram_device_ptr(&tcpu->impl_reg, obj,
+                                          TYPE_APPLE_A13 ".impl-reg",
+                                          reg[1], g_malloc0(reg[1]));
+        memory_region_add_subregion(get_system_memory(),
+                                    reg[0], &tcpu->impl_reg);
+    }
 
     prop = find_dtb_prop(node, "coresight-reg");
-    assert(prop);
-    assert(prop->length == 16);
+    if (prop) {
+        assert(prop->length == 16);
 
-    reg = (uint64_t*)prop->value;
+        reg = (uint64_t*)prop->value;
 
-    memory_region_init_ram_device_ptr(&tcpu->coresight_reg, obj,
-                                      TYPE_APPLE_A13 ".coresight-reg",
-                                      reg[1], g_malloc0(reg[1]));
-    memory_region_add_subregion(get_system_memory(),
-                                reg[0], &tcpu->coresight_reg);
+        memory_region_init_ram_device_ptr(&tcpu->coresight_reg, obj,
+                                          TYPE_APPLE_A13 ".coresight-reg",
+                                          reg[1], g_malloc0(reg[1]));
+        memory_region_add_subregion(get_system_memory(),
+                                    reg[0], &tcpu->coresight_reg);
+    }
 
     prop = find_dtb_prop(node, "cpm-impl-reg");
-    assert(prop->length == 16);
-    memcpy(tcpu->cluster_reg, prop->value, 16);
+    if (prop) {
+        assert(prop->length == 16);
+        memcpy(tcpu->cluster_reg, prop->value, 16);
+    }
     return tcpu;
 }
 
