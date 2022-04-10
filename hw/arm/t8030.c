@@ -212,6 +212,7 @@ static void t8030_memory_setup(MachineState *machine)
     }
     hdr = tms->kernel;
     assert(hdr);
+    g_phys_base = (hwaddr)macho_get_buffer(hdr);
     macho_highest_lowest(hdr, NULL, &virt_end);
     last_range = xnu_pf_segment(hdr, "__LAST");
     phys_ptr = T8030_DRAM_BASE;
