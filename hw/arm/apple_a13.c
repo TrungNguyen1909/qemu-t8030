@@ -53,6 +53,7 @@
         .opc1 = p_op1, .opc2 = p_op2, .access = p_access, .type = ARM_CP_IO, \
         .state = ARM_CP_STATE_AA64, .readfn = apple_a13_cluster_cpreg_read,  \
         .writefn = apple_a13_cluster_cpreg_write,                            \
+        .resetfn = apple_a13_cluster_cpreg_reset,                            \
         .fieldoffset = offsetof(AppleA13Cluster, A13_CPREG_VAR_NAME(p_name)) \
     }
 
@@ -168,6 +169,18 @@ static void apple_a13_cluster_cpreg_write(CPUARMState *env,
         return;
     }
     *(uint64_t *)((char *)(c) + (ri)->fieldoffset) = value;
+}
+
+static void apple_a13_cluster_cpreg_reset(CPUARMState *env,
+                                          const ARMCPRegInfo *ri)
+{
+    AppleA13State *tcpu = APPLE_A13(env_archcpu(env));
+    AppleA13Cluster *c = apple_a13_find_cluster(tcpu->cluster_id);
+
+    if (unlikely(!c)) {
+        return;
+    }
+    *(uint64_t *)((char *)(c) + (ri)->fieldoffset) = ri->resetvalue;
 }
 
 /* Deliver IPI */
