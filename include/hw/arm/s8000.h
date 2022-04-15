@@ -69,5 +69,6 @@ typedef struct
     hwaddr panic_base;
     hwaddr panic_size;
     char pmgr_reg[0x100000];
+    bool force_dfu;
 } S8000MachineState;
 #endif

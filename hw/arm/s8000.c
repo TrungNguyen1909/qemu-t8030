@@ -723,7 +723,8 @@ static void s8000_machine_reset(MachineState* machine)
     apple_a9_reset(tms);
 
     gpio = DEVICE(object_property_get_link(OBJECT(machine), "gpio", &error_fatal));
-    qemu_irq_raise(qdev_get_gpio_in(gpio, S8000_GPIO_FORCE_DFU));
+
+    qemu_set_irq(qdev_get_gpio_in(gpio, S8000_GPIO_FORCE_DFU), tms->force_dfu);
 }
 
 static void s8000_machine_init_done(Notifier *notifier, void *data)
@@ -789,6 +790,25 @@ static void s8000_machine_init(MachineState *machine)
     qemu_add_machine_init_done_notifier(&tms->init_done_notifier);
 }
 
+static void s8000_set_force_dfu(Object *obj, const char *value, Error **errp)
+{
+    S8000MachineState *tms = S8000_MACHINE(obj);
+
+    if (!strcmp(value, "true")
+        || strtoul(value, NULL, 0)) {
+        tms->force_dfu = true;
+    } else {
+        tms->force_dfu = false;
+    }
+}
+
+static char *s8000_get_force_dfu(Object *obj, Error **errp)
+{
+    S8000MachineState *tms = S8000_MACHINE(obj);
+
+    return g_strdup(tms->force_dfu ? "true" : "false");
+}
+
 static void s8000_machine_class_init(ObjectClass *klass, void *data)
 {
     MachineClass *mc = MACHINE_CLASS(klass);
@@ -805,6 +825,12 @@ static void s8000_machine_class_init(ObjectClass *klass, void *data)
     mc->no_parallel = 1;
     mc->default_cpu_type = TYPE_APPLE_A9;
     mc->minimum_page_bits = 14;
+
+    object_class_property_add_str(klass, "force-dfu",
+                                  s8000_get_force_dfu,
+                                  s8000_set_force_dfu);
+    object_class_property_set_description(klass, "force-dfu",
+                                          "Set FORCE_DFU pin state");
 }
 
 static const TypeInfo s8000_machine_info = {
