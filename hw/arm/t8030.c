@@ -49,7 +49,7 @@
 #include "hw/block/apple_ans.h"
 #include "hw/arm/apple_sart.h"
 #include "hw/gpio/apple_gpio.h"
-#include "hw/i2c/apple_i2c.h"
+#include "hw/i2c/apple_hw_i2c.h"
 #include "hw/usb/apple_otg.h"
 #include "hw/watchdog/apple_wdt.h"
 #include "hw/misc/apple_aes.h"
@@ -840,101 +840,36 @@ static void t8030_create_gpio(MachineState *machine, const char *name)
     sysbus_realize_and_unref(SYS_BUS_DEVICE(gpio), &error_fatal);
 }
 
-static DeviceState *t8030_get_gpio_with_role(MachineState *machine, uint32_t role)
-{
-    switch (role) {
-        case 0x00005041: /* AP */
-            return DEVICE(object_property_get_link(OBJECT(machine), "gpio", &error_fatal));
-            break;
-        case 0x00434d53: /* SMC */
-            return DEVICE(object_property_get_link(OBJECT(machine), "smc-gpio", &error_fatal));
-            break;
-        case 0x0042554e: /* NUB */
-            return DEVICE(object_property_get_link(OBJECT(machine), "nub-gpio", &error_fatal));
-            break;
-        default:
-            qemu_log_mask(LOG_GUEST_ERROR, "%s: invalid gpio role %s\n", __func__, (const char*)&role);
-    }
-    return NULL;
-}
-
 static void t8030_create_i2c(MachineState *machine, const char *name)
 {
-    uint32_t line = 0;
-    uint32_t opts = 0;
-    uint32_t role = 0;
-    DeviceState *gpio;
-    DeviceState *i2c = NULL;
+    SysBusDevice *i2c = NULL;
     DTBProp *prop;
     uint64_t *reg;
-    uint32_t* ints;
+    uint32_t *ints;
     int i;
     T8030MachineState *tms = T8030_MACHINE(machine);
     DTBNode *child = find_dtb_node(tms->device_tree, "arm-io");
 
-    assert(child);
     child = find_dtb_node(child, name);
-    if (!child) return;
-
-    i2c = apple_i2c_create(child);
+    assert(child);
+    i2c = apple_hw_i2c_create(name);
     assert(i2c);
     object_property_add_child(OBJECT(machine), name, OBJECT(i2c));
 
     prop = find_dtb_prop(child, "reg");
     assert(prop);
-
-    reg = (uint64_t*)prop->value;
-    sysbus_mmio_map(SYS_BUS_DEVICE(i2c), 0, tms->soc_base_pa + reg[0]);
-
+    reg = (uint64_t *)prop->value;
+    sysbus_mmio_map(i2c, 0, tms->soc_base_pa + reg[0]);
     prop = find_dtb_prop(child, "interrupts");
     assert(prop);
+
     ints = (uint32_t*)prop->value;
+
     for(i = 0; i < prop->length / sizeof(uint32_t); i++) {
-        sysbus_connect_irq(SYS_BUS_DEVICE(i2c), i, qdev_get_gpio_in(DEVICE(tms->aic), ints[i]));
+        sysbus_connect_irq(i2c, i, qdev_get_gpio_in(DEVICE(tms->aic), ints[i]));
     }
 
-    prop = find_dtb_prop(child, "gpio-iic_scl");
-    assert(prop);
-    line = ((uint32_t*)prop->value)[0];
-    opts = ((uint32_t*)prop->value)[1];
-    role = ((uint32_t*)prop->value)[2];
-
-    gpio = t8030_get_gpio_with_role(machine, role);
-    if (gpio) {
-        if (!find_dtb_prop(child, "function-iic_scl")) {
-            uint32_t func[] = {
-                APPLE_GPIO(gpio)->phandle,
-                0x4750494F, /* GPIO */
-                line,
-                opts
-            };
-            prop = set_dtb_prop(child, "function-iic_scl", sizeof(func), (uint8_t*)func);
-        }
-        qdev_connect_gpio_out(gpio, line, qdev_get_gpio_in(i2c, BITBANG_I2C_SCL));
-    }
-
-    prop = find_dtb_prop(child, "gpio-iic_sda");
-    assert(prop);
-    line = ((uint32_t*)prop->value)[0];
-    opts = ((uint32_t*)prop->value)[1];
-    role = ((uint32_t*)prop->value)[2];
-
-    gpio = t8030_get_gpio_with_role(machine, role);
-    if (gpio) {
-        if (!find_dtb_prop(child, "function-iic_sda")) {
-            uint32_t func[] = {
-                APPLE_GPIO(gpio)->phandle,
-                0x4750494F, /* GPIO */
-                line,
-                opts
-            };
-            prop = set_dtb_prop(child, "function-iic_sda", sizeof(func), (uint8_t*)func);
-        }
-        qdev_connect_gpio_out(gpio, line, qdev_get_gpio_in(i2c, BITBANG_I2C_SDA));
-        qdev_connect_gpio_out(i2c, BITBANG_I2C_SDA, qdev_get_gpio_in(gpio, line));
-    }
-
-    sysbus_realize_and_unref(SYS_BUS_DEVICE(i2c), &error_fatal);
+    sysbus_realize_and_unref(i2c, &error_fatal);
 }
 
 static void t8030_create_usb(MachineState *machine)
