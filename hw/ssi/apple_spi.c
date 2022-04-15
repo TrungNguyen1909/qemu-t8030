@@ -130,7 +130,7 @@ static void apple_spi_update_cs(AppleSPIState *s)
     BusChild *kid = QTAILQ_FIRST(&b->children);
     if (kid) {
         qemu_set_irq(qdev_get_gpio_in_named(kid->child, SSI_GPIO_CS, 0),
-                     (REG(s, R_PIN) & R_PIN_CS) == 0);
+                     (REG(s, R_PIN) & R_PIN_CS) != 0);
     }
 }
 
@@ -138,9 +138,9 @@ static void apple_spi_cs_set(void *opaque, int pin, int level)
 {
     AppleSPIState *s = APPLE_SPI(opaque);
     if (level) {
-        REG(s, R_PIN) &= ~R_PIN_CS;
-    } else {
         REG(s, R_PIN) |= R_PIN_CS;
+    } else {
+        REG(s, R_PIN) &= ~R_PIN_CS;
     }
     apple_spi_update_cs(s);
 }
