@@ -74,6 +74,7 @@ typedef struct
     char *ticket_filename;
     BootMode boot_mode;
     uint32_t build_version;
+    Notifier init_done_notifier;
     hwaddr panic_base;
     hwaddr panic_size;
     uint8_t pmgr_reg[0x100000];

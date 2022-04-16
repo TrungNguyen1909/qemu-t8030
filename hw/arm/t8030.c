@@ -1302,7 +1302,22 @@ static void t8030_machine_reset(MachineState* machine)
     T8030MachineState *tms = T8030_MACHINE(machine);
 
     qemu_devices_reset();
-    t8030_memory_setup(machine);
+    memset(&tms->pmgr_reg, 0, sizeof(tms->pmgr_reg));
+    if (!runstate_check(RUN_STATE_RESTORE_VM)
+        && !runstate_check(RUN_STATE_PRELAUNCH)) {
+        if (!runstate_check(RUN_STATE_PAUSED)
+            || qemu_reset_requested_get() != SHUTDOWN_CAUSE_NONE) {
+            t8030_memory_setup(MACHINE(tms));
+        }
+    }
+    t8030_cpu_reset(tms);
+}
+
+static void t8030_machine_init_done(Notifier *notifier, void *data)
+{
+    T8030MachineState *tms = container_of(notifier, T8030MachineState,
+                                          init_done_notifier);
+    t8030_memory_setup(MACHINE(tms));
     t8030_cpu_reset(tms);
 }
 
@@ -1429,6 +1444,9 @@ static void t8030_machine_init(MachineState *machine)
     t8030_create_smc(machine);
 
     t8030_create_boot_display(machine);
+
+    tms->init_done_notifier.notify = t8030_machine_init_done;
+    qemu_add_machine_init_done_notifier(&tms->init_done_notifier);
 }
 
 static void t8030_set_trustcache_filename(Object *obj, const char *value, Error **errp)
