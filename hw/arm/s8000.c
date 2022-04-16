@@ -695,7 +695,7 @@ static void apple_a9_reset(void *opaque)
         AppleA9State *tcpu = (AppleA9State *)object_dynamic_cast(OBJECT(cpu),
                                                                TYPE_APPLE_A9);
         if (tcpu) {
-            object_property_set_int(DEVICE(cpu), "rvbar",
+            object_property_set_int(OBJECT(cpu), "rvbar",
                                     tms->bootinfo.entry & ~0xfff,
                                     &error_abort);
             cpu_reset(cpu);
