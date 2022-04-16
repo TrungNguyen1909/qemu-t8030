@@ -999,11 +999,11 @@ static void gen_llwp(DisasContext *ctx, uint32_t base, int16_t offset,
 
     gen_base_offset_addr(ctx, taddr, base, offset);
     tcg_gen_qemu_ld64(tval, taddr, ctx->mem_idx);
-#ifdef TARGET_WORDS_BIGENDIAN
-    tcg_gen_extr_i64_tl(tmp2, tmp1, tval);
-#else
-    tcg_gen_extr_i64_tl(tmp1, tmp2, tval);
-#endif
+    if (cpu_is_bigendian(ctx)) {
+        tcg_gen_extr_i64_tl(tmp2, tmp1, tval);
+    } else {
+        tcg_gen_extr_i64_tl(tmp1, tmp2, tval);
+    }
     gen_store_gpr(tmp1, reg1);
     tcg_temp_free(tmp1);
     gen_store_gpr(tmp2, reg2);
@@ -1035,11 +1035,11 @@ static void gen_scwp(DisasContext *ctx, uint32_t base, int16_t offset,
     gen_load_gpr(tmp1, reg1);
     gen_load_gpr(tmp2, reg2);
 
-#ifdef TARGET_WORDS_BIGENDIAN
-    tcg_gen_concat_tl_i64(tval, tmp2, tmp1);
-#else
-    tcg_gen_concat_tl_i64(tval, tmp1, tmp2);
-#endif
+    if (cpu_is_bigendian(ctx)) {
+        tcg_gen_concat_tl_i64(tval, tmp2, tmp1);
+    } else {
+        tcg_gen_concat_tl_i64(tval, tmp1, tmp2);
+    }
 
     tcg_gen_ld_i64(llval, cpu_env, offsetof(CPUMIPSState, llval_wp));
     tcg_gen_atomic_cmpxchg_i64(val, taddr, llval, tval,
@@ -1268,11 +1268,11 @@ static void gen_pool32a0_nanomips_insn(CPUMIPSState *env, DisasContext *ctx)
         switch (extract32(ctx->opcode, 10, 1)) {
         case NM_TEQ:
             check_nms(ctx);
-            gen_trap(ctx, OPC_TEQ, rs, rt, -1);
+            gen_trap(ctx, OPC_TEQ, rs, rt, -1, rd);
             break;
         case NM_TNE:
             check_nms(ctx);
-            gen_trap(ctx, OPC_TNE, rs, rt, -1);
+            gen_trap(ctx, OPC_TNE, rs, rt, -1, rd);
             break;
         }
         break;
@@ -1868,6 +1868,9 @@ static void gen_pool32axf_2_nanomips_insn(DisasContext *ctx, uint32_t opc,
                 TCGv_i32 t2 = tcg_temp_new_i32();
                 TCGv_i32 t3 = tcg_temp_new_i32();
 
+                if (acc || ctx->insn_flags & ISA_MIPS_R6) {
+                    check_dsp_r2(ctx);
+                }
                 gen_load_gpr(t0, rs);
                 gen_load_gpr(t1, rt);
                 tcg_gen_trunc_tl_i32(t2, t0);
@@ -1925,6 +1928,9 @@ static void gen_pool32axf_2_nanomips_insn(DisasContext *ctx, uint32_t opc,
                 TCGv_i32 t2 = tcg_temp_new_i32();
                 TCGv_i32 t3 = tcg_temp_new_i32();
 
+                if (acc || ctx->insn_flags & ISA_MIPS_R6) {
+                    check_dsp_r2(ctx);
+                }
                 gen_load_gpr(t0, rs);
                 gen_load_gpr(t1, rt);
                 tcg_gen_trunc_tl_i32(t2, t0);
@@ -3656,7 +3662,7 @@ static int decode_nanomips_32_48_opc(CPUMIPSState *env, DisasContext *ctx)
     int offset;
     int imm;
 
-    insn = translator_lduw(env, ctx->base.pc_next + 2);
+    insn = translator_lduw(env, &ctx->base, ctx->base.pc_next + 2);
     ctx->opcode = (ctx->opcode << 16) | insn;
 
     rt = extract32(ctx->opcode, 21, 5);
@@ -3775,7 +3781,7 @@ static int decode_nanomips_32_48_opc(CPUMIPSState *env, DisasContext *ctx)
         break;
     case NM_P48I:
         {
-            insn = translator_lduw(env, ctx->base.pc_next + 4);
+            insn = translator_lduw(env, &ctx->base, ctx->base.pc_next + 4);
             target_long addr_off = extract32(ctx->opcode, 0, 16) | insn << 16;
             switch (extract32(ctx->opcode, 16, 5)) {
             case NM_LI48:

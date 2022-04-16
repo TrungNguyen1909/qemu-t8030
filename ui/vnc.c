@@ -1354,11 +1354,11 @@ void vnc_disconnect_finish(VncState *vs)
         /* last client gone */
         vnc_update_server_surface(vs->vd);
     }
-    if (vs->cbpeer.update.notify) {
+    vnc_unlock_output(vs);
+
+    if (vs->cbpeer.notifier.notify) {
         qemu_clipboard_peer_unregister(&vs->cbpeer);
     }
-
-    vnc_unlock_output(vs);
 
     qemu_mutex_destroy(&vs->output_mutex);
     if (vs->bh != NULL) {
@@ -2596,7 +2596,7 @@ static int protocol_client_msg(VncState *vs, uint8_t *data, size_t len)
             memset(&info, 0, sizeof(info));
             info.width = w;
             info.height = h;
-            dpy_set_ui_info(vs->vd->dcl.con, &info);
+            dpy_set_ui_info(vs->vd->dcl.con, &info, false);
             vnc_desktop_resize_ext(vs, 4 /* Request forwarded */);
         } else {
             vnc_desktop_resize_ext(vs, 3 /* Invalid screen layout */);
@@ -3098,12 +3098,22 @@ static int vnc_refresh_server_surface(VncDisplay *vd)
     VncState *vs;
     int has_dirty = 0;
     pixman_image_t *tmpbuf = NULL;
+    unsigned long offset;
+    int x;
+    uint8_t *guest_ptr, *server_ptr;
 
     struct timeval tv = { 0, 0 };
 
     if (!vd->non_adaptive) {
         gettimeofday(&tv, NULL);
         has_dirty = vnc_update_stats(vd, &tv);
+    }
+
+    offset = find_next_bit((unsigned long *) &vd->guest.dirty,
+                           height * VNC_DIRTY_BPL(&vd->guest), 0);
+    if (offset == height * VNC_DIRTY_BPL(&vd->guest)) {
+        /* no dirty bits in guest surface */
+        return has_dirty;
     }
 
     /*
@@ -3130,15 +3140,6 @@ static int vnc_refresh_server_surface(VncDisplay *vd)
     line_bytes = MIN(server_stride, guest_ll);
 
     for (;;) {
-        int x;
-        uint8_t *guest_ptr, *server_ptr;
-        unsigned long offset = find_next_bit((unsigned long *) &vd->guest.dirty,
-                                             height * VNC_DIRTY_BPL(&vd->guest),
-                                             y * VNC_DIRTY_BPL(&vd->guest));
-        if (offset == height * VNC_DIRTY_BPL(&vd->guest)) {
-            /* no more dirty bits */
-            break;
-        }
         y = offset / VNC_DIRTY_BPL(&vd->guest);
         x = offset % VNC_DIRTY_BPL(&vd->guest);
 
@@ -3177,6 +3178,13 @@ static int vnc_refresh_server_surface(VncDisplay *vd)
         }
 
         y++;
+        offset = find_next_bit((unsigned long *) &vd->guest.dirty,
+                               height * VNC_DIRTY_BPL(&vd->guest),
+                               y * VNC_DIRTY_BPL(&vd->guest));
+        if (offset == height * VNC_DIRTY_BPL(&vd->guest)) {
+            /* no more dirty bits */
+            break;
+        }
     }
     qemu_pixman_image_unref(tmpbuf);
     return has_dirty;

@@ -102,6 +102,10 @@ typedef struct DisasContext {
     bool hstr_active;
     /* True if memory operations require alignment */
     bool align_mem;
+    /* True if PSTATE.IL is set */
+    bool pstate_il;
+    /* True if MVE insns are definitely not predicated by VPR or LTPSIZE */
+    bool mve_no_pred;
     /*
      * >= 0, a copy of PSTATE.BTYPE, which will be 0 without v8.5-BTI.
      *  < 0, set by the current instruction.
@@ -183,6 +187,12 @@ static inline int rsub_16(DisasContext *s, int x)
 static inline int rsub_8(DisasContext *s, int x)
 {
     return 8 - x;
+}
+
+static inline int neon_3same_fp_size(DisasContext *s, int x)
+{
+    /* Convert 0==fp32, 1==fp16 into a MO_* value */
+    return MO_32 - x;
 }
 
 static inline int arm_dc_feature(DisasContext *dc, int feature)

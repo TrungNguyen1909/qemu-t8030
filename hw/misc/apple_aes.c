@@ -249,7 +249,8 @@ static bool aes_process_command(AppleAESState *s, AESCommand *cmd)
         buffer = g_malloc0(len);
 
         WITH_RCU_READ_LOCK_GUARD() {
-            dma_memory_read(&s->dma_as, source_addr, buffer, len);
+            dma_memory_read(&s->dma_as, source_addr, buffer, len,
+                            MEMTXATTRS_UNSPECIFIED);
         }
         qcrypto_cipher_setiv(s->keys[key_ctx].cipher, s->iv[iv_ctx], 16, &errp);
 
@@ -259,7 +260,7 @@ static bool aes_process_command(AppleAESState *s, AESCommand *cmd)
             qcrypto_cipher_decrypt(s->keys[key_ctx].cipher, buffer, buffer, len, &errp);
         }
         qcrypto_cipher_getiv(s->keys[key_ctx].cipher, s->iv[iv_ctx], 16, &errp);
-        dma_memory_write(&s->dma_as, dest_addr, buffer, len);
+        dma_memory_write(&s->dma_as, dest_addr, buffer, len, MEMTXATTRS_UNSPECIFIED);
         break;
     }
     case OPCODE_STORE_IV:
@@ -269,7 +270,7 @@ static bool aes_process_command(AppleAESState *s, AESCommand *cmd)
         uint32_t ctx = COMMAND_STORE_IV_COMMAND_CONTEXT(cmd->command);
         dest_addr = c->dest_addr;
         dest_addr |= ((dma_addr_t)COMMAND_STORE_IV_COMMAND_UPPER_ADDR_DEST(c->command)) << 32;
-        dma_memory_write(&s->dma_as, dest_addr, s->iv[ctx], 16);
+        dma_memory_write(&s->dma_as, dest_addr, s->iv[ctx], 16, MEMTXATTRS_UNSPECIFIED);
         break;
     }
     case OPCODE_FLAG:

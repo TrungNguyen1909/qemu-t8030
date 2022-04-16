@@ -43,9 +43,6 @@ typedef struct BlockJob {
     /** Data belonging to the generic Job infrastructure */
     Job job;
 
-    /** The block device on which the job is operating.  */
-    BlockBackend *blk;
-
     /** Status that is published by the query-block-jobs QMP API */
     BlockDeviceIoStatus iostatus;
 
@@ -76,6 +73,13 @@ typedef struct BlockJob {
     /** BlockDriverStates that are involved in this block job */
     GSList *nodes;
 } BlockJob;
+
+/*
+ * Global state (GS) API. These functions run under the BQL.
+ *
+ * See include/block/block-global-state.h for more information about
+ * the GS API.
+ */
 
 /**
  * block_job_next:
@@ -157,6 +161,21 @@ BlockJobInfo *block_job_query(BlockJob *job, Error **errp);
  * other than job->blk.
  */
 void block_job_iostatus_reset(BlockJob *job);
+
+/*
+ * block_job_get_aio_context:
+ *
+ * Returns aio context associated with a block job.
+ */
+AioContext *block_job_get_aio_context(BlockJob *job);
+
+
+/*
+ * Common functions that are neither I/O nor Global State.
+ *
+ * See include/block/block-common.h for more information about
+ * the Common API.
+ */
 
 /**
  * block_job_is_internal:

@@ -23,9 +23,9 @@ The ``virt`` machine supports the following devices:
 * 1 generic PCIe host bridge
 * The fw_cfg device that allows a guest to obtain data from QEMU
 
-Note that the default CPU is a generic RV32GC/RV64GC. Optional extensions
-can be enabled via command line parameters, e.g.: ``-cpu rv64,x-h=true``
-enables the hypervisor extension for RV64.
+The hypervisor extension has been enabled for the default CPU, so virtual
+machines with hypervisor extension can simply be used without explicitly
+declaring.
 
 Hardware configuration information
 ----------------------------------
@@ -52,6 +52,32 @@ for loading a Linux kernel, a VxWorks kernel, an S-mode U-Boot bootloader
 with the default OpenSBI firmware image as the -bios. It also supports
 the recommended RISC-V bootflow: U-Boot SPL (M-mode) loads OpenSBI fw_dynamic
 firmware and U-Boot proper (S-mode), using the standard -bios functionality.
+
+Machine-specific options
+------------------------
+
+The following machine-specific options are supported:
+
+- aclint=[on|off]
+
+  When this option is "on", ACLINT devices will be emulated instead of
+  SiFive CLINT. When not specified, this option is assumed to be "off".
+
+- aia=[none|aplic|aplic-imsic]
+
+  This option allows selecting interrupt controller defined by the AIA
+  (advanced interrupt architecture) specification. The "aia=aplic" selects
+  APLIC (advanced platform level interrupt controller) to handle wired
+  interrupts whereas the "aia=aplic-imsic" selects APLIC and IMSIC (incoming
+  message signaled interrupt controller) to handle both wired interrupts and
+  MSIs. When not specified, this option is assumed to be "none" which selects
+  SiFive PLIC to handle wired interrupts.
+
+- aia-guests=nnn
+
+  The number of per-HART VS-level AIA IMSIC pages to be emulated for a guest
+  having AIA IMSIC (i.e. "aia=aplic-imsic" selected). When not specified,
+  the default number of per-HART VS-level AIA IMSIC pages is 0.
 
 Running Linux kernel
 --------------------

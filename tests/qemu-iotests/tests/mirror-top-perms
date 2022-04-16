@@ -20,12 +20,12 @@
 #
 
 import os
-import iotests
-from iotests import qemu_img
 
-# Import qemu after iotests.py has amended sys.path
-# pylint: disable=wrong-import-order
-import qemu
+from qemu.machine import machine
+from qemu.qmp import QMPConnectError
+
+import iotests
+from iotests import change_log_level, qemu_img
 
 
 image_size = 1 * 1024 * 1024
@@ -34,8 +34,7 @@ source = os.path.join(iotests.test_dir, 'source.img')
 
 class TestMirrorTopPerms(iotests.QMPTestCase):
     def setUp(self):
-        assert qemu_img('create', '-f', iotests.imgfmt, source,
-                        str(image_size)) == 0
+        qemu_img('create', '-f', iotests.imgfmt, source, str(image_size))
         self.vm = iotests.VM()
         self.vm.add_drive(source)
         self.vm.add_blockdev(f'null-co,node-name=null,size={image_size}')
@@ -47,7 +46,7 @@ class TestMirrorTopPerms(iotests.QMPTestCase):
     def tearDown(self):
         try:
             self.vm.shutdown()
-        except qemu.machine.AbnormalShutdown:
+        except machine.AbnormalShutdown:
             pass
 
         if self.vm_b is not None:
@@ -99,10 +98,14 @@ class TestMirrorTopPerms(iotests.QMPTestCase):
         self.vm_b.add_blockdev(f'file,node-name=drive0,filename={source}')
         self.vm_b.add_device('virtio-blk,drive=drive0,share-rw=on')
         try:
-            self.vm_b.launch()
-            print('ERROR: VM B launched successfully, this should not have '
-                  'happened')
-        except qemu.qmp.QMPConnectError:
+            # Silence AQMP errors temporarily.
+            # TODO: Remove this and just allow the errors to be logged when
+            # AQMP fully replaces QMP.
+            with change_log_level('qemu.aqmp'):
+                self.vm_b.launch()
+                print('ERROR: VM B launched successfully, '
+                      'this should not have happened')
+        except (QMPConnectError, machine.VMLaunchFailure):
             assert 'Is another process using the image' in self.vm_b.get_log()
 
         result = self.vm.qmp('block-job-cancel',

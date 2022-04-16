@@ -26,14 +26,12 @@
 
 #define TYPE_AVR_CPU "avr-cpu"
 
-OBJECT_DECLARE_TYPE(AVRCPU, AVRCPUClass,
-                    AVR_CPU)
+OBJECT_DECLARE_CPU_TYPE(AVRCPU, AVRCPUClass, AVR_CPU)
 
 /**
  *  AVRCPUClass:
  *  @parent_realize: The parent class' realize handler.
  *  @parent_reset: The parent class' reset handler.
- *  @vr: Version Register value.
  *
  *  A AVR CPU model.
  */

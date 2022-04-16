@@ -8,7 +8,7 @@ check-patch:
   variables:
     GIT_DEPTH: 1000
   rules:
-    - if: '$CI_PROJECT_NAMESPACE == "qemu-project" && $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH'
+    - if: '$CI_PROJECT_NAMESPACE == "qemu-project"'
       when: never
     - when: on_success
       allow_failure: true
@@ -46,4 +46,6 @@ check-python-tox:
     QEMU_TOX_EXTRA_ARGS: --skip-missing-interpreters=false
   needs:
     job: python-container
+  rules:
+    - when: manual
   allow_failure: true

@@ -60,7 +60,7 @@ I2CBus *i2c_init_bus(DeviceState *parent, const char *name)
 {
     I2CBus *bus;
 
-    bus = I2C_BUS(qbus_create(TYPE_I2C_BUS, parent, name));
+    bus = I2C_BUS(qbus_new(TYPE_I2C_BUS, parent, name));
     QLIST_INIT(&bus->current_devs);
     vmstate_register(NULL, VMSTATE_INSTANCE_ID_ANY, &vmstate_i2c_bus, bus);
     return bus;
@@ -274,7 +274,7 @@ static int i2c_slave_post_load(void *opaque, int version_id)
     bus = I2C_BUS(qdev_get_parent_bus(DEVICE(dev)));
     if ((bus->saved_address == dev->address) ||
         (bus->saved_address == I2C_BROADCAST)) {
-        node = g_malloc(sizeof(struct I2CNode));
+        node = g_new(struct I2CNode, 1);
         node->elt = dev;
         QLIST_INSERT_HEAD(&bus->current_devs, node, next);
     }
@@ -319,7 +319,7 @@ static bool i2c_slave_match(I2CSlave *candidate, uint8_t address,
                             bool broadcast, I2CNodeList *current_devs)
 {
     if ((candidate->address == address) || (broadcast)) {
-        I2CNode *node = g_malloc(sizeof(struct I2CNode));
+        I2CNode *node = g_new(struct I2CNode, 1);
         node->elt = candidate;
         QLIST_INSERT_HEAD(current_devs, node, next);
         return true;

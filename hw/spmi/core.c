@@ -54,7 +54,7 @@ SPMIBus *spmi_init_bus(DeviceState *parent, const char *name)
 {
     SPMIBus *bus;
 
-    bus = SPMI_BUS(qbus_create(TYPE_SPMI_BUS, parent, name));
+    bus = SPMI_BUS(qbus_new(TYPE_SPMI_BUS, parent, name));
     vmstate_register(NULL, VMSTATE_INSTANCE_ID_ANY, &vmstate_spmi_bus, bus);
     return bus;
 }

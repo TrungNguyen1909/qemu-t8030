@@ -308,8 +308,8 @@ static AppleDARTTLBEntry *apple_dart_ptw(AppleDARTInstance *o, uint32_t sid,
         idx = (iova & (s->l_mask[level])) >> s->l_shift[level];
         pa += 8 * idx;
 
-        if (dma_memory_read(&address_space_memory, pa, &pte, sizeof(pte))
-            != MEMTX_OK) {
+        if (dma_memory_read(&address_space_memory, pa, &pte, sizeof(pte),
+                            MEMTXATTRS_UNSPECIFIED) != MEMTX_OK) {
             err_status = (DART_ERROR_FLAG | DART_ERROR_L2E_INVLD);
             pa = 0;
             pte = 0;

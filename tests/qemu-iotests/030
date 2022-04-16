@@ -251,7 +251,16 @@ class TestParallelOps(iotests.QMPTestCase):
                                  speed=1024)
             self.assert_qmp(result, 'return', {})
 
-        for job in pending_jobs:
+        # Do this in reverse: After unthrottling them, some jobs may finish
+        # before we have unthrottled all of them.  This will drain their
+        # subgraph, and this will make jobs above them advance (despite those
+        # jobs on top being throttled).  In the worst case, all jobs below the
+        # top one are finished before we can unthrottle it, and this makes it
+        # advance so far that it completes before we can unthrottle it - which
+        # results in an error.
+        # Starting from the top (i.e. in reverse) does not have this problem:
+        # When a job finishes, the ones below it are not advanced.
+        for job in reversed(pending_jobs):
             result = self.vm.qmp('block-job-set-speed', device=job, speed=0)
             self.assert_qmp(result, 'return', {})
 
@@ -426,6 +435,11 @@ class TestParallelOps(iotests.QMPTestCase):
         self.vm.run_job(job='drive0', auto_dismiss=True)
         self.vm.run_job(job='node4', auto_dismiss=True)
         self.assert_no_active_block_jobs()
+
+        # Assert that node0 is now the backing node of node4
+        result = self.vm.qmp('query-named-block-nodes')
+        node4 = next(node for node in result['return'] if node['node-name'] == 'node4')
+        self.assertEqual(node4['image']['backing-image']['filename'], self.imgs[0])
 
     # Test a block-stream and a block-commit job in parallel
     # Here the stream job is supposed to finish quickly in order to reproduce
@@ -710,7 +724,8 @@ class TestEIO(TestErrors):
                     if result == {'return': []}:
                         # Job finished too quickly
                         continue
-                    self.assert_qmp(result, 'return[0]/paused', False)
+                    self.assertIn(result['return'][0]['status'],
+                                  ['running', 'pending', 'aborting', 'concluded'])
                 elif event['event'] == 'BLOCK_JOB_COMPLETED':
                     self.assertTrue(error, 'job completed unexpectedly')
                     self.assert_qmp(event, 'data/type', 'stream')
@@ -740,8 +755,14 @@ class TestEIO(TestErrors):
                     self.assert_qmp(event, 'data/device', 'drive0')
                     self.assert_qmp(event, 'data/operation', 'read')
 
+                    if self.vm.qmp('query-block-jobs')['return'][0]['status'] != 'paused':
+                        self.vm.events_wait([(
+                            'JOB_STATUS_CHANGE',
+                            {'data': {'id': 'drive0', 'status': 'paused'}}
+                        )])
+
                     result = self.vm.qmp('query-block-jobs')
-                    self.assert_qmp(result, 'return[0]/paused', True)
+                    self.assert_qmp(result, 'return[0]/status', 'paused')
                     self.assert_qmp(result, 'return[0]/offset', self.STREAM_BUFFER_SIZE)
                     self.assert_qmp(result, 'return[0]/io-status', 'failed')
 
@@ -752,7 +773,8 @@ class TestEIO(TestErrors):
                     if result == {'return': []}:
                         # Race; likely already finished. Check.
                         continue
-                    self.assert_qmp(result, 'return[0]/paused', False)
+                    self.assertIn(result['return'][0]['status'],
+                                  ['running', 'pending', 'aborting', 'concluded'])
                     self.assert_qmp(result, 'return[0]/io-status', 'ok')
                 elif event['event'] == 'BLOCK_JOB_COMPLETED':
                     self.assertTrue(error, 'job completed unexpectedly')
@@ -829,8 +851,14 @@ class TestENOSPC(TestErrors):
                     self.assert_qmp(event, 'data/operation', 'read')
                     error = True
 
+                    if self.vm.qmp('query-block-jobs')['return'][0]['status'] != 'paused':
+                        self.vm.events_wait([(
+                            'JOB_STATUS_CHANGE',
+                            {'data': {'id': 'drive0', 'status': 'paused'}}
+                        )])
+
                     result = self.vm.qmp('query-block-jobs')
-                    self.assert_qmp(result, 'return[0]/paused', True)
+                    self.assert_qmp(result, 'return[0]/status', 'paused')
                     self.assert_qmp(result, 'return[0]/offset', self.STREAM_BUFFER_SIZE)
                     self.assert_qmp(result, 'return[0]/io-status', 'nospace')
 
@@ -841,7 +869,8 @@ class TestENOSPC(TestErrors):
                     if result == {'return': []}:
                         # Race; likely already finished. Check.
                         continue
-                    self.assert_qmp(result, 'return[0]/paused', False)
+                    self.assertIn(result['return'][0]['status'],
+                                  ['running', 'pending', 'aborting', 'concluded'])
                     self.assert_qmp(result, 'return[0]/io-status', 'ok')
                 elif event['event'] == 'BLOCK_JOB_COMPLETED':
                     self.assertTrue(error, 'job completed unexpectedly')

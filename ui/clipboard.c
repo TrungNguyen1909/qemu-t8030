@@ -4,19 +4,79 @@
 static NotifierList clipboard_notifiers =
     NOTIFIER_LIST_INITIALIZER(clipboard_notifiers);
 
+static QemuClipboardInfo *cbinfo[QEMU_CLIPBOARD_SELECTION__COUNT];
+
 void qemu_clipboard_peer_register(QemuClipboardPeer *peer)
 {
-    notifier_list_add(&clipboard_notifiers, &peer->update);
+    notifier_list_add(&clipboard_notifiers, &peer->notifier);
 }
 
 void qemu_clipboard_peer_unregister(QemuClipboardPeer *peer)
 {
-    notifier_remove(&peer->update);
+    int i;
+
+    for (i = 0; i < QEMU_CLIPBOARD_SELECTION__COUNT; i++) {
+        qemu_clipboard_peer_release(peer, i);
+    }
+    notifier_remove(&peer->notifier);
+}
+
+bool qemu_clipboard_peer_owns(QemuClipboardPeer *peer,
+                              QemuClipboardSelection selection)
+{
+    QemuClipboardInfo *info = qemu_clipboard_info(selection);
+
+    return info && info->owner == peer;
+}
+
+void qemu_clipboard_peer_release(QemuClipboardPeer *peer,
+                                 QemuClipboardSelection selection)
+{
+    g_autoptr(QemuClipboardInfo) info = NULL;
+
+    if (qemu_clipboard_peer_owns(peer, selection)) {
+        /* set empty clipboard info */
+        info = qemu_clipboard_info_new(NULL, selection);
+        qemu_clipboard_update(info);
+    }
+}
+
+bool qemu_clipboard_check_serial(QemuClipboardInfo *info, bool client)
+{
+    if (!info->has_serial ||
+        !cbinfo[info->selection] ||
+        !cbinfo[info->selection]->has_serial) {
+        return true;
+    }
+
+    if (client) {
+        return cbinfo[info->selection]->serial >= info->serial;
+    } else {
+        return cbinfo[info->selection]->serial > info->serial;
+    }
 }
 
 void qemu_clipboard_update(QemuClipboardInfo *info)
 {
-    notifier_list_notify(&clipboard_notifiers, info);
+    QemuClipboardNotify notify = {
+        .type = QEMU_CLIPBOARD_UPDATE_INFO,
+        .info = info,
+    };
+    assert(info->selection < QEMU_CLIPBOARD_SELECTION__COUNT);
+
+    notifier_list_notify(&clipboard_notifiers, &notify);
+
+    if (cbinfo[info->selection] != info) {
+        qemu_clipboard_info_unref(cbinfo[info->selection]);
+        cbinfo[info->selection] = qemu_clipboard_info_ref(info);
+    }
+}
+
+QemuClipboardInfo *qemu_clipboard_info(QemuClipboardSelection selection)
+{
+    assert(selection < QEMU_CLIPBOARD_SELECTION__COUNT);
+
+    return cbinfo[selection];
 }
 
 QemuClipboardInfo *qemu_clipboard_info_new(QemuClipboardPeer *owner,
@@ -67,6 +127,13 @@ void qemu_clipboard_request(QemuClipboardInfo *info,
 
     info->types[type].requested = true;
     info->owner->request(info, type);
+}
+
+void qemu_clipboard_reset_serial(void)
+{
+    QemuClipboardNotify notify = { .type = QEMU_CLIPBOARD_RESET_SERIAL };
+
+    notifier_list_notify(&clipboard_notifiers, &notify);
 }
 
 void qemu_clipboard_set_data(QemuClipboardPeer *peer,

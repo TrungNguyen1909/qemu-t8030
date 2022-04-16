@@ -47,7 +47,7 @@ static int vhost_kernel_cleanup(struct vhost_dev *dev)
 
     assert(dev->vhost_ops->backend_type == VHOST_BACKEND_TYPE_KERNEL);
 
-    return close(fd);
+    return close(fd) < 0 ? -errno : 0;
 }
 
 static int vhost_kernel_memslots_limit(struct vhost_dev *dev)
@@ -58,7 +58,7 @@ static int vhost_kernel_memslots_limit(struct vhost_dev *dev)
     if (g_file_get_contents("/sys/module/vhost/parameters/max_mem_regions",
                             &s, NULL, NULL)) {
         uint64_t val = g_ascii_strtoull(s, NULL, 10);
-        if (!((val == G_MAXUINT64 || !val) && errno)) {
+        if (val < INT_MAX && val > 0) {
             g_free(s);
             return val;
         }
@@ -293,7 +293,7 @@ static void vhost_kernel_set_iotlb_callback(struct vhost_dev *dev,
         qemu_set_fd_handler((uintptr_t)dev->opaque, NULL, NULL, NULL);
 }
 
-static const VhostOps kernel_ops = {
+const VhostOps kernel_ops = {
         .backend_type = VHOST_BACKEND_TYPE_KERNEL,
         .vhost_backend_init = vhost_kernel_init,
         .vhost_backend_cleanup = vhost_kernel_cleanup,
@@ -327,34 +327,6 @@ static const VhostOps kernel_ops = {
         .vhost_send_device_iotlb_msg = vhost_kernel_send_device_iotlb_msg,
 };
 #endif
-
-int vhost_set_backend_type(struct vhost_dev *dev, VhostBackendType backend_type)
-{
-    int r = 0;
-
-    switch (backend_type) {
-#ifdef CONFIG_VHOST_KERNEL
-    case VHOST_BACKEND_TYPE_KERNEL:
-        dev->vhost_ops = &kernel_ops;
-        break;
-#endif
-#ifdef CONFIG_VHOST_USER
-    case VHOST_BACKEND_TYPE_USER:
-        dev->vhost_ops = &user_ops;
-        break;
-#endif
-#ifdef CONFIG_VHOST_VDPA
-    case VHOST_BACKEND_TYPE_VDPA:
-        dev->vhost_ops = &vdpa_ops;
-        break;
-#endif
-    default:
-        error_report("Unknown vhost backend type");
-        r = -1;
-    }
-
-    return r;
-}
 
 int vhost_backend_update_device_iotlb(struct vhost_dev *dev,
                                              uint64_t iova, uint64_t uaddr,

@@ -60,7 +60,8 @@ void *create_device_tree(int *sizep)
     }
     ret = fdt_open_into(fdt, fdt, *sizep);
     if (ret) {
-        error_report("Unable to copy device tree in memory");
+        error_report("%s: Unable to copy device tree into memory: %s",
+                     __func__, fdt_strerror(ret));
         exit(1);
     }
 
@@ -104,7 +105,8 @@ void *load_device_tree(const char *filename_path, int *sizep)
 
     ret = fdt_open_into(fdt, fdt, dt_size);
     if (ret) {
-        error_report("Unable to copy device tree in memory");
+        error_report("%s: Unable to copy device tree into memory: %s",
+                     __func__, fdt_strerror(ret));
         goto fail;
     }
 
@@ -540,12 +542,51 @@ int qemu_fdt_add_subnode(void *fdt, const char *name)
 
     retval = fdt_add_subnode(fdt, parent, basename);
     if (retval < 0) {
-        error_report("FDT: Failed to create subnode %s: %s", name,
-                     fdt_strerror(retval));
+        error_report("%s: Failed to create subnode %s: %s",
+                     __func__, name, fdt_strerror(retval));
         exit(1);
     }
 
     g_free(dupname);
+    return retval;
+}
+
+/*
+ * qemu_fdt_add_path: Like qemu_fdt_add_subnode(), but will add
+ * all missing subnodes from the given path.
+ */
+int qemu_fdt_add_path(void *fdt, const char *path)
+{
+    const char *name;
+    int namelen, retval;
+    int parent = 0;
+
+    if (path[0] != '/') {
+        return -1;
+    }
+
+    do {
+        name = path + 1;
+        path = strchr(name, '/');
+        namelen = path != NULL ? path - name : strlen(name);
+
+        retval = fdt_subnode_offset_namelen(fdt, parent, name, namelen);
+        if (retval < 0 && retval != -FDT_ERR_NOTFOUND) {
+            error_report("%s: Unexpected error in finding subnode %.*s: %s",
+                         __func__, namelen, name, fdt_strerror(retval));
+            exit(1);
+        } else if (retval == -FDT_ERR_NOTFOUND) {
+            retval = fdt_add_subnode_namelen(fdt, parent, name, namelen);
+            if (retval < 0) {
+                error_report("%s: Failed to create subnode %.*s: %s",
+                             __func__, namelen, name, fdt_strerror(retval));
+                exit(1);
+            }
+        }
+
+        parent = retval;
+    } while (path);
+
     return retval;
 }
 

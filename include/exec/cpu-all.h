@@ -234,15 +234,6 @@ extern const TargetPageBits target_page;
 
 #define TARGET_PAGE_ALIGN(addr) ROUND_UP((addr), TARGET_PAGE_SIZE)
 
-/* Using intptr_t ensures that qemu_*_page_mask is sign-extended even
- * when intptr_t is 32-bit and we are aligning a long long.
- */
-extern uintptr_t qemu_host_page_size;
-extern intptr_t qemu_host_page_mask;
-
-#define HOST_PAGE_ALIGN(addr) ROUND_UP((addr), qemu_host_page_size)
-#define REAL_HOST_PAGE_ALIGN(addr) ROUND_UP((addr), qemu_real_host_page_size)
-
 /* same as PROT_xxx */
 #define PAGE_READ      0x0001
 #define PAGE_WRITE     0x0002
@@ -429,24 +420,18 @@ static inline bool tlb_hit(target_ulong tlb_addr, target_ulong addr)
 
 #ifdef CONFIG_TCG
 /* accel/tcg/cpu-exec.c */
-void dump_drift_info(void);
+void dump_drift_info(GString *buf);
 /* accel/tcg/translate-all.c */
-void dump_exec_info(void);
-void dump_opcount_info(void);
+void dump_exec_info(GString *buf);
+void dump_opcount_info(GString *buf);
 #endif /* CONFIG_TCG */
 
 #endif /* !CONFIG_USER_ONLY */
 
-#ifdef CONFIG_TCG
 /* accel/tcg/cpu-exec.c */
 int cpu_exec(CPUState *cpu);
 void tcg_exec_realizefn(CPUState *cpu, Error **errp);
 void tcg_exec_unrealizefn(CPUState *cpu);
-#endif /* CONFIG_TCG */
-
-/* Returns: 0 on success, -1 on error */
-int cpu_memory_rw_debug(CPUState *cpu, target_ulong addr,
-                        void *ptr, target_ulong len, bool is_write);
 
 /**
  * cpu_set_cpustate_pointers(cpu)

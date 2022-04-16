@@ -55,6 +55,7 @@ Supported guest CPU types:
 - ``cortex-a53`` (64-bit)
 - ``cortex-a57`` (64-bit)
 - ``cortex-a72`` (64-bit)
+- ``a64fx`` (64-bit)
 - ``host`` (with KVM only)
 - ``max`` (same as ``host`` for KVM; best possible emulation with TCG)
 
@@ -119,6 +120,14 @@ iommu
 ras
   Set ``on``/``off`` to enable/disable reporting host memory errors to a guest
   using ACPI and guest external abort exceptions. The default is off.
+
+dtb-kaslr-seed
+  Set ``on``/``off`` to pass a random seed via the guest dtb
+  kaslr-seed node (in both "/chosen" and /secure-chosen) to use
+  for features like address space randomisation. The default is
+  ``on``. You will want to disable it if your trusted boot chain will
+  verify the DTB it is passed. It would be the responsibility of the
+  firmware to come up with a seed and pass it on if it wants to.
 
 Linux guest kernel configuration
 """"""""""""""""""""""""""""""""

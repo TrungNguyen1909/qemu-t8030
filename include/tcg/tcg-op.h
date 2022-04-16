@@ -843,7 +843,6 @@ static inline void tcg_gen_plugin_cb_end(void)
 
 #if TARGET_LONG_BITS == 32
 #define tcg_temp_new() tcg_temp_new_i32()
-#define tcg_global_reg_new tcg_global_reg_new_i32
 #define tcg_global_mem_new tcg_global_mem_new_i32
 #define tcg_temp_local_new() tcg_temp_local_new_i32()
 #define tcg_temp_free tcg_temp_free_i32
@@ -851,7 +850,6 @@ static inline void tcg_gen_plugin_cb_end(void)
 #define tcg_gen_qemu_st_tl tcg_gen_qemu_st_i32
 #else
 #define tcg_temp_new() tcg_temp_new_i64()
-#define tcg_global_reg_new tcg_global_reg_new_i64
 #define tcg_global_mem_new tcg_global_mem_new_i64
 #define tcg_temp_local_new() tcg_temp_local_new_i64()
 #define tcg_temp_free tcg_temp_free_i64
@@ -896,7 +894,7 @@ static inline void tcg_gen_qemu_ld32s(TCGv ret, TCGv addr, int mem_index)
 
 static inline void tcg_gen_qemu_ld64(TCGv_i64 ret, TCGv addr, int mem_index)
 {
-    tcg_gen_qemu_ld_i64(ret, addr, mem_index, MO_TEQ);
+    tcg_gen_qemu_ld_i64(ret, addr, mem_index, MO_TEUQ);
 }
 
 static inline void tcg_gen_qemu_st8(TCGv arg, TCGv addr, int mem_index)
@@ -916,7 +914,7 @@ static inline void tcg_gen_qemu_st32(TCGv arg, TCGv addr, int mem_index)
 
 static inline void tcg_gen_qemu_st64(TCGv_i64 arg, TCGv addr, int mem_index)
 {
-    tcg_gen_qemu_st_i64(arg, addr, mem_index, MO_TEQ);
+    tcg_gen_qemu_st_i64(arg, addr, mem_index, MO_TEUQ);
 }
 
 void tcg_gen_atomic_cmpxchg_i32(TCGv_i32, TCGv, TCGv_i32, TCGv_i32,

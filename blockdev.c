@@ -56,7 +56,6 @@
 #include "sysemu/iothread.h"
 #include "block/block_int.h"
 #include "block/trace.h"
-#include "sysemu/arch_init.h"
 #include "sysemu/runstate.h"
 #include "sysemu/replay.h"
 #include "qemu/cutils.h"
@@ -64,11 +63,13 @@
 #include "qemu/main-loop.h"
 #include "qemu/throttle-options.h"
 
+/* Protected by BQL */
 QTAILQ_HEAD(, BlockDriverState) monitor_bdrv_states =
     QTAILQ_HEAD_INITIALIZER(monitor_bdrv_states);
 
 void bdrv_set_monitor_owned(BlockDriverState *bs)
 {
+    GLOBAL_STATE_CODE();
     QTAILQ_INSERT_TAIL(&monitor_bdrv_states, bs, monitor_list);
 }
 
@@ -112,6 +113,8 @@ void override_max_devs(BlockInterfaceType type, int max_devs)
     BlockBackend *blk;
     DriveInfo *dinfo;
 
+    GLOBAL_STATE_CODE();
+
     if (max_devs <= 0) {
         return;
     }
@@ -141,6 +144,8 @@ void blockdev_mark_auto_del(BlockBackend *blk)
     DriveInfo *dinfo = blk_legacy_dinfo(blk);
     BlockJob *job;
 
+    GLOBAL_STATE_CODE();
+
     if (!dinfo) {
         return;
     }
@@ -162,28 +167,12 @@ void blockdev_mark_auto_del(BlockBackend *blk)
 void blockdev_auto_del(BlockBackend *blk)
 {
     DriveInfo *dinfo = blk_legacy_dinfo(blk);
+    GLOBAL_STATE_CODE();
 
     if (dinfo && dinfo->auto_del) {
         monitor_remove_blk(blk);
         blk_unref(blk);
     }
-}
-
-/**
- * Returns the current mapping of how many units per bus
- * a particular interface can support.
- *
- *  A positive integer indicates n units per bus.
- *  0 implies the mapping has not been established.
- * -1 indicates an invalid BlockInterfaceType was given.
- */
-int drive_get_max_devs(BlockInterfaceType type)
-{
-    if (type >= IF_IDE && type < IF_COUNT) {
-        return if_max_devs[type];
-    }
-
-    return -1;
 }
 
 static int drive_index_to_bus_id(BlockInterfaceType type, int index)
@@ -198,17 +187,14 @@ static int drive_index_to_unit_id(BlockInterfaceType type, int index)
     return max_devs ? index % max_devs : index;
 }
 
-QemuOpts *drive_def(const char *optstr)
-{
-    return qemu_opts_parse_noisily(qemu_find_opts("drive"), optstr, false);
-}
-
 QemuOpts *drive_add(BlockInterfaceType type, int index, const char *file,
                     const char *optstr)
 {
     QemuOpts *opts;
 
-    opts = drive_def(optstr);
+    GLOBAL_STATE_CODE();
+
+    opts = qemu_opts_parse_noisily(qemu_find_opts("drive"), optstr, false);
     if (!opts) {
         return NULL;
     }
@@ -227,6 +213,8 @@ DriveInfo *drive_get(BlockInterfaceType type, int bus, int unit)
 {
     BlockBackend *blk;
     DriveInfo *dinfo;
+
+    GLOBAL_STATE_CODE();
 
     for (blk = blk_next(NULL); blk; blk = blk_next(blk)) {
         dinfo = blk_legacy_dinfo(blk);
@@ -249,6 +237,8 @@ void drive_check_orphaned(void)
     DriveInfo *dinfo;
     Location loc;
     bool orphans = false;
+
+    GLOBAL_STATE_CODE();
 
     for (blk = blk_next(NULL); blk; blk = blk_next(blk)) {
         dinfo = blk_legacy_dinfo(blk);
@@ -283,6 +273,7 @@ void drive_check_orphaned(void)
 
 DriveInfo *drive_get_by_index(BlockInterfaceType type, int index)
 {
+    GLOBAL_STATE_CODE();
     return drive_get(type,
                      drive_index_to_bus_id(type, index),
                      drive_index_to_unit_id(type, index));
@@ -294,6 +285,8 @@ int drive_get_max_bus(BlockInterfaceType type)
     BlockBackend *blk;
     DriveInfo *dinfo;
 
+    GLOBAL_STATE_CODE();
+
     max_bus = -1;
     for (blk = blk_next(NULL); blk; blk = blk_next(blk)) {
         dinfo = blk_legacy_dinfo(blk);
@@ -302,16 +295,6 @@ int drive_get_max_bus(BlockInterfaceType type)
         }
     }
     return max_bus;
-}
-
-/* Get a block device.  This should only be used for single-drive devices
-   (e.g. SD/Floppy/MTD).  Multi-disk devices (scsi/ide) should use the
-   appropriate bus.  */
-DriveInfo *drive_get_next(BlockInterfaceType type)
-{
-    static int next_block_unit[IF_COUNT];
-
-    return drive_get(type, 0, next_block_unit[type]++);
 }
 
 static void bdrv_format_print(void *opaque, const char *name)
@@ -661,6 +644,7 @@ BlockDriverState *bds_tree_init(QDict *bs_opts, Error **errp)
 {
     int bdrv_flags = 0;
 
+    GLOBAL_STATE_CODE();
     /* bdrv_open() defaults to the values in bdrv_flags (for compatibility
      * with other callers) rather than what we want as the real defaults.
      * Apply the defaults here instead. */
@@ -679,6 +663,7 @@ void blockdev_close_all_bdrv_states(void)
 {
     BlockDriverState *bs, *next_bs;
 
+    GLOBAL_STATE_CODE();
     QTAILQ_FOREACH_SAFE(bs, &monitor_bdrv_states, monitor_list, next_bs) {
         AioContext *ctx = bdrv_get_aio_context(bs);
 
@@ -691,6 +676,7 @@ void blockdev_close_all_bdrv_states(void)
 /* Iterates over the list of monitor-owned BlockDriverStates */
 BlockDriverState *bdrv_next_monitor_owned(BlockDriverState *bs)
 {
+    GLOBAL_STATE_CODE();
     return bs ? QTAILQ_NEXT(bs, monitor_list)
               : QTAILQ_FIRST(&monitor_bdrv_states);
 }
@@ -786,6 +772,8 @@ DriveInfo *drive_new(QemuOpts *all_opts, BlockInterfaceType block_default_type,
     bool copy_on_read;
     const char *filename;
     int i;
+
+    GLOBAL_STATE_CODE();
 
     /* Change legacy command line options into QMP ones */
     static const struct {
@@ -1207,6 +1195,8 @@ typedef struct BlkActionState BlkActionState;
  *
  * Only prepare() may fail. In a single transaction, only one of commit() or
  * abort() will be called. clean() will always be called if it is present.
+ *
+ * Always run under BQL.
  */
 typedef struct BlkActionOps {
     size_t instance_size;
@@ -1848,7 +1838,7 @@ static void drive_backup_abort(BlkActionState *common)
         aio_context = bdrv_get_aio_context(state->bs);
         aio_context_acquire(aio_context);
 
-        job_cancel_sync(&state->job->job);
+        job_cancel_sync(&state->job->job, true);
 
         aio_context_release(aio_context);
     }
@@ -1949,7 +1939,7 @@ static void blockdev_backup_abort(BlkActionState *common)
         aio_context = bdrv_get_aio_context(state->bs);
         aio_context_acquire(aio_context);
 
-        job_cancel_sync(&state->job->job);
+        job_cancel_sync(&state->job->job, true);
 
         aio_context_release(aio_context);
     }
@@ -2316,6 +2306,8 @@ static TransactionProperties *get_transaction_properties(
 /*
  * 'Atomic' group operations.  The operations are performed as a set, and if
  * any fail then we roll back all operations in the group.
+ *
+ * Always run under BQL.
  */
 void qmp_transaction(TransactionActionList *dev_list,
                      bool has_props,
@@ -2326,6 +2318,8 @@ void qmp_transaction(TransactionActionList *dev_list,
     JobTxn *block_job_txn = NULL;
     BlkActionState *state, *next;
     Error *local_err = NULL;
+
+    GLOBAL_STATE_CODE();
 
     QTAILQ_HEAD(, BlkActionState) snap_bdrv_states;
     QTAILQ_INIT(&snap_bdrv_states);
@@ -3326,7 +3320,7 @@ static BlockJob *find_block_job(const char *id, AioContext **aio_context,
         return NULL;
     }
 
-    *aio_context = blk_get_aio_context(job->blk);
+    *aio_context = block_job_get_aio_context(job);
     aio_context_acquire(*aio_context);
 
     return job;
@@ -3431,7 +3425,7 @@ void qmp_block_job_finalize(const char *id, Error **errp)
      * automatically acquires the new one), so make sure we release the correct
      * one.
      */
-    aio_context = blk_get_aio_context(job->blk);
+    aio_context = block_job_get_aio_context(job);
     job_unref(&job->job);
     aio_context_release(aio_context);
 }
@@ -3563,6 +3557,7 @@ void qmp_blockdev_reopen(BlockdevOptionsList *reopen_list, Error **errp)
 {
     BlockReopenQueue *queue = NULL;
     GSList *drained = NULL;
+    GSList *p;
 
     /* Add each one of the BDS that we want to reopen to the queue */
     for (; reopen_list != NULL; reopen_list = reopen_list->next) {
@@ -3612,13 +3607,23 @@ void qmp_blockdev_reopen(BlockdevOptionsList *reopen_list, Error **errp)
 
 fail:
     bdrv_reopen_queue_free(queue);
-    g_slist_free_full(drained, (GDestroyNotify) bdrv_subtree_drained_end);
+    for (p = drained; p; p = p->next) {
+        BlockDriverState *bs = p->data;
+        AioContext *ctx = bdrv_get_aio_context(bs);
+
+        aio_context_acquire(ctx);
+        bdrv_subtree_drained_end(bs);
+        aio_context_release(ctx);
+    }
+    g_slist_free(drained);
 }
 
 void qmp_blockdev_del(const char *node_name, Error **errp)
 {
     AioContext *aio_context;
     BlockDriverState *bs;
+
+    GLOBAL_STATE_CODE();
 
     bs = bdrv_find_node(node_name);
     if (!bs) {
@@ -3722,7 +3727,7 @@ BlockJobInfoList *qmp_query_block_jobs(Error **errp)
         if (block_job_is_internal(job)) {
             continue;
         }
-        aio_context = blk_get_aio_context(job->blk);
+        aio_context = block_job_get_aio_context(job);
         aio_context_acquire(aio_context);
         value = block_job_query(job, errp);
         aio_context_release(aio_context);

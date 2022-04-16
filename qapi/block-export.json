@@ -168,7 +168,7 @@
   'data': { 'mountpoint': 'str',
             '*growable': 'bool',
             '*allow-other': 'FuseExportAllowOther' },
-  'if': 'defined(CONFIG_FUSE)' }
+  'if': 'CONFIG_FUSE' }
 
 ##
 # @NbdServerAddOptions:
@@ -219,13 +219,13 @@
 #
 # @hard: Drop all connections immediately and remove export.
 #
-# Potential additional modes to be added in the future:
+# TODO: Potential additional modes to be added in the future:
 #
-# hide: Just hide export from new clients, leave existing connections as is.
-# Remove export after all clients are disconnected.
+#       hide: Just hide export from new clients, leave existing connections as is.
+#       Remove export after all clients are disconnected.
 #
-# soft: Hide export from new clients, answer with ESHUTDOWN for all further
-# requests from existing clients.
+#       soft: Hide export from new clients, answer with ESHUTDOWN for all further
+#       requests from existing clients.
 #
 # Since: 2.12
 ##
@@ -277,8 +277,10 @@
 # Since: 4.2
 ##
 { 'enum': 'BlockExportType',
-  'data': [ 'nbd', 'vhost-user-blk',
-            { 'name': 'fuse', 'if': 'defined(CONFIG_FUSE)' } ] }
+  'data': [ 'nbd',
+            { 'name': 'vhost-user-blk',
+              'if': 'CONFIG_VHOST_USER_BLK_SERVER' },
+            { 'name': 'fuse', 'if': 'CONFIG_FUSE' } ] }
 
 ##
 # @BlockExportOptions:
@@ -319,9 +321,10 @@
   'discriminator': 'type',
   'data': {
       'nbd': 'BlockExportOptionsNbd',
-      'vhost-user-blk': 'BlockExportOptionsVhostUserBlk',
+      'vhost-user-blk': { 'type': 'BlockExportOptionsVhostUserBlk',
+                          'if': 'CONFIG_VHOST_USER_BLK_SERVER' },
       'fuse': { 'type': 'BlockExportOptionsFuse',
-                'if': 'defined(CONFIG_FUSE)' }
+                'if': 'CONFIG_FUSE' }
    } }
 
 ##

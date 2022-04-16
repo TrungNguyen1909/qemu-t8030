@@ -61,12 +61,9 @@ endif
 # non-inline runs will trigger the duplicate instruction heuristics in libinsn.so
 run-plugin-%-with-libinsn.so:
 	$(call run-test, $@, $(QEMU) $(QEMU_OPTS) \
-	       -plugin ../../plugin/libinsn.so$(COMMA)arg=inline \
+	       -plugin ../../plugin/libinsn.so$(COMMA)inline=on \
 	       -d plugin -D $*-with-libinsn.so.pout $*, \
 		"$* (inline) on $(TARGET_NAME)")
-
-run-plugin-signals-with-libinsn.so:
-	$(call skip-test, $<, "BROKEN awaiting sigframe clean-ups and vdso support")
 
 # Update TESTS
 I386_TESTS:=$(filter-out $(SKIP_I386_TESTS), $(ALL_X86_TESTS))
@@ -74,3 +71,12 @@ TESTS=$(MULTIARCH_TESTS) $(I386_TESTS)
 
 # On i386 and x86_64 Linux only supports 4k pages (large pages are a different hack)
 EXTRA_RUNS+=run-test-mmap-4096
+
+sha512-sse: CFLAGS=-msse4.1 -O3
+sha512-sse: sha512.c
+	$(CC) $(CFLAGS) $(EXTRA_CFLAGS) $< -o $@ $(LDFLAGS)
+
+run-sha512-sse: QEMU_OPTS+=-cpu max
+run-plugin-sha512-sse-with-%: QEMU_OPTS+=-cpu max
+
+TESTS+=sha512-sse

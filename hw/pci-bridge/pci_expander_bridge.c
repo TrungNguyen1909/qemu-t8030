@@ -193,6 +193,12 @@ static int pxb_map_irq_fn(PCIDevice *pci_dev, int pin)
     PCIDevice *pxb = pci_get_bus(pci_dev)->parent_dev;
 
     /*
+     * First carry out normal swizzle to handle
+     * multple root ports on a pxb instance.
+     */
+    pin = pci_swizzle_map_irq_fn(pci_dev, pin);
+
+    /*
      * The bios does not index the pxb slot number when
      * it computes the IRQ because it resides on bus 0
      * and not on the current bus.
@@ -245,7 +251,7 @@ static void pxb_dev_realize_common(PCIDevice *dev, bool pcie, Error **errp)
     } else {
         bus = pci_root_bus_new(ds, "pxb-internal", NULL, NULL, 0, TYPE_PXB_BUS);
         bds = qdev_new("pci-bridge");
-        bds->id = dev_name;
+        bds->id = g_strdup(dev_name);
         qdev_prop_set_uint8(bds, PCI_BRIDGE_DEV_PROP_CHASSIS_NR, pxb->bus_nr);
         qdev_prop_set_bit(bds, PCI_BRIDGE_DEV_PROP_SHPC, false);
     }

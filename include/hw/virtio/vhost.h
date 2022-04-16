@@ -71,9 +71,11 @@ struct vhost_dev {
     int n_tmp_sections;
     MemoryRegionSection *tmp_sections;
     struct vhost_virtqueue *vqs;
-    int nvqs;
+    unsigned int nvqs;
     /* the first virtqueue which would be used by this vhost dev */
     int vq_index;
+    /* one past the last vq index for the virtio device (not vhost) */
+    int vq_index_end;
     /* if non-zero, minimum required value for max_queues */
     int num_queues;
     uint64_t features;
@@ -94,6 +96,10 @@ struct vhost_dev {
     IOMMUNotifier n;
     const VhostDevConfigOps *config_ops;
 };
+
+extern const VhostOps kernel_ops;
+extern const VhostOps user_ops;
+extern const VhostOps vdpa_ops;
 
 struct vhost_net {
     struct vhost_dev dev;

@@ -781,6 +781,29 @@ static int cpu_post_load(void *opaque, int version_id)
     hw_breakpoint_update_all(cpu);
     hw_watchpoint_update_all(cpu);
 
+    /*
+     * TCG gen_update_fp_context() relies on the invariant that
+     * FPDSCR.LTPSIZE is constant 4 for M-profile with the LOB extension;
+     * forbid bogus incoming data with some other value.
+     */
+    if (arm_feature(env, ARM_FEATURE_M) && cpu_isar_feature(aa32_lob, cpu)) {
+        if (extract32(env->v7m.fpdscr[M_REG_NS],
+                      FPCR_LTPSIZE_SHIFT, FPCR_LTPSIZE_LENGTH) != 4 ||
+            extract32(env->v7m.fpdscr[M_REG_S],
+                      FPCR_LTPSIZE_SHIFT, FPCR_LTPSIZE_LENGTH) != 4) {
+            return -1;
+        }
+    }
+
+    /*
+     * Misaligned thumb pc is architecturally impossible.
+     * We have an assert in thumb_tr_translate_insn to verify this.
+     * Fail an incoming migrate to avoid this assert.
+     */
+    if (!is_a64(env) && env->thumb && (env->regs[15] & 1)) {
+        return -1;
+    }
+
     if (!kvm_enabled()) {
         pmu_op_finish(&cpu->env);
     }

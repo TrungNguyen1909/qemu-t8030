@@ -1281,7 +1281,9 @@ static void t8030_cpu_reset(void *opaque)
         AppleA13State *tcpu = (AppleA13State *)object_dynamic_cast(OBJECT(cpu),
                                                                TYPE_APPLE_A13);
         if (tcpu) {
-            ARM_CPU(cpu)->rvbar = tms->bootinfo.entry & ~0xfff;
+            object_property_set_int(DEVICE(cpu), "rvbar",
+                                    tms->bootinfo.entry & ~0xfff,
+                                    &error_abort);
             cpu_reset(cpu);
             if (!found_first) {
                 found_first = true;

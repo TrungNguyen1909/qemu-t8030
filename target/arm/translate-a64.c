@@ -404,8 +404,6 @@ static inline void gen_goto_tb(DisasContext *s, int n, uint64_t dest)
         gen_a64_set_pc_im(dest);
         if (s->ss_active) {
             gen_step_complete_exception(s);
-        } else if (s->base.singlestep_enabled) {
-            gen_exception_internal(EXCP_DEBUG);
         } else {
             tcg_gen_lookup_and_goto_ptr();
             s->base.is_jmp = DISAS_NORETURN;
@@ -975,7 +973,7 @@ static void do_fp_st(DisasContext *s, int srcidx, TCGv_i64 tcg_addr, int size)
 
         tcg_gen_ld_i64(tmphi, cpu_env, fp_reg_hi_offset(s, srcidx));
 
-        mop = s->be_data | MO_Q;
+        mop = s->be_data | MO_UQ;
         tcg_gen_qemu_st_i64(be ? tmphi : tmplo, tcg_addr, get_mem_index(s),
                             mop | (s->align_mem ? MO_ALIGN_16 : 0));
         tcg_gen_addi_i64(tcg_hiaddr, tcg_addr, 8);
@@ -1009,7 +1007,7 @@ static void do_fp_ld(DisasContext *s, int destidx, TCGv_i64 tcg_addr, int size)
         tmphi = tcg_temp_new_i64();
         tcg_hiaddr = tcg_temp_new_i64();
 
-        mop = s->be_data | MO_Q;
+        mop = s->be_data | MO_UQ;
         tcg_gen_qemu_ld_i64(be ? tmphi : tmplo, tcg_addr, get_mem_index(s),
                             mop | (s->align_mem ? MO_ALIGN_16 : 0));
         tcg_gen_addi_i64(tcg_hiaddr, tcg_addr, 8);
@@ -1045,7 +1043,7 @@ static void read_vec_element(DisasContext *s, TCGv_i64 tcg_dest, int srcidx,
                              int element, MemOp memop)
 {
     int vect_off = vec_reg_offset(s, srcidx, element, memop & MO_SIZE);
-    switch (memop) {
+    switch ((unsigned)memop) {
     case MO_8:
         tcg_gen_ld8u_i64(tcg_dest, cpu_env, vect_off);
         break;
@@ -2484,7 +2482,12 @@ static void gen_store_exclusive(DisasContext *s, int rd, int rt, int rt2,
         } else if (tb_cflags(s->base.tb) & CF_PARALLEL) {
             if (!HAVE_CMPXCHG128) {
                 gen_helper_exit_atomic(cpu_env);
-                s->base.is_jmp = DISAS_NORETURN;
+                /*
+                 * Produce a result so we have a well-formed opcode
+                 * stream when the following (dead) code uses 'tmp'.
+                 * TCG will remove the dead ops for us.
+                 */
+                tcg_gen_movi_i64(tmp, 0);
             } else if (s->be_data == MO_LE) {
                 gen_helper_paired_cmpxchg64_le_parallel(tmp, cpu_env,
                                                         cpu_exclusive_addr,
@@ -4113,10 +4116,10 @@ static void disas_ldst_tag(DisasContext *s, uint32_t insn)
         int i, n = (1 + is_pair) << LOG2_TAG_GRANULE;
 
         tcg_gen_qemu_st_i64(tcg_zero, clean_addr, mem_index,
-                            MO_Q | MO_ALIGN_16);
+                            MO_UQ | MO_ALIGN_16);
         for (i = 8; i < n; i += 8) {
             tcg_gen_addi_i64(clean_addr, clean_addr, 8);
-            tcg_gen_qemu_st_i64(tcg_zero, clean_addr, mem_index, MO_Q);
+            tcg_gen_qemu_st_i64(tcg_zero, clean_addr, mem_index, MO_UQ);
         }
         tcg_temp_free_i64(tcg_zero);
     }
@@ -9059,9 +9062,9 @@ static void handle_simd_shift_fpint_conv(DisasContext *s, bool is_scalar,
         }
     }
 
-    tcg_temp_free_ptr(tcg_fpstatus);
     tcg_temp_free_i32(tcg_shift);
     gen_helper_set_rmode(tcg_rmode, tcg_rmode, tcg_fpstatus);
+    tcg_temp_free_ptr(tcg_fpstatus);
     tcg_temp_free_i32(tcg_rmode);
 }
 
@@ -14577,6 +14580,34 @@ static void disas_data_proc_simd_fp(DisasContext *s, uint32_t insn)
     }
 }
 
+static void disas_gxf_insn(DisasContext *s, uint32_t insn)
+{
+    switch (insn) {
+        case 0x00201420: /* GENTER */
+            if (s->current_el == 0 || s->guarded) {
+                unallocated_encoding(s);
+                break;
+            }
+            gen_a64_set_pc_im(s->pc_curr);
+            gen_ss_advance(s);
+            gen_exception_insn(s, s->base.pc_next, EXCP_GENTER, syn_aa64_genter(), s->current_el);
+            break;
+
+        case 0x00201400: /* GEXIT */
+            if (s->current_el == 0 || !s->guarded) {
+                unallocated_encoding(s);
+                break;
+            }
+            gen_helper_gexit(cpu_env);
+            s->base.is_jmp = DISAS_EXIT;
+            break;
+
+        default:
+            unallocated_encoding(s);
+            break;
+    }
+}
+
 /**
  * is_guarded_page:
  * @env: The cpu environment
@@ -14661,46 +14692,164 @@ static bool btype_destination_ok(uint32_t insn, bool bt, int btype)
     return false;
 }
 
-static void disas_gxf_insn(DisasContext *s, uint32_t insn)
+static void aarch64_tr_init_disas_context(DisasContextBase *dcbase,
+                                          CPUState *cpu)
 {
-    switch (insn) {
-        case 0x00201420: /* GENTER */
-            if (s->current_el == 0 || s->guarded) {
-                unallocated_encoding(s);
-                break;
-            }
-            gen_a64_set_pc_im(s->pc_curr);
-            gen_ss_advance(s);
-            gen_exception_insn(s, s->base.pc_next, EXCP_GENTER, syn_aa64_genter(), s->current_el);
-            break;
+    DisasContext *dc = container_of(dcbase, DisasContext, base);
+    CPUARMState *env = cpu->env_ptr;
+    ARMCPU *arm_cpu = env_archcpu(env);
+    CPUARMTBFlags tb_flags = arm_tbflags_from_tb(dc->base.tb);
+    int bound, core_mmu_idx;
 
-        case 0x00201400: /* GEXIT */
-            if (s->current_el == 0 || !s->guarded) {
-                unallocated_encoding(s);
-                break;
-            }
-            gen_helper_gexit(cpu_env);
-            s->base.is_jmp = DISAS_EXIT;
-            break;
+    dc->isar = &arm_cpu->isar;
+    dc->condjmp = 0;
 
-        default:
-            unallocated_encoding(s);
-            break;
+    dc->aarch64 = 1;
+    /* If we are coming from secure EL0 in a system with a 32-bit EL3, then
+     * there is no secure EL1, so we route exceptions to EL3.
+     */
+    dc->secure_routed_to_el3 = arm_feature(env, ARM_FEATURE_EL3) &&
+                               !arm_el_is_aa64(env, 3);
+    dc->gxf_active = arm_feature(env, ARM_FEATURE_GXF);
+    dc->thumb = 0;
+    dc->sctlr_b = 0;
+    dc->be_data = EX_TBFLAG_ANY(tb_flags, BE_DATA) ? MO_BE : MO_LE;
+    dc->condexec_mask = 0;
+    dc->condexec_cond = 0;
+    core_mmu_idx = EX_TBFLAG_ANY(tb_flags, MMUIDX);
+    dc->mmu_idx = core_to_aa64_mmu_idx(core_mmu_idx);
+    dc->tbii = EX_TBFLAG_A64(tb_flags, TBII);
+    dc->tbid = EX_TBFLAG_A64(tb_flags, TBID);
+    dc->tcma = EX_TBFLAG_A64(tb_flags, TCMA);
+    dc->current_el = arm_mmu_idx_to_el(dc->mmu_idx);
+#if !defined(CONFIG_USER_ONLY)
+    dc->user = (dc->current_el == 0);
+#endif
+    dc->fp_excp_el = EX_TBFLAG_ANY(tb_flags, FPEXC_EL);
+    dc->align_mem = EX_TBFLAG_ANY(tb_flags, ALIGN_MEM);
+    dc->pstate_il = EX_TBFLAG_ANY(tb_flags, PSTATE__IL);
+    dc->sve_excp_el = EX_TBFLAG_A64(tb_flags, SVEEXC_EL);
+    dc->sve_len = (EX_TBFLAG_A64(tb_flags, ZCR_LEN) + 1) * 16;
+    dc->pauth_active = EX_TBFLAG_A64(tb_flags, PAUTH_ACTIVE);
+    dc->bt = EX_TBFLAG_A64(tb_flags, BT);
+    dc->btype = EX_TBFLAG_A64(tb_flags, BTYPE);
+    dc->unpriv = EX_TBFLAG_A64(tb_flags, UNPRIV);
+    dc->ata = EX_TBFLAG_A64(tb_flags, ATA);
+    dc->mte_active[0] = EX_TBFLAG_A64(tb_flags, MTE_ACTIVE);
+    dc->mte_active[1] = EX_TBFLAG_A64(tb_flags, MTE0_ACTIVE);
+    dc->guarded = dc->gxf_active && arm_mmu_idx_is_guarded(dc->mmu_idx);
+    dc->vec_len = 0;
+    dc->vec_stride = 0;
+    dc->cp_regs = arm_cpu->cp_regs;
+    dc->features = env->features;
+    dc->dcz_blocksize = arm_cpu->dcz_blocksize;
+
+#ifdef CONFIG_USER_ONLY
+    /* In sve_probe_page, we assume TBI is enabled. */
+    tcg_debug_assert(dc->tbid & 1);
+#endif
+
+    /* Single step state. The code-generation logic here is:
+     *  SS_ACTIVE == 0:
+     *   generate code with no special handling for single-stepping (except
+     *   that anything that can make us go to SS_ACTIVE == 1 must end the TB;
+     *   this happens anyway because those changes are all system register or
+     *   PSTATE writes).
+     *  SS_ACTIVE == 1, PSTATE.SS == 1: (active-not-pending)
+     *   emit code for one insn
+     *   emit code to clear PSTATE.SS
+     *   emit code to generate software step exception for completed step
+     *   end TB (as usual for having generated an exception)
+     *  SS_ACTIVE == 1, PSTATE.SS == 0: (active-pending)
+     *   emit code to generate a software step exception
+     *   end the TB
+     */
+    dc->ss_active = EX_TBFLAG_ANY(tb_flags, SS_ACTIVE);
+    dc->pstate_ss = EX_TBFLAG_ANY(tb_flags, PSTATE__SS);
+    dc->is_ldex = false;
+    dc->debug_target_el = EX_TBFLAG_ANY(tb_flags, DEBUG_TARGET_EL);
+
+    /* Bound the number of insns to execute to those left on the page.  */
+    bound = -(dc->base.pc_first | TARGET_PAGE_MASK) / 4;
+
+    /* If architectural single step active, limit to 1.  */
+    if (dc->ss_active) {
+        bound = 1;
     }
+    dc->base.max_insns = MIN(dc->base.max_insns, bound);
+
+    init_tmp_a64_array(dc);
 }
 
-/* C3.1 A64 instruction index by encoding */
-static void disas_a64_insn(CPUARMState *env, DisasContext *s)
+static void aarch64_tr_tb_start(DisasContextBase *db, CPUState *cpu)
 {
+}
+
+static void aarch64_tr_insn_start(DisasContextBase *dcbase, CPUState *cpu)
+{
+    DisasContext *dc = container_of(dcbase, DisasContext, base);
+
+    tcg_gen_insn_start(dc->base.pc_next, 0, 0);
+    dc->insn_start = tcg_last_op();
+}
+
+static void aarch64_tr_translate_insn(DisasContextBase *dcbase, CPUState *cpu)
+{
+    DisasContext *s = container_of(dcbase, DisasContext, base);
+    CPUARMState *env = cpu->env_ptr;
+    uint64_t pc = s->base.pc_next;
     uint32_t insn;
 
-    s->pc_curr = s->base.pc_next;
-    insn = arm_ldl_code(env, s->base.pc_next, s->sctlr_b);
+    /* Singlestep exceptions have the highest priority. */
+    if (s->ss_active && !s->pstate_ss) {
+        /* Singlestep state is Active-pending.
+         * If we're in this state at the start of a TB then either
+         *  a) we just took an exception to an EL which is being debugged
+         *     and this is the first insn in the exception handler
+         *  b) debug exceptions were masked and we just unmasked them
+         *     without changing EL (eg by clearing PSTATE.D)
+         * In either case we're going to take a swstep exception in the
+         * "did not step an insn" case, and so the syndrome ISV and EX
+         * bits should be zero.
+         */
+        assert(s->base.num_insns == 1);
+        gen_swstep_exception(s, 0, 0);
+        s->base.is_jmp = DISAS_NORETURN;
+        s->base.pc_next = pc + 4;
+        return;
+    }
+
+    if (pc & 3) {
+        /*
+         * PC alignment fault.  This has priority over the instruction abort
+         * that we would receive from a translation fault via arm_ldl_code.
+         * This should only be possible after an indirect branch, at the
+         * start of the TB.
+         */
+        assert(s->base.num_insns == 1);
+        gen_helper_exception_pc_alignment(cpu_env, tcg_constant_tl(pc));
+        s->base.is_jmp = DISAS_NORETURN;
+        s->base.pc_next = QEMU_ALIGN_UP(pc, 4);
+        return;
+    }
+
+    s->pc_curr = pc;
+    insn = arm_ldl_code(env, &s->base, pc, s->sctlr_b);
     s->insn = insn;
-    s->base.pc_next += 4;
+    s->base.pc_next = pc + 4;
 
     s->fp_access_checked = false;
     s->sve_access_checked = false;
+
+    if (s->pstate_il) {
+        /*
+         * Illegal execution state. This has priority over BTI
+         * exceptions, but comes after instruction abort exceptions.
+         */
+        gen_exception_insn(s, s->pc_curr, EXCP_UDEF,
+                           syn_illegalstate(), default_exception_el(s));
+        return;
+    }
 
     if (dc_isar_feature(aa64_bti, s)) {
         if (s->base.num_insns == 1) {
@@ -14791,139 +14940,15 @@ static void disas_a64_insn(CPUARMState *env, DisasContext *s)
     if (s->btype > 0 && s->base.is_jmp != DISAS_NORETURN) {
         reset_btype(s);
     }
-}
 
-static void aarch64_tr_init_disas_context(DisasContextBase *dcbase,
-                                          CPUState *cpu)
-{
-    DisasContext *dc = container_of(dcbase, DisasContext, base);
-    CPUARMState *env = cpu->env_ptr;
-    ARMCPU *arm_cpu = env_archcpu(env);
-    CPUARMTBFlags tb_flags = arm_tbflags_from_tb(dc->base.tb);
-    int bound, core_mmu_idx;
-
-    dc->isar = &arm_cpu->isar;
-    dc->condjmp = 0;
-
-    dc->aarch64 = 1;
-    /* If we are coming from secure EL0 in a system with a 32-bit EL3, then
-     * there is no secure EL1, so we route exceptions to EL3.
-     */
-    dc->secure_routed_to_el3 = arm_feature(env, ARM_FEATURE_EL3) &&
-                               !arm_el_is_aa64(env, 3);
-    dc->gxf_active = arm_feature(env, ARM_FEATURE_GXF);
-    dc->thumb = 0;
-    dc->sctlr_b = 0;
-    dc->be_data = EX_TBFLAG_ANY(tb_flags, BE_DATA) ? MO_BE : MO_LE;
-    dc->condexec_mask = 0;
-    dc->condexec_cond = 0;
-    core_mmu_idx = EX_TBFLAG_ANY(tb_flags, MMUIDX);
-    dc->mmu_idx = core_to_aa64_mmu_idx(core_mmu_idx);
-    dc->tbii = EX_TBFLAG_A64(tb_flags, TBII);
-    dc->tbid = EX_TBFLAG_A64(tb_flags, TBID);
-    dc->tcma = EX_TBFLAG_A64(tb_flags, TCMA);
-    dc->current_el = arm_mmu_idx_to_el(dc->mmu_idx);
-#if !defined(CONFIG_USER_ONLY)
-    dc->user = (dc->current_el == 0);
-#endif
-    dc->fp_excp_el = EX_TBFLAG_ANY(tb_flags, FPEXC_EL);
-    dc->align_mem = EX_TBFLAG_ANY(tb_flags, ALIGN_MEM);
-    dc->sve_excp_el = EX_TBFLAG_A64(tb_flags, SVEEXC_EL);
-    dc->sve_len = (EX_TBFLAG_A64(tb_flags, ZCR_LEN) + 1) * 16;
-    dc->pauth_active = EX_TBFLAG_A64(tb_flags, PAUTH_ACTIVE);
-    dc->bt = EX_TBFLAG_A64(tb_flags, BT);
-    dc->btype = EX_TBFLAG_A64(tb_flags, BTYPE);
-    dc->unpriv = EX_TBFLAG_A64(tb_flags, UNPRIV);
-    dc->ata = EX_TBFLAG_A64(tb_flags, ATA);
-    dc->mte_active[0] = EX_TBFLAG_A64(tb_flags, MTE_ACTIVE);
-    dc->mte_active[1] = EX_TBFLAG_A64(tb_flags, MTE0_ACTIVE);
-    dc->guarded = dc->gxf_active && arm_mmu_idx_is_guarded(dc->mmu_idx);
-    dc->vec_len = 0;
-    dc->vec_stride = 0;
-    dc->cp_regs = arm_cpu->cp_regs;
-    dc->features = env->features;
-    dc->dcz_blocksize = arm_cpu->dcz_blocksize;
-
-#ifdef CONFIG_USER_ONLY
-    /* In sve_probe_page, we assume TBI is enabled. */
-    tcg_debug_assert(dc->tbid & 1);
-#endif
-
-    /* Single step state. The code-generation logic here is:
-     *  SS_ACTIVE == 0:
-     *   generate code with no special handling for single-stepping (except
-     *   that anything that can make us go to SS_ACTIVE == 1 must end the TB;
-     *   this happens anyway because those changes are all system register or
-     *   PSTATE writes).
-     *  SS_ACTIVE == 1, PSTATE.SS == 1: (active-not-pending)
-     *   emit code for one insn
-     *   emit code to clear PSTATE.SS
-     *   emit code to generate software step exception for completed step
-     *   end TB (as usual for having generated an exception)
-     *  SS_ACTIVE == 1, PSTATE.SS == 0: (active-pending)
-     *   emit code to generate a software step exception
-     *   end the TB
-     */
-    dc->ss_active = EX_TBFLAG_ANY(tb_flags, SS_ACTIVE);
-    dc->pstate_ss = EX_TBFLAG_ANY(tb_flags, PSTATE__SS);
-    dc->is_ldex = false;
-    dc->debug_target_el = EX_TBFLAG_ANY(tb_flags, DEBUG_TARGET_EL);
-
-    /* Bound the number of insns to execute to those left on the page.  */
-    bound = -(dc->base.pc_first | TARGET_PAGE_MASK) / 4;
-
-    /* If architectural single step active, limit to 1.  */
-    if (dc->ss_active) {
-        bound = 1;
-    }
-    dc->base.max_insns = MIN(dc->base.max_insns, bound);
-
-    init_tmp_a64_array(dc);
-}
-
-static void aarch64_tr_tb_start(DisasContextBase *db, CPUState *cpu)
-{
-}
-
-static void aarch64_tr_insn_start(DisasContextBase *dcbase, CPUState *cpu)
-{
-    DisasContext *dc = container_of(dcbase, DisasContext, base);
-
-    tcg_gen_insn_start(dc->base.pc_next, 0, 0);
-    dc->insn_start = tcg_last_op();
-}
-
-static void aarch64_tr_translate_insn(DisasContextBase *dcbase, CPUState *cpu)
-{
-    DisasContext *dc = container_of(dcbase, DisasContext, base);
-    CPUARMState *env = cpu->env_ptr;
-
-    if (dc->ss_active && !dc->pstate_ss) {
-        /* Singlestep state is Active-pending.
-         * If we're in this state at the start of a TB then either
-         *  a) we just took an exception to an EL which is being debugged
-         *     and this is the first insn in the exception handler
-         *  b) debug exceptions were masked and we just unmasked them
-         *     without changing EL (eg by clearing PSTATE.D)
-         * In either case we're going to take a swstep exception in the
-         * "did not step an insn" case, and so the syndrome ISV and EX
-         * bits should be zero.
-         */
-        assert(dc->base.num_insns == 1);
-        gen_swstep_exception(dc, 0, 0);
-        dc->base.is_jmp = DISAS_NORETURN;
-    } else {
-        disas_a64_insn(env, dc);
-    }
-
-    translator_loop_temp_check(&dc->base);
+    translator_loop_temp_check(&s->base);
 }
 
 static void aarch64_tr_tb_stop(DisasContextBase *dcbase, CPUState *cpu)
 {
     DisasContext *dc = container_of(dcbase, DisasContext, base);
 
-    if (unlikely(dc->base.singlestep_enabled || dc->ss_active)) {
+    if (unlikely(dc->ss_active)) {
         /* Note that this means single stepping WFI doesn't halt the CPU.
          * For conditional branch insns this is harmless unreachable code as
          * gen_goto_tb() has already handled emitting the debug exception
@@ -14935,11 +14960,7 @@ static void aarch64_tr_tb_stop(DisasContextBase *dcbase, CPUState *cpu)
             /* fall through */
         case DISAS_EXIT:
         case DISAS_JUMP:
-            if (dc->base.singlestep_enabled) {
-                gen_exception_internal(EXCP_DEBUG);
-            } else {
-                gen_step_complete_exception(dc);
-            }
+            gen_step_complete_exception(dc);
             break;
         case DISAS_NORETURN:
             break;

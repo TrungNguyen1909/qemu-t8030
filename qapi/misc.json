@@ -14,8 +14,8 @@
 # Allow client connections for VNC, Spice and socket based
 # character devices to be passed in to QEMU via SCM_RIGHTS.
 #
-# @protocol: protocol name. Valid names are "vnc", "spice" or the
-#            name of a character device (eg. from -chardev id=XXXX)
+# @protocol: protocol name. Valid names are "vnc", "spice", "@dbus-display" or
+#            the name of a character device (eg. from -chardev id=XXXX)
 #
 # @fdname: file descriptor name previously passed via 'getfd' command
 #
@@ -185,6 +185,9 @@
 # available during the preconfig state (i.e. when the --preconfig command
 # line option was in use).
 #
+# Features:
+# @unstable: This command is experimental.
+#
 # Since 3.0
 #
 # Returns: nothing
@@ -195,7 +198,8 @@
 # <- { "return": {} }
 #
 ##
-{ 'command': 'x-exit-preconfig', 'allow-preconfig': true }
+{ 'command': 'x-exit-preconfig', 'allow-preconfig': true,
+  'features': [ 'unstable' ] }
 
 ##
 # @human-monitor-command:
@@ -523,3 +527,29 @@
  'data': { '*option': 'str' },
  'returns': ['CommandLineOptionInfo'],
  'allow-preconfig': true }
+
+##
+# @RTC_CHANGE:
+#
+# Emitted when the guest changes the RTC time.
+#
+# @offset: offset in seconds between base RTC clock (as specified
+#          by -rtc base), and new RTC clock value
+#
+# @qom-path: path to the RTC object in the QOM tree
+#
+# Note: This event is rate-limited.
+#       It is not guaranteed that the RTC in the system implements
+#       this event, or even that the system has an RTC at all.
+#
+# Since: 0.13
+#
+# Example:
+#
+# <-   { "event": "RTC_CHANGE",
+#        "data": { "offset": 78 },
+#        "timestamp": { "seconds": 1267020223, "microseconds": 435656 } }
+#
+##
+{ 'event': 'RTC_CHANGE',
+  'data': { 'offset': 'int', 'qom-path': 'str' } }

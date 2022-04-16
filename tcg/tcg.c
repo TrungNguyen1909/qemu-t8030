@@ -36,6 +36,7 @@
 #include "qemu/qemu-print.h"
 #include "qemu/timer.h"
 #include "qemu/cacheflush.h"
+#include "qemu/cacheinfo.h"
 
 /* Note: the long term plan is to reduce the dependencies on the QEMU
    CPU definitions. Currently they are used for qemu_ld/st
@@ -58,6 +59,7 @@
 
 #include "elf.h"
 #include "exec/log.h"
+#include "tcg/tcg-ldst.h"
 #include "tcg-internal.h"
 
 #ifdef CONFIG_TCG_INTERPRETER
@@ -1405,6 +1407,12 @@ bool tcg_op_supported(TCGOpcode op)
         return have_vec && TCG_TARGET_HAS_andc_vec;
     case INDEX_op_orc_vec:
         return have_vec && TCG_TARGET_HAS_orc_vec;
+    case INDEX_op_nand_vec:
+        return have_vec && TCG_TARGET_HAS_nand_vec;
+    case INDEX_op_nor_vec:
+        return have_vec && TCG_TARGET_HAS_nor_vec;
+    case INDEX_op_eqv_vec:
+        return have_vec && TCG_TARGET_HAS_eqv_vec;
     case INDEX_op_mul_vec:
         return have_vec && TCG_TARGET_HAS_mul_vec;
     case INDEX_op_shli_vec:
@@ -1507,11 +1515,11 @@ void tcg_gen_callN(void *func, TCGTemp *ret, int nargs, TCGTemp **args)
 
         if (is_32bit) {
             TCGv_i64 temp = tcg_temp_new_i64();
-            TCGv_i64 orig = temp_tcgv_i64(args[i]);
+            TCGv_i32 orig = temp_tcgv_i32(args[i]);
             if (is_signed) {
-                tcg_gen_ext32s_i64(temp, orig);
+                tcg_gen_ext_i32_i64(temp, orig);
             } else {
-                tcg_gen_ext32u_i64(temp, orig);
+                tcg_gen_extu_i32_i64(temp, orig);
             }
             args[i] = tcgv_i64_temp(temp);
         }
@@ -1750,12 +1758,12 @@ static const char * const ldst_name[] =
     [MO_LESW] = "lesw",
     [MO_LEUL] = "leul",
     [MO_LESL] = "lesl",
-    [MO_LEQ]  = "leq",
+    [MO_LEUQ] = "leq",
     [MO_BEUW] = "beuw",
     [MO_BESW] = "besw",
     [MO_BEUL] = "beul",
     [MO_BESL] = "besl",
-    [MO_BEQ]  = "beq",
+    [MO_BEUQ] = "beq",
 };
 
 static const char * const alignment_name[(MO_AMASK >> MO_ASHIFT) + 1] = {
@@ -1910,7 +1918,7 @@ static void tcg_dump_ops(TCGContext *s, bool have_prefs)
             case INDEX_op_qemu_ld_i64:
             case INDEX_op_qemu_st_i64:
                 {
-                    TCGMemOpIdx oi = op->args[k++];
+                    MemOpIdx oi = op->args[k++];
                     MemOp op = get_memop(oi);
                     unsigned ix = get_mmuidx(oi);
 
@@ -3060,7 +3068,13 @@ static void temp_allocate_frame(TCGContext *s, TCGTemp *ts)
         g_assert_not_reached();
     }
 
-    assert(align <= TCG_TARGET_STACK_ALIGN);
+    /*
+     * Assume the stack is sufficiently aligned.
+     * This affects e.g. ARM NEON, where we have 8 byte stack alignment
+     * and do not require 16 byte vector alignment.  This seems slightly
+     * easier than fully parameterizing the above switch statement.
+     */
+    align = MIN(TCG_TARGET_STACK_ALIGN, align);
     off = ROUND_UP(s->current_frame_offset, align);
 
     /* If we've exhausted the stack frame, restart with a smaller TB. */
@@ -4115,15 +4129,15 @@ static void tcg_profile_snapshot_table(TCGProfile *prof)
     tcg_profile_snapshot(prof, false, true);
 }
 
-void tcg_dump_op_count(void)
+void tcg_dump_op_count(GString *buf)
 {
     TCGProfile prof = {};
     int i;
 
     tcg_profile_snapshot_table(&prof);
     for (i = 0; i < NB_OPS; i++) {
-        qemu_printf("%s %" PRId64 "\n", tcg_op_defs[i].name,
-                    prof.table_op_count[i]);
+        g_string_append_printf(buf, "%s %" PRId64 "\n", tcg_op_defs[i].name,
+                               prof.table_op_count[i]);
     }
 }
 
@@ -4142,9 +4156,9 @@ int64_t tcg_cpu_exec_time(void)
     return ret;
 }
 #else
-void tcg_dump_op_count(void)
+void tcg_dump_op_count(GString *buf)
 {
-    qemu_printf("[TCG profiler not compiled]\n");
+    g_string_append_printf(buf, "[TCG profiler not compiled]\n");
 }
 
 int64_t tcg_cpu_exec_time(void)
@@ -4382,7 +4396,7 @@ int tcg_gen_code(TCGContext *s, TranslationBlock *tb)
 }
 
 #ifdef CONFIG_PROFILER
-void tcg_dump_info(void)
+void tcg_dump_info(GString *buf)
 {
     TCGProfile prof = {};
     const TCGProfile *s;
@@ -4396,53 +4410,59 @@ void tcg_dump_info(void)
     tb_div_count = tb_count ? tb_count : 1;
     tot = s->interm_time + s->code_time;
 
-    qemu_printf("JIT cycles          %" PRId64 " (%0.3f s at 2.4 GHz)\n",
-                tot, tot / 2.4e9);
-    qemu_printf("translated TBs      %" PRId64 " (aborted=%" PRId64
-                " %0.1f%%)\n",
-                tb_count, s->tb_count1 - tb_count,
-                (double)(s->tb_count1 - s->tb_count)
-                / (s->tb_count1 ? s->tb_count1 : 1) * 100.0);
-    qemu_printf("avg ops/TB          %0.1f max=%d\n",
-                (double)s->op_count / tb_div_count, s->op_count_max);
-    qemu_printf("deleted ops/TB      %0.2f\n",
-                (double)s->del_op_count / tb_div_count);
-    qemu_printf("avg temps/TB        %0.2f max=%d\n",
-                (double)s->temp_count / tb_div_count, s->temp_count_max);
-    qemu_printf("avg host code/TB    %0.1f\n",
-                (double)s->code_out_len / tb_div_count);
-    qemu_printf("avg search data/TB  %0.1f\n",
-                (double)s->search_out_len / tb_div_count);
+    g_string_append_printf(buf, "JIT cycles          %" PRId64
+                           " (%0.3f s at 2.4 GHz)\n",
+                           tot, tot / 2.4e9);
+    g_string_append_printf(buf, "translated TBs      %" PRId64
+                           " (aborted=%" PRId64 " %0.1f%%)\n",
+                           tb_count, s->tb_count1 - tb_count,
+                           (double)(s->tb_count1 - s->tb_count)
+                           / (s->tb_count1 ? s->tb_count1 : 1) * 100.0);
+    g_string_append_printf(buf, "avg ops/TB          %0.1f max=%d\n",
+                           (double)s->op_count / tb_div_count, s->op_count_max);
+    g_string_append_printf(buf, "deleted ops/TB      %0.2f\n",
+                           (double)s->del_op_count / tb_div_count);
+    g_string_append_printf(buf, "avg temps/TB        %0.2f max=%d\n",
+                           (double)s->temp_count / tb_div_count,
+                           s->temp_count_max);
+    g_string_append_printf(buf, "avg host code/TB    %0.1f\n",
+                           (double)s->code_out_len / tb_div_count);
+    g_string_append_printf(buf, "avg search data/TB  %0.1f\n",
+                           (double)s->search_out_len / tb_div_count);
     
-    qemu_printf("cycles/op           %0.1f\n",
-                s->op_count ? (double)tot / s->op_count : 0);
-    qemu_printf("cycles/in byte      %0.1f\n",
-                s->code_in_len ? (double)tot / s->code_in_len : 0);
-    qemu_printf("cycles/out byte     %0.1f\n",
-                s->code_out_len ? (double)tot / s->code_out_len : 0);
-    qemu_printf("cycles/search byte     %0.1f\n",
-                s->search_out_len ? (double)tot / s->search_out_len : 0);
+    g_string_append_printf(buf, "cycles/op           %0.1f\n",
+                           s->op_count ? (double)tot / s->op_count : 0);
+    g_string_append_printf(buf, "cycles/in byte      %0.1f\n",
+                           s->code_in_len ? (double)tot / s->code_in_len : 0);
+    g_string_append_printf(buf, "cycles/out byte     %0.1f\n",
+                           s->code_out_len ? (double)tot / s->code_out_len : 0);
+    g_string_append_printf(buf, "cycles/search byte     %0.1f\n",
+                           s->search_out_len ?
+                           (double)tot / s->search_out_len : 0);
     if (tot == 0) {
         tot = 1;
     }
-    qemu_printf("  gen_interm time   %0.1f%%\n",
-                (double)s->interm_time / tot * 100.0);
-    qemu_printf("  gen_code time     %0.1f%%\n",
-                (double)s->code_time / tot * 100.0);
-    qemu_printf("optim./code time    %0.1f%%\n",
-                (double)s->opt_time / (s->code_time ? s->code_time : 1)
-                * 100.0);
-    qemu_printf("liveness/code time  %0.1f%%\n",
-                (double)s->la_time / (s->code_time ? s->code_time : 1) * 100.0);
-    qemu_printf("cpu_restore count   %" PRId64 "\n",
-                s->restore_count);
-    qemu_printf("  avg cycles        %0.1f\n",
-                s->restore_count ? (double)s->restore_time / s->restore_count : 0);
+    g_string_append_printf(buf, "  gen_interm time   %0.1f%%\n",
+                           (double)s->interm_time / tot * 100.0);
+    g_string_append_printf(buf, "  gen_code time     %0.1f%%\n",
+                           (double)s->code_time / tot * 100.0);
+    g_string_append_printf(buf, "optim./code time    %0.1f%%\n",
+                           (double)s->opt_time / (s->code_time ?
+                                                  s->code_time : 1)
+                           * 100.0);
+    g_string_append_printf(buf, "liveness/code time  %0.1f%%\n",
+                           (double)s->la_time / (s->code_time ?
+                                                 s->code_time : 1) * 100.0);
+    g_string_append_printf(buf, "cpu_restore count   %" PRId64 "\n",
+                           s->restore_count);
+    g_string_append_printf(buf, "  avg cycles        %0.1f\n",
+                           s->restore_count ?
+                           (double)s->restore_time / s->restore_count : 0);
 }
 #else
-void tcg_dump_info(void)
+void tcg_dump_info(GString *buf)
 {
-    qemu_printf("[TCG profiler not compiled]\n");
+    g_string_append_printf(buf, "[TCG profiler not compiled]\n");
 }
 #endif
 

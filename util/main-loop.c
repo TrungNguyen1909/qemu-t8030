@@ -273,7 +273,7 @@ static PollingEntry *first_polling_entry;
 int qemu_add_polling_cb(PollingFunc *func, void *opaque)
 {
     PollingEntry **ppe, *pe;
-    pe = g_malloc0(sizeof(PollingEntry));
+    pe = g_new0(PollingEntry, 1);
     pe->func = func;
     pe->opaque = opaque;
     for(ppe = &first_polling_entry; *ppe != NULL; ppe = &(*ppe)->next);
@@ -582,7 +582,7 @@ void qemu_set_fd_handler(int fd,
 {
     iohandler_init();
     aio_set_fd_handler(iohandler_ctx, fd, false,
-                       fd_read, fd_write, NULL, opaque);
+                       fd_read, fd_write, NULL, NULL, opaque);
 }
 
 void event_notifier_set_handler(EventNotifier *e,
@@ -590,5 +590,5 @@ void event_notifier_set_handler(EventNotifier *e,
 {
     iohandler_init();
     aio_set_event_notifier(iohandler_ctx, e, false,
-                           handler, NULL);
+                           handler, NULL, NULL);
 }

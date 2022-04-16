@@ -3,7 +3,6 @@
    Copyright (c) 2019, Linaro Limited
    Written by Emilio Cota and Alex Bennée
 
-================
 QEMU TCG Plugins
 ================
 
@@ -16,17 +15,41 @@ only monitor it passively. However they can do this down to an
 individual instruction granularity including potentially subscribing
 to all load and store operations.
 
-API Stability
-=============
+Usage
+-----
+
+Any QEMU binary with TCG support has plugins enabled by default.
+Earlier releases needed to be explicitly enabled with::
+
+  configure --enable-plugins
+
+Once built a program can be run with multiple plugins loaded each with
+their own arguments::
+
+  $QEMU $OTHER_QEMU_ARGS \
+      -plugin contrib/plugin/libhowvec.so,inline=on,count=hint \
+      -plugin contrib/plugin/libhotblocks.so
+
+Arguments are plugin specific and can be used to modify their
+behaviour. In this case the howvec plugin is being asked to use inline
+ops to count and break down the hint instructions by type.
+
+Linux user-mode emulation also evaluates the environment variable
+``QEMU_PLUGIN``::
+
+  QEMU_PLUGIN="file=contrib/plugins/libhowvec.so,inline=on,count=hint" $QEMU
+
+Writing plugins
+---------------
+
+API versioning
+~~~~~~~~~~~~~~
 
 This is a new feature for QEMU and it does allow people to develop
 out-of-tree plugins that can be dynamically linked into a running QEMU
 process. However the project reserves the right to change or break the
 API should it need to do so. The best way to avoid this is to submit
 your plugin upstream so they can be updated if/when the API changes.
-
-API versioning
---------------
 
 All plugins need to declare a symbol which exports the plugin API
 version they were built against. This can be done simply by::
@@ -43,18 +66,8 @@ current API versions supported by QEMU. The API version will be
 incremented if new APIs are added. The minimum API version will be
 incremented if existing APIs are changed or removed.
 
-Exposure of QEMU internals
---------------------------
-
-The plugin architecture actively avoids leaking implementation details
-about how QEMU's translation works to the plugins. While there are
-conceptions such as translation time and translation blocks the
-details are opaque to plugins. The plugin is able to query select
-details of instructions and system configuration only through the
-exported *qemu_plugin* functions.
-
-Query Handle Lifetime
----------------------
+Lifetime of the query handle
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 Each callback provides an opaque anonymous information handle which
 can usually be further queried to find out information about a
@@ -63,32 +76,8 @@ valid during the lifetime of the callback so it is important that any
 information that is needed is extracted during the callback and saved
 by the plugin.
 
-API
-===
-
-.. kernel-doc:: include/qemu/qemu-plugin.h
-
-Usage
-=====
-
-Any QEMU binary with TCG support has plugins enabled by default.
-Earlier releases needed to be explicitly enabled with::
-
-  configure --enable-plugins
-
-Once built a program can be run with multiple plugins loaded each with
-their own arguments::
-
-  $QEMU $OTHER_QEMU_ARGS \
-      -plugin tests/plugin/libhowvec.so,arg=inline,arg=hint \
-      -plugin tests/plugin/libhotblocks.so
-
-Arguments are plugin specific and can be used to modify their
-behaviour. In this case the howvec plugin is being asked to use inline
-ops to count and break down the hint instructions by type.
-
-Plugin Life cycle
-=================
+Plugin life cycle
+~~~~~~~~~~~~~~~~~
 
 First the plugin is loaded and the public qemu_plugin_install function
 is called. The plugin will then register callbacks for various plugin
@@ -111,11 +100,26 @@ callback which can then ensure atomicity itself.
 Finally when QEMU exits all the registered *atexit* callbacks are
 invoked.
 
+Exposure of QEMU internals
+~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+The plugin architecture actively avoids leaking implementation details
+about how QEMU's translation works to the plugins. While there are
+conceptions such as translation time and translation blocks the
+details are opaque to plugins. The plugin is able to query select
+details of instructions and system configuration only through the
+exported *qemu_plugin* functions.
+
+API
+~~~
+
+.. kernel-doc:: include/qemu/qemu-plugin.h
+
 Internals
-=========
+---------
 
 Locking
--------
+~~~~~~~
 
 We have to ensure we cannot deadlock, particularly under MTTCG. For
 this we acquire a lock when called from plugin code. We also keep the
@@ -142,7 +146,7 @@ requested. The plugin isn't completely uninstalled until the safe work
 has executed while all vCPUs are quiescent.
 
 Example Plugins
-===============
+---------------
 
 There are a number of plugins included with QEMU and you are
 encouraged to contribute your own plugins plugins upstream. There is a
@@ -193,17 +197,32 @@ Similar to hotblocks but this time tracks memory accesses::
   0x0000000048b000, 0x0001, 130594, 0x0001, 355
   0x0000000048a000, 0x0001, 1826, 0x0001, 11
 
+The hotpages plugin can be configured using the following arguments:
+
+  * sortby=reads|writes|address
+
+  Log the data sorted by either the number of reads, the number of writes, or
+  memory address. (Default: entries are sorted by the sum of reads and writes)
+
+  * io=on
+
+  Track IO addresses. Only relevant to full system emulation. (Default: off)
+
+  * pagesize=N
+
+  The page size used. (Default: N = 4096)
+
 - contrib/plugins/howvec.c
 
 This is an instruction classifier so can be used to count different
 types of instructions. It has a number of options to refine which get
-counted. You can give an argument for a class of instructions to break
-it down fully, so for example to see all the system registers
-accesses::
+counted. You can give a value to the ``count`` argument for a class of
+instructions to break it down fully, so for example to see all the system
+registers accesses::
 
   ./aarch64-softmmu/qemu-system-aarch64 $(QEMU_ARGS) \
     -append "root=/dev/sda2 systemd.unit=benchmark.service" \
-    -smp 4 -plugin ./contrib/plugins/libhowvec.so,arg=sreg -d plugin
+    -smp 4 -plugin ./contrib/plugins/libhowvec.so,count=sreg -d plugin
 
 which will lead to a sorted list after the class breakdown::
 
@@ -271,7 +290,7 @@ communicate over::
 
   ./sparc-softmmu/qemu-system-sparc -monitor none -parallel none \
     -net none -M SS-20 -m 256 -kernel day11/zImage.elf \
-    -plugin ./contrib/plugins/liblockstep.so,arg=lockstep-sparc.sock \
+    -plugin ./contrib/plugins/liblockstep.so,sockpath=lockstep-sparc.sock \
   -d plugin,nochain
 
 which will eventually report::
@@ -286,27 +305,27 @@ which will eventually report::
     previously @ 0x000000ffd08098/5 (809900593 insns)
     previously @ 0x000000ffd080c0/1 (809900588 insns)
 
-- contrib/plugins/hwprofile
+- contrib/plugins/hwprofile.c
 
 The hwprofile tool can only be used with system emulation and allows
 the user to see what hardware is accessed how often. It has a number of options:
 
- * arg=read or arg=write
+ * track=read or track=write
 
  By default the plugin tracks both reads and writes. You can use one
  of these options to limit the tracking to just one class of accesses.
 
- * arg=source
+ * source
 
  Will include a detailed break down of what the guest PC that made the
- access was. Not compatible with arg=pattern. Example output::
+ access was. Not compatible with the pattern option. Example output::
 
    cirrus-low-memory @ 0xfffffd00000a0000
     pc:fffffc0000005cdc, 1, 256
     pc:fffffc0000005ce8, 1, 256
     pc:fffffc0000005cec, 1, 256
 
- * arg=pattern
+ * pattern
 
  Instead break down the accesses based on the offset into the HW
  region. This can be useful for seeing the most used registers of a
@@ -345,21 +364,19 @@ which will output an execution trace following this structure::
   0, 0xd34, 0xf9c8f000, "bl #0x10c8"
   0, 0x10c8, 0xfff96c43, "ldr r3, [r0, #0x44]", load, 0x200000e4, RAM
 
-- contrib/plugins/cache
+- contrib/plugins/cache.c
 
-Cache modelling plugin that measures the performance of a given cache
-configuration when a given working set is run::
+Cache modelling plugin that measures the performance of a given L1 cache
+configuration, and optionally a unified L2 per-core cache when a given working
+set is run::
 
     qemu-x86_64 -plugin ./contrib/plugins/libcache.so \
       -d plugin -D cache.log ./tests/tcg/x86_64-linux-user/float_convs
 
 will report the following::
 
-    Data accesses: 996479, Misses: 507
-    Miss rate: 0.050879%
-
-    Instruction accesses: 2641737, Misses: 18617
-    Miss rate: 0.704726%
+    core #, data accesses, data misses, dmiss rate, insn accesses, insn misses, imiss rate
+    0       996695         508             0.0510%  2642799        18617           0.7044%
 
     address, data misses, instruction
     0x424f1e (_int_malloc), 109, movq %rax, 8(%rcx)
@@ -377,29 +394,50 @@ will report the following::
 
 The plugin has a number of arguments, all of them are optional:
 
-  * arg="limit=N"
+  * limit=N
 
   Print top N icache and dcache thrashing instructions along with their
   address, number of misses, and its disassembly. (default: 32)
 
-  * arg="icachesize=N"
-  * arg="iblksize=B"
-  * arg="iassoc=A"
+  * icachesize=N
+  * iblksize=B
+  * iassoc=A
 
   Instruction cache configuration arguments. They specify the cache size, block
   size, and associativity of the instruction cache, respectively.
   (default: N = 16384, B = 64, A = 8)
 
-  * arg="dcachesize=N"
-  * arg="dblksize=B"
-  * arg="dassoc=A"
+  * dcachesize=N
+  * dblksize=B
+  * dassoc=A
 
   Data cache configuration arguments. They specify the cache size, block size,
   and associativity of the data cache, respectively.
   (default: N = 16384, B = 64, A = 8)
 
-  * arg="evict=POLICY"
+  * evict=POLICY
 
   Sets the eviction policy to POLICY. Available policies are: :code:`lru`,
   :code:`fifo`, and :code:`rand`. The plugin will use the specified policy for
   both instruction and data caches. (default: POLICY = :code:`lru`)
+
+  * cores=N
+
+  Sets the number of cores for which we maintain separate icache and dcache.
+  (default: for linux-user, N = 1, for full system emulation: N = cores
+  available to guest)
+
+  * l2=on
+
+  Simulates a unified L2 cache (stores blocks for both instructions and data)
+  using the default L2 configuration (cache size = 2MB, associativity = 16-way,
+  block size = 64B).
+
+  * l2cachesize=N
+  * l2blksize=B
+  * l2assoc=A
+
+  L2 cache configuration arguments. They specify the cache size, block size, and
+  associativity of the L2 cache, respectively. Setting any of the L2
+  configuration arguments implies ``l2=on``.
+  (default: N = 2097152 (2MB), B = 64, A = 16)

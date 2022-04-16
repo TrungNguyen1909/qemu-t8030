@@ -217,6 +217,13 @@ const char *job_type_str(const Job *job)
 
 bool job_is_cancelled(Job *job)
 {
+    /* force_cancel may be true only if cancelled is true, too */
+    assert(job->cancelled || !job->force_cancel);
+    return job->force_cancel;
+}
+
+bool job_cancel_requested(Job *job)
+{
     return job->cancelled;
 }
 
@@ -345,6 +352,7 @@ void *job_create(const char *job_id, const JobDriver *driver, JobTxn *txn,
     notifier_list_init(&job->on_finalize_completed);
     notifier_list_init(&job->on_pending);
     notifier_list_init(&job->on_ready);
+    notifier_list_init(&job->on_idle);
 
     job_state_transition(job, JOB_STATUS_CREATED);
     aio_timer_init(qemu_get_aio_context(), &job->sleep_timer,
@@ -373,6 +381,8 @@ void job_ref(Job *job)
 
 void job_unref(Job *job)
 {
+    GLOBAL_STATE_CODE();
+
     if (--job->refcnt == 0) {
         assert(job->status == JOB_STATUS_NULL);
         assert(!timer_pending(&job->sleep_timer));
@@ -594,6 +604,7 @@ bool job_user_paused(Job *job)
 void job_user_resume(Job *job, Error **errp)
 {
     assert(job);
+    GLOBAL_STATE_CODE();
     if (!job->user_paused || job->pause_count <= 0) {
         error_setg(errp, "Can't resume a job that was not paused");
         return;
@@ -664,6 +675,7 @@ static void job_update_rc(Job *job)
 static void job_commit(Job *job)
 {
     assert(!job->ret);
+    GLOBAL_STATE_CODE();
     if (job->driver->commit) {
         job->driver->commit(job);
     }
@@ -672,6 +684,7 @@ static void job_commit(Job *job)
 static void job_abort(Job *job)
 {
     assert(job->ret);
+    GLOBAL_STATE_CODE();
     if (job->driver->abort) {
         job->driver->abort(job);
     }
@@ -679,6 +692,7 @@ static void job_abort(Job *job)
 
 static void job_clean(Job *job)
 {
+    GLOBAL_STATE_CODE();
     if (job->driver->clean) {
         job->driver->clean(job);
     }
@@ -718,9 +732,14 @@ static int job_finalize_single(Job *job)
 
 static void job_cancel_async(Job *job, bool force)
 {
+    GLOBAL_STATE_CODE();
     if (job->driver->cancel) {
-        job->driver->cancel(job, force);
+        force = job->driver->cancel(job, force);
+    } else {
+        /* No .cancel() means the job will behave as if force-cancelled */
+        force = true;
     }
+
     if (job->user_paused) {
         /* Do not call job_enter here, the caller will handle it.  */
         if (job->driver->user_resume) {
@@ -730,14 +749,23 @@ static void job_cancel_async(Job *job, bool force)
         assert(job->pause_count > 0);
         job->pause_count--;
     }
-    job->cancelled = true;
-    /* To prevent 'force == false' overriding a previous 'force == true' */
-    job->force_cancel |= force;
+
+    /*
+     * Ignore soft cancel requests after the job is already done
+     * (We will still invoke job->driver->cancel() above, but if the
+     * job driver supports soft cancelling and the job is done, that
+     * should be a no-op, too.  We still call it so it can override
+     * @force.)
+     */
+    if (force || !job->deferred_to_main_loop) {
+        job->cancelled = true;
+        /* To prevent 'force == false' overriding a previous 'force == true' */
+        job->force_cancel |= force;
+    }
 }
 
 static void job_completed_txn_abort(Job *job)
 {
-    AioContext *outer_ctx = job->aio_context;
     AioContext *ctx;
     JobTxn *txn = job->txn;
     Job *other_job;
@@ -751,10 +779,14 @@ static void job_completed_txn_abort(Job *job)
     txn->aborting = true;
     job_txn_ref(txn);
 
-    /* We can only hold the single job's AioContext lock while calling
+    /*
+     * We can only hold the single job's AioContext lock while calling
      * job_finalize_single() because the finalization callbacks can involve
-     * calls of AIO_WAIT_WHILE(), which could deadlock otherwise. */
-    aio_context_release(outer_ctx);
+     * calls of AIO_WAIT_WHILE(), which could deadlock otherwise.
+     * Note that the job's AioContext may change when it is finalized.
+     */
+    job_ref(job);
+    aio_context_release(job->aio_context);
 
     /* Other jobs are effectively cancelled by us, set the status for
      * them; this job, however, may or may not be cancelled, depending
@@ -763,29 +795,44 @@ static void job_completed_txn_abort(Job *job)
         if (other_job != job) {
             ctx = other_job->aio_context;
             aio_context_acquire(ctx);
-            job_cancel_async(other_job, false);
+            /*
+             * This is a transaction: If one job failed, no result will matter.
+             * Therefore, pass force=true to terminate all other jobs as quickly
+             * as possible.
+             */
+            job_cancel_async(other_job, true);
             aio_context_release(ctx);
         }
     }
     while (!QLIST_EMPTY(&txn->jobs)) {
         other_job = QLIST_FIRST(&txn->jobs);
+        /*
+         * The job's AioContext may change, so store it in @ctx so we
+         * release the same context that we have acquired before.
+         */
         ctx = other_job->aio_context;
         aio_context_acquire(ctx);
         if (!job_is_completed(other_job)) {
-            assert(job_is_cancelled(other_job));
+            assert(job_cancel_requested(other_job));
             job_finish_sync(other_job, NULL, NULL);
         }
         job_finalize_single(other_job);
         aio_context_release(ctx);
     }
 
-    aio_context_acquire(outer_ctx);
+    /*
+     * Use job_ref()/job_unref() so we can read the AioContext here
+     * even if the job went away during job_finalize_single().
+     */
+    aio_context_acquire(job->aio_context);
+    job_unref(job);
 
     job_txn_unref(txn);
 }
 
 static int job_prepare(Job *job)
 {
+    GLOBAL_STATE_CODE();
     if (job->ret == 0 && job->driver->prepare) {
         job->ret = job->driver->prepare(job);
         job_update_rc(job);
@@ -913,6 +960,7 @@ static void coroutine_fn job_co_entry(void *opaque)
     Job *job = opaque;
 
     assert(job && job->driver && job->driver->run);
+    assert(job->aio_context == qemu_get_current_aio_context());
     job_pause_point(job);
     job->ret = job->driver->run(job, &job->err);
     job->deferred_to_main_loop = true;
@@ -942,7 +990,19 @@ void job_cancel(Job *job, bool force)
     if (!job_started(job)) {
         job_completed(job);
     } else if (job->deferred_to_main_loop) {
-        job_completed_txn_abort(job);
+        /*
+         * job_cancel_async() ignores soft-cancel requests for jobs
+         * that are already done (i.e. deferred to the main loop).  We
+         * have to check again whether the job is really cancelled.
+         * (job_cancel_requested() and job_is_cancelled() are equivalent
+         * here, because job_cancel_async() will make soft-cancel
+         * requests no-ops when deferred_to_main_loop is true.  We
+         * choose to call job_is_cancelled() to show that we invoke
+         * job_completed_txn_abort() only for force-cancelled jobs.)
+         */
+        if (job_is_cancelled(job)) {
+            job_completed_txn_abort(job);
+        }
     } else {
         job_enter(job);
     }
@@ -964,9 +1024,21 @@ static void job_cancel_err(Job *job, Error **errp)
     job_cancel(job, false);
 }
 
-int job_cancel_sync(Job *job)
+/**
+ * Same as job_cancel_err(), but force-cancel.
+ */
+static void job_force_cancel_err(Job *job, Error **errp)
 {
-    return job_finish_sync(job, &job_cancel_err, NULL);
+    job_cancel(job, true);
+}
+
+int job_cancel_sync(Job *job, bool force)
+{
+    if (force) {
+        return job_finish_sync(job, &job_force_cancel_err, NULL);
+    } else {
+        return job_finish_sync(job, &job_cancel_err, NULL);
+    }
 }
 
 void job_cancel_sync_all(void)
@@ -977,7 +1049,7 @@ void job_cancel_sync_all(void)
     while ((job = job_next(NULL))) {
         aio_context = job->aio_context;
         aio_context_acquire(aio_context);
-        job_cancel_sync(job);
+        job_cancel_sync(job, true);
         aio_context_release(aio_context);
     }
 }
@@ -991,10 +1063,11 @@ void job_complete(Job *job, Error **errp)
 {
     /* Should not be reachable via external interface for internal jobs */
     assert(job->id);
+    GLOBAL_STATE_CODE();
     if (job_apply_verb(job, JOB_VERB_COMPLETE, errp)) {
         return;
     }
-    if (job_is_cancelled(job) || !job->driver->complete) {
+    if (job_cancel_requested(job) || !job->driver->complete) {
         error_setg(errp, "The active block job '%s' cannot be completed",
                    job->id);
         return;

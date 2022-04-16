@@ -24,6 +24,7 @@
 #ifndef QEMU_ARM_GICV3_INTERNAL_H
 #define QEMU_ARM_GICV3_INTERNAL_H
 
+#include "hw/registerfields.h"
 #include "hw/intc/arm_gicv3_common.h"
 
 /* Distributor registers, as offsets from the distributor base address */
@@ -67,6 +68,11 @@
 #define GICD_CTLR_E1NWF             (1U << 7)
 #define GICD_CTLR_RWP               (1U << 31)
 
+#define GICD_TYPER_LPIS_SHIFT          17
+
+/* 16 bits EventId */
+#define GICD_TYPER_IDBITS            0xf
+
 /*
  * Redistributor frame offsets from RD_base
  */
@@ -104,6 +110,7 @@
 #define GICR_NSACR            (GICR_SGI_OFFSET + 0x0E00)
 
 #define GICR_CTLR_ENABLE_LPIS        (1U << 0)
+#define GICR_CTLR_CES                (1U << 1)
 #define GICR_CTLR_RWP                (1U << 3)
 #define GICR_CTLR_DPG0               (1U << 24)
 #define GICR_CTLR_DPG1NS             (1U << 25)
@@ -122,17 +129,19 @@
 #define GICR_WAKER_ProcessorSleep    (1U << 1)
 #define GICR_WAKER_ChildrenAsleep    (1U << 2)
 
-#define GICR_PROPBASER_OUTER_CACHEABILITY_MASK (7ULL << 56)
-#define GICR_PROPBASER_ADDR_MASK               (0xfffffffffULL << 12)
-#define GICR_PROPBASER_SHAREABILITY_MASK       (3U << 10)
-#define GICR_PROPBASER_CACHEABILITY_MASK       (7U << 7)
-#define GICR_PROPBASER_IDBITS_MASK             (0x1f)
+FIELD(GICR_PROPBASER, IDBITS, 0, 5)
+FIELD(GICR_PROPBASER, INNERCACHE, 7, 3)
+FIELD(GICR_PROPBASER, SHAREABILITY, 10, 2)
+FIELD(GICR_PROPBASER, PHYADDR, 12, 40)
+FIELD(GICR_PROPBASER, OUTERCACHE, 56, 3)
 
-#define GICR_PENDBASER_PTZ                     (1ULL << 62)
-#define GICR_PENDBASER_OUTER_CACHEABILITY_MASK (7ULL << 56)
-#define GICR_PENDBASER_ADDR_MASK               (0xffffffffULL << 16)
-#define GICR_PENDBASER_SHAREABILITY_MASK       (3U << 10)
-#define GICR_PENDBASER_CACHEABILITY_MASK       (7U << 7)
+FIELD(GICR_PENDBASER, INNERCACHE, 7, 3)
+FIELD(GICR_PENDBASER, SHAREABILITY, 10, 2)
+FIELD(GICR_PENDBASER, PHYADDR, 16, 36)
+FIELD(GICR_PENDBASER, OUTERCACHE, 56, 3)
+FIELD(GICR_PENDBASER, PTZ, 62, 1)
+
+#define GICR_PROPBASER_IDBITS_THRESHOLD          0xd
 
 #define ICC_CTLR_EL1_CBPR           (1U << 0)
 #define ICC_CTLR_EL1_EOIMODE        (1U << 1)
@@ -239,12 +248,196 @@
 #define ICH_VTR_EL2_PREBITS_SHIFT 26
 #define ICH_VTR_EL2_PRIBITS_SHIFT 29
 
+/* ITS Registers */
+
+FIELD(GITS_BASER, SIZE, 0, 8)
+FIELD(GITS_BASER, PAGESIZE, 8, 2)
+FIELD(GITS_BASER, SHAREABILITY, 10, 2)
+FIELD(GITS_BASER, PHYADDR, 12, 36)
+FIELD(GITS_BASER, PHYADDRL_64K, 16, 32)
+FIELD(GITS_BASER, PHYADDRH_64K, 12, 4)
+FIELD(GITS_BASER, ENTRYSIZE, 48, 5)
+FIELD(GITS_BASER, OUTERCACHE, 53, 3)
+FIELD(GITS_BASER, TYPE, 56, 3)
+FIELD(GITS_BASER, INNERCACHE, 59, 3)
+FIELD(GITS_BASER, INDIRECT, 62, 1)
+FIELD(GITS_BASER, VALID, 63, 1)
+
+FIELD(GITS_CBASER, SIZE, 0, 8)
+FIELD(GITS_CBASER, SHAREABILITY, 10, 2)
+FIELD(GITS_CBASER, PHYADDR, 12, 40)
+FIELD(GITS_CBASER, OUTERCACHE, 53, 3)
+FIELD(GITS_CBASER, INNERCACHE, 59, 3)
+FIELD(GITS_CBASER, VALID, 63, 1)
+
+FIELD(GITS_CREADR, STALLED, 0, 1)
+FIELD(GITS_CREADR, OFFSET, 5, 15)
+
+FIELD(GITS_CWRITER, RETRY, 0, 1)
+FIELD(GITS_CWRITER, OFFSET, 5, 15)
+
+FIELD(GITS_CTLR, ENABLED, 0, 1)
+FIELD(GITS_CTLR, QUIESCENT, 31, 1)
+
+FIELD(GITS_TYPER, PHYSICAL, 0, 1)
+FIELD(GITS_TYPER, ITT_ENTRY_SIZE, 4, 4)
+FIELD(GITS_TYPER, IDBITS, 8, 5)
+FIELD(GITS_TYPER, DEVBITS, 13, 5)
+FIELD(GITS_TYPER, SEIS, 18, 1)
+FIELD(GITS_TYPER, PTA, 19, 1)
+FIELD(GITS_TYPER, CIDBITS, 32, 4)
+FIELD(GITS_TYPER, CIL, 36, 1)
+
+#define GITS_IDREGS           0xFFD0
+
+#define GITS_BASER_RO_MASK                  (R_GITS_BASER_ENTRYSIZE_MASK | \
+                                              R_GITS_BASER_TYPE_MASK)
+
+#define GITS_BASER_PAGESIZE_4K                0
+#define GITS_BASER_PAGESIZE_16K               1
+#define GITS_BASER_PAGESIZE_64K               2
+
+#define GITS_BASER_TYPE_DEVICE               1ULL
+#define GITS_BASER_TYPE_COLLECTION           4ULL
+
+#define GITS_PAGE_SIZE_4K       0x1000
+#define GITS_PAGE_SIZE_16K      0x4000
+#define GITS_PAGE_SIZE_64K      0x10000
+
+#define L1TABLE_ENTRY_SIZE         8
+
+#define LPI_CTE_ENABLED          TABLE_ENTRY_VALID_MASK
+#define LPI_PRIORITY_MASK         0xfc
+
+#define GITS_CMDQ_ENTRY_WORDS 4
+#define GITS_CMDQ_ENTRY_SIZE  (GITS_CMDQ_ENTRY_WORDS * sizeof(uint64_t))
+
+#define CMD_MASK                  0xff
+
+/* ITS Commands */
+#define GITS_CMD_MOVI             0x01
+#define GITS_CMD_INT              0x03
+#define GITS_CMD_CLEAR            0x04
+#define GITS_CMD_SYNC             0x05
+#define GITS_CMD_MAPD             0x08
+#define GITS_CMD_MAPC             0x09
+#define GITS_CMD_MAPTI            0x0A
+#define GITS_CMD_MAPI             0x0B
+#define GITS_CMD_INV              0x0C
+#define GITS_CMD_INVALL           0x0D
+#define GITS_CMD_MOVALL           0x0E
+#define GITS_CMD_DISCARD          0x0F
+
+/* MAPC command fields */
+#define ICID_LENGTH                  16
+#define ICID_MASK                 ((1U << ICID_LENGTH) - 1)
+FIELD(MAPC, RDBASE, 16, 32)
+
+#define RDBASE_PROCNUM_LENGTH        16
+#define RDBASE_PROCNUM_MASK       ((1ULL << RDBASE_PROCNUM_LENGTH) - 1)
+
+/* MAPD command fields */
+#define ITTADDR_LENGTH               44
+#define ITTADDR_SHIFT                 8
+#define ITTADDR_MASK             MAKE_64BIT_MASK(ITTADDR_SHIFT, ITTADDR_LENGTH)
+#define SIZE_MASK                 0x1f
+
+/* MAPI command fields */
+#define EVENTID_MASK              ((1ULL << 32) - 1)
+
+/* MAPTI command fields */
+#define pINTID_SHIFT                 32
+#define pINTID_MASK               MAKE_64BIT_MASK(32, 32)
+
+#define DEVID_SHIFT                  32
+#define DEVID_MASK                MAKE_64BIT_MASK(32, 32)
+
+#define VALID_SHIFT               63
+#define CMD_FIELD_VALID_MASK      (1ULL << VALID_SHIFT)
+#define L2_TABLE_VALID_MASK       CMD_FIELD_VALID_MASK
+#define TABLE_ENTRY_VALID_MASK    (1ULL << 0)
+
+/* MOVALL command fields */
+FIELD(MOVALL_2, RDBASE1, 16, 36)
+FIELD(MOVALL_3, RDBASE2, 16, 36)
+
+/* MOVI command fields */
+FIELD(MOVI_0, DEVICEID, 32, 32)
+FIELD(MOVI_1, EVENTID, 0, 32)
+FIELD(MOVI_2, ICID, 0, 16)
+
+/*
+ * 12 bytes Interrupt translation Table Entry size
+ * as per Table 5.3 in GICv3 spec
+ * ITE Lower 8 Bytes
+ *   Bits:    | 63 ... 48 | 47 ... 32 | 31 ... 26 | 25 ... 2 |   1     |  0    |
+ *   Values:  | vPEID     | ICID      | unused    |  IntNum  | IntType | Valid |
+ * ITE Higher 4 Bytes
+ *   Bits:    | 31 ... 25 | 24 ... 0 |
+ *   Values:  | unused    | Doorbell |
+ * (When Doorbell is unused, as it always is for INTYPE_PHYSICAL,
+ * the value of that field in memory cannot be relied upon -- older
+ * versions of QEMU did not correctly write to that memory.)
+ */
+#define ITS_ITT_ENTRY_SIZE            0xC
+
+FIELD(ITE_L, VALID, 0, 1)
+FIELD(ITE_L, INTTYPE, 1, 1)
+FIELD(ITE_L, INTID, 2, 24)
+FIELD(ITE_L, ICID, 32, 16)
+FIELD(ITE_L, VPEID, 48, 16)
+FIELD(ITE_H, DOORBELL, 0, 24)
+
+/* Possible values for ITE_L INTTYPE */
+#define ITE_INTTYPE_VIRTUAL 0
+#define ITE_INTTYPE_PHYSICAL 1
+
+/* 16 bits EventId */
+#define ITS_IDBITS                   GICD_TYPER_IDBITS
+
+/* 16 bits DeviceId */
+#define ITS_DEVBITS                   0xF
+
+/* 16 bits CollectionId */
+#define ITS_CIDBITS                  0xF
+
+/*
+ * 8 bytes Device Table Entry size
+ * Valid = 1 bit,ITTAddr = 44 bits,Size = 5 bits
+ */
+#define GITS_DTE_SIZE                 (0x8ULL)
+
+FIELD(DTE, VALID, 0, 1)
+FIELD(DTE, SIZE, 1, 5)
+FIELD(DTE, ITTADDR, 6, 44)
+
+/*
+ * 8 bytes Collection Table Entry size
+ * Valid = 1 bit, RDBase = 16 bits
+ */
+#define GITS_CTE_SIZE                 (0x8ULL)
+FIELD(CTE, VALID, 0, 1)
+FIELD(CTE, RDBASE, 1, RDBASE_PROCNUM_LENGTH)
+
 /* Special interrupt IDs */
 #define INTID_SECURE 1020
 #define INTID_NONSECURE 1021
 #define INTID_SPURIOUS 1023
 
 /* Functions internal to the emulated GICv3 */
+
+/**
+ * gicv3_intid_is_special:
+ * @intid: interrupt ID
+ *
+ * Return true if @intid is a special interrupt ID (1020 to
+ * 1023 inclusive). This corresponds to the GIC spec pseudocode
+ * IsSpecial() function.
+ */
+static inline bool gicv3_intid_is_special(int intid)
+{
+    return intid >= INTID_SECURE && intid <= INTID_SPURIOUS;
+}
 
 /**
  * gicv3_redist_update:
@@ -296,6 +489,47 @@ MemTxResult gicv3_redist_write(void *opaque, hwaddr offset, uint64_t data,
                                unsigned size, MemTxAttrs attrs);
 void gicv3_dist_set_irq(GICv3State *s, int irq, int level);
 void gicv3_redist_set_irq(GICv3CPUState *cs, int irq, int level);
+void gicv3_redist_process_lpi(GICv3CPUState *cs, int irq, int level);
+void gicv3_redist_lpi_pending(GICv3CPUState *cs, int irq, int level);
+/**
+ * gicv3_redist_update_lpi:
+ * @cs: GICv3CPUState
+ *
+ * Scan the LPI pending table and recalculate the highest priority
+ * pending LPI and also the overall highest priority pending interrupt.
+ */
+void gicv3_redist_update_lpi(GICv3CPUState *cs);
+/**
+ * gicv3_redist_update_lpi_only:
+ * @cs: GICv3CPUState
+ *
+ * Scan the LPI pending table and recalculate cs->hpplpi only,
+ * without calling gicv3_redist_update() to recalculate the overall
+ * highest priority pending interrupt. This should be called after
+ * an incoming migration has loaded new state.
+ */
+void gicv3_redist_update_lpi_only(GICv3CPUState *cs);
+/**
+ * gicv3_redist_mov_lpi:
+ * @src: source redistributor
+ * @dest: destination redistributor
+ * @irq: LPI to update
+ *
+ * Move the pending state of the specified LPI from @src to @dest,
+ * as required by the ITS MOVI command.
+ */
+void gicv3_redist_mov_lpi(GICv3CPUState *src, GICv3CPUState *dest, int irq);
+/**
+ * gicv3_redist_movall_lpis:
+ * @src: source redistributor
+ * @dest: destination redistributor
+ *
+ * Scan the LPI pending table for @src, and for each pending LPI there
+ * mark it as not-pending for @src and pending for @dest, as required
+ * by the ITS MOVALL command.
+ */
+void gicv3_redist_movall_lpis(GICv3CPUState *src, GICv3CPUState *dest);
+
 void gicv3_redist_send_sgi(GICv3CPUState *cs, int grp, int irq, bool ns);
 void gicv3_init_cpuif(GICv3State *s);
 

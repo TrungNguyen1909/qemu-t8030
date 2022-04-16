@@ -65,8 +65,9 @@ static void co_reenter_bh(void *opaque)
 }
 
 static int coroutine_fn bdrv_test_co_preadv(BlockDriverState *bs,
-                                            uint64_t offset, uint64_t bytes,
-                                            QEMUIOVector *qiov, int flags)
+                                            int64_t offset, int64_t bytes,
+                                            QEMUIOVector *qiov,
+                                            BdrvRequestFlags flags)
 {
     BDRVTestState *s = bs->opaque;
 
@@ -771,6 +772,7 @@ static void test_iothread_drain_subtree(void)
 
 typedef struct TestBlockJob {
     BlockJob common;
+    BlockDriverState *bs;
     int run_ret;
     int prepare_ret;
     bool running;
@@ -782,7 +784,7 @@ static int test_job_prepare(Job *job)
     TestBlockJob *s = container_of(job, TestBlockJob, common.job);
 
     /* Provoke an AIO_WAIT_WHILE() call to verify there is no deadlock */
-    blk_flush(s->common.blk);
+    bdrv_flush(s->bs);
     return s->prepare_ret;
 }
 
@@ -791,7 +793,7 @@ static void test_job_commit(Job *job)
     TestBlockJob *s = container_of(job, TestBlockJob, common.job);
 
     /* Provoke an AIO_WAIT_WHILE() call to verify there is no deadlock */
-    blk_flush(s->common.blk);
+    bdrv_flush(s->bs);
 }
 
 static void test_job_abort(Job *job)
@@ -799,7 +801,7 @@ static void test_job_abort(Job *job)
     TestBlockJob *s = container_of(job, TestBlockJob, common.job);
 
     /* Provoke an AIO_WAIT_WHILE() call to verify there is no deadlock */
-    blk_flush(s->common.blk);
+    bdrv_flush(s->bs);
 }
 
 static int coroutine_fn test_job_run(Job *job, Error **errp)
@@ -914,6 +916,7 @@ static void test_blockjob_common_drain_node(enum drain_type drain_type,
     tjob = block_job_create("job0", &test_job_driver, NULL, src,
                             0, BLK_PERM_ALL,
                             0, 0, NULL, NULL, &error_abort);
+    tjob->bs = src;
     job = &tjob->common;
     block_job_add_bdrv(job, "target", target, 0, BLK_PERM_ALL, &error_abort);
 
@@ -1106,8 +1109,9 @@ static void bdrv_test_top_close(BlockDriverState *bs)
 }
 
 static int coroutine_fn bdrv_test_top_co_preadv(BlockDriverState *bs,
-                                                uint64_t offset, uint64_t bytes,
-                                                QEMUIOVector *qiov, int flags)
+                                                int64_t offset, int64_t bytes,
+                                                QEMUIOVector *qiov,
+                                                BdrvRequestFlags flags)
 {
     BDRVTestTopState *tts = bs->opaque;
     return bdrv_co_preadv(tts->wait_child, offset, bytes, qiov, flags);
@@ -1536,6 +1540,7 @@ typedef struct TestDropBackingBlockJob {
     bool should_complete;
     bool *did_complete;
     BlockDriverState *detach_also;
+    BlockDriverState *bs;
 } TestDropBackingBlockJob;
 
 static int coroutine_fn test_drop_backing_job_run(Job *job, Error **errp)
@@ -1555,7 +1560,7 @@ static void test_drop_backing_job_commit(Job *job)
     TestDropBackingBlockJob *s =
         container_of(job, TestDropBackingBlockJob, common.job);
 
-    bdrv_set_backing_hd(blk_bs(s->common.blk), NULL, &error_abort);
+    bdrv_set_backing_hd(s->bs, NULL, &error_abort);
     bdrv_set_backing_hd(s->detach_also, NULL, &error_abort);
 
     *s->did_complete = true;
@@ -1655,6 +1660,7 @@ static void test_blockjob_commit_by_drained_end(void)
     job = block_job_create("job", &test_drop_backing_job_driver, NULL,
                            bs_parents[2], 0, BLK_PERM_ALL, 0, 0, NULL, NULL,
                            &error_abort);
+    job->bs = bs_parents[2];
 
     job->detach_also = bs_parents[0];
     job->did_complete = &job_has_completed;
@@ -1855,10 +1861,10 @@ static void bdrv_replace_test_close(BlockDriverState *bs)
  *   Set .has_read to true and return success.
  */
 static int coroutine_fn bdrv_replace_test_co_preadv(BlockDriverState *bs,
-                                                    uint64_t offset,
-                                                    uint64_t bytes,
+                                                    int64_t offset,
+                                                    int64_t bytes,
                                                     QEMUIOVector *qiov,
-                                                    int flags)
+                                                    BdrvRequestFlags flags)
 {
     BDRVReplaceTestState *s = bs->opaque;
 

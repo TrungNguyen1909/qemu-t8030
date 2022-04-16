@@ -18,6 +18,7 @@
  */
 
 #include "qemu/osdep.h"
+#include "qemu/log.h"
 #include "cpu.h"
 #include "exec/helper-proto.h"
 #include "exec/exec-all.h"
@@ -108,14 +109,6 @@ void QEMU_NORETURN helper_pause(CPUX86State *env, int next_eip_addend)
     env->eip += next_eip_addend;
 
     do_pause(env);
-}
-
-void QEMU_NORETURN helper_debug(CPUX86State *env)
-{
-    CPUState *cs = env_cpu(env);
-
-    cs->exception_index = EXCP_DEBUG;
-    cpu_loop_exit(cs);
 }
 
 uint64_t helper_rdpkru(CPUX86State *env, uint32_t ecx)

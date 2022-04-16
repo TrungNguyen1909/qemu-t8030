@@ -49,10 +49,12 @@
 #include "qemu/osdep.h"
 #include "qemu-common.h"
 #include "qemu/error-report.h"
+#include "qemu/memalign.h"
 
 #include "sysemu/hvf.h"
 #include "sysemu/hvf_int.h"
 #include "sysemu/runstate.h"
+#include "sysemu/cpus.h"
 #include "hvf-i386.h"
 #include "vmcs.h"
 #include "vmx.h"
@@ -204,6 +206,16 @@ static inline bool tsc_is_known(CPUX86State *env)
 static inline bool apic_bus_freq_is_known(CPUX86State *env)
 {
     return env->apic_bus_freq != 0;
+}
+
+void hvf_kick_vcpu_thread(CPUState *cpu)
+{
+    cpus_kick_thread(cpu);
+}
+
+int hvf_arch_init(void)
+{
+    return 0;
 }
 
 int hvf_arch_init_vcpu(CPUState *cpu)

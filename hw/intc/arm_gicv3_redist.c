@@ -248,10 +248,20 @@ static MemTxResult gicr_writel(GICv3CPUState *cs, hwaddr offset,
     case GICR_CTLR:
         /* For our implementation, GICR_TYPER.DPGS is 0 and so all
          * the DPG bits are RAZ/WI. We don't do anything asynchronously,
-         * so UWP and RWP are RAZ/WI. And GICR_TYPER.LPIS is 0 (we don't
-         * implement LPIs) so Enable_LPIs is RES0. So there are no writable
-         * bits for us.
+         * so UWP and RWP are RAZ/WI. GICR_TYPER.LPIS is 1 (we
+         * implement LPIs) so Enable_LPIs is programmable.
          */
+        if (cs->gicr_typer & GICR_TYPER_PLPIS) {
+            if (value & GICR_CTLR_ENABLE_LPIS) {
+                cs->gicr_ctlr |= GICR_CTLR_ENABLE_LPIS;
+                /* Check for any pending interr in pending table */
+                gicv3_redist_update_lpi(cs);
+            } else {
+                cs->gicr_ctlr &= ~GICR_CTLR_ENABLE_LPIS;
+                /* cs->hppi might have been an LPI; recalculate */
+                gicv3_redist_update(cs);
+            }
+        }
         return MEMTX_OK;
     case GICR_STATUSR:
         /* RAZ/WI for our implementation */
@@ -416,22 +426,24 @@ static MemTxResult gicr_writell(GICv3CPUState *cs, hwaddr offset,
 MemTxResult gicv3_redist_read(void *opaque, hwaddr offset, uint64_t *data,
                               unsigned size, MemTxAttrs attrs)
 {
-    GICv3State *s = opaque;
+    GICv3RedistRegion *region = opaque;
+    GICv3State *s = region->gic;
     GICv3CPUState *cs;
     MemTxResult r;
     int cpuidx;
 
     assert((offset & (size - 1)) == 0);
 
-    /* This region covers all the redistributor pages; there are
-     * (for GICv3) two 64K pages per CPU. At the moment they are
-     * all contiguous (ie in this one region), though we might later
-     * want to allow splitting of redistributor pages into several
-     * blocks so we can support more CPUs.
+    /*
+     * There are (for GICv3) two 64K redistributor pages per CPU.
+     * In some cases the redistributor pages for all CPUs are not
+     * contiguous (eg on the virt board they are split into two
+     * parts if there are too many CPUs to all fit in the same place
+     * in the memory map); if so then the GIC has multiple MemoryRegions
+     * for the redistributors.
      */
-    cpuidx = offset / 0x20000;
-    offset %= 0x20000;
-    assert(cpuidx < s->num_cpu);
+    cpuidx = region->cpuidx + offset / GICV3_REDIST_SIZE;
+    offset %= GICV3_REDIST_SIZE;
 
     cs = &s->cpu[cpuidx];
 
@@ -450,7 +462,7 @@ MemTxResult gicv3_redist_read(void *opaque, hwaddr offset, uint64_t *data,
         break;
     }
 
-    if (r == MEMTX_ERROR) {
+    if (r != MEMTX_OK) {
         qemu_log_mask(LOG_GUEST_ERROR,
                       "%s: invalid guest read at offset " TARGET_FMT_plx
                       " size %u\n", __func__, offset, size);
@@ -473,22 +485,24 @@ MemTxResult gicv3_redist_read(void *opaque, hwaddr offset, uint64_t *data,
 MemTxResult gicv3_redist_write(void *opaque, hwaddr offset, uint64_t data,
                                unsigned size, MemTxAttrs attrs)
 {
-    GICv3State *s = opaque;
+    GICv3RedistRegion *region = opaque;
+    GICv3State *s = region->gic;
     GICv3CPUState *cs;
     MemTxResult r;
     int cpuidx;
 
     assert((offset & (size - 1)) == 0);
 
-    /* This region covers all the redistributor pages; there are
-     * (for GICv3) two 64K pages per CPU. At the moment they are
-     * all contiguous (ie in this one region), though we might later
-     * want to allow splitting of redistributor pages into several
-     * blocks so we can support more CPUs.
+    /*
+     * There are (for GICv3) two 64K redistributor pages per CPU.
+     * In some cases the redistributor pages for all CPUs are not
+     * contiguous (eg on the virt board they are split into two
+     * parts if there are too many CPUs to all fit in the same place
+     * in the memory map); if so then the GIC has multiple MemoryRegions
+     * for the redistributors.
      */
-    cpuidx = offset / 0x20000;
-    offset %= 0x20000;
-    assert(cpuidx < s->num_cpu);
+    cpuidx = region->cpuidx + offset / GICV3_REDIST_SIZE;
+    offset %= GICV3_REDIST_SIZE;
 
     cs = &s->cpu[cpuidx];
 
@@ -507,7 +521,7 @@ MemTxResult gicv3_redist_write(void *opaque, hwaddr offset, uint64_t data,
         break;
     }
 
-    if (r == MEMTX_ERROR) {
+    if (r != MEMTX_OK) {
         qemu_log_mask(LOG_GUEST_ERROR,
                       "%s: invalid guest write at offset " TARGET_FMT_plx
                       " size %u\n", __func__, offset, size);
@@ -524,6 +538,254 @@ MemTxResult gicv3_redist_write(void *opaque, hwaddr offset, uint64_t data,
                                  size, attrs.secure);
     }
     return r;
+}
+
+static void gicv3_redist_check_lpi_priority(GICv3CPUState *cs, int irq)
+{
+    AddressSpace *as = &cs->gic->dma_as;
+    uint64_t lpict_baddr;
+    uint8_t lpite;
+    uint8_t prio;
+
+    lpict_baddr = cs->gicr_propbaser & R_GICR_PROPBASER_PHYADDR_MASK;
+
+    address_space_read(as, lpict_baddr + ((irq - GICV3_LPI_INTID_START) *
+                       sizeof(lpite)), MEMTXATTRS_UNSPECIFIED, &lpite,
+                       sizeof(lpite));
+
+    if (!(lpite & LPI_CTE_ENABLED)) {
+        return;
+    }
+
+    if (cs->gic->gicd_ctlr & GICD_CTLR_DS) {
+        prio = lpite & LPI_PRIORITY_MASK;
+    } else {
+        prio = ((lpite & LPI_PRIORITY_MASK) >> 1) | 0x80;
+    }
+
+    if ((prio < cs->hpplpi.prio) ||
+        ((prio == cs->hpplpi.prio) && (irq <= cs->hpplpi.irq))) {
+        cs->hpplpi.irq = irq;
+        cs->hpplpi.prio = prio;
+        /* LPIs are always non-secure Grp1 interrupts */
+        cs->hpplpi.grp = GICV3_G1NS;
+    }
+}
+
+void gicv3_redist_update_lpi_only(GICv3CPUState *cs)
+{
+    /*
+     * This function scans the LPI pending table and for each pending
+     * LPI, reads the corresponding entry from LPI configuration table
+     * to extract the priority info and determine if the current LPI
+     * priority is lower than the last computed high priority lpi interrupt.
+     * If yes, replace current LPI as the new high priority lpi interrupt.
+     */
+    AddressSpace *as = &cs->gic->dma_as;
+    uint64_t lpipt_baddr;
+    uint32_t pendt_size = 0;
+    uint8_t pend;
+    int i, bit;
+    uint64_t idbits;
+
+    idbits = MIN(FIELD_EX64(cs->gicr_propbaser, GICR_PROPBASER, IDBITS),
+                 GICD_TYPER_IDBITS);
+
+    if (!(cs->gicr_ctlr & GICR_CTLR_ENABLE_LPIS)) {
+        return;
+    }
+
+    cs->hpplpi.prio = 0xff;
+
+    lpipt_baddr = cs->gicr_pendbaser & R_GICR_PENDBASER_PHYADDR_MASK;
+
+    /* Determine the highest priority pending interrupt among LPIs */
+    pendt_size = (1ULL << (idbits + 1));
+
+    for (i = GICV3_LPI_INTID_START / 8; i < pendt_size / 8; i++) {
+        address_space_read(as, lpipt_baddr + i, MEMTXATTRS_UNSPECIFIED, &pend,
+                           sizeof(pend));
+
+        while (pend) {
+            bit = ctz32(pend);
+            gicv3_redist_check_lpi_priority(cs, i * 8 + bit);
+            pend &= ~(1 << bit);
+        }
+    }
+}
+
+void gicv3_redist_update_lpi(GICv3CPUState *cs)
+{
+    gicv3_redist_update_lpi_only(cs);
+    gicv3_redist_update(cs);
+}
+
+void gicv3_redist_lpi_pending(GICv3CPUState *cs, int irq, int level)
+{
+    /*
+     * This function updates the pending bit in lpi pending table for
+     * the irq being activated or deactivated.
+     */
+    AddressSpace *as = &cs->gic->dma_as;
+    uint64_t lpipt_baddr;
+    bool ispend = false;
+    uint8_t pend;
+
+    /*
+     * get the bit value corresponding to this irq in the
+     * lpi pending table
+     */
+    lpipt_baddr = cs->gicr_pendbaser & R_GICR_PENDBASER_PHYADDR_MASK;
+
+    address_space_read(as, lpipt_baddr + ((irq / 8) * sizeof(pend)),
+                       MEMTXATTRS_UNSPECIFIED, &pend, sizeof(pend));
+
+    ispend = extract32(pend, irq % 8, 1);
+
+    /* no change in the value of pending bit, return */
+    if (ispend == level) {
+        return;
+    }
+    pend = deposit32(pend, irq % 8, 1, level ? 1 : 0);
+
+    address_space_write(as, lpipt_baddr + ((irq / 8) * sizeof(pend)),
+                        MEMTXATTRS_UNSPECIFIED, &pend, sizeof(pend));
+
+    /*
+     * check if this LPI is better than the current hpplpi, if yes
+     * just set hpplpi.prio and .irq without doing a full rescan
+     */
+    if (level) {
+        gicv3_redist_check_lpi_priority(cs, irq);
+        gicv3_redist_update(cs);
+    } else {
+        if (irq == cs->hpplpi.irq) {
+            gicv3_redist_update_lpi(cs);
+        }
+    }
+}
+
+void gicv3_redist_process_lpi(GICv3CPUState *cs, int irq, int level)
+{
+    uint64_t idbits;
+
+    idbits = MIN(FIELD_EX64(cs->gicr_propbaser, GICR_PROPBASER, IDBITS),
+                 GICD_TYPER_IDBITS);
+
+    if (!(cs->gicr_ctlr & GICR_CTLR_ENABLE_LPIS) ||
+        (irq > (1ULL << (idbits + 1)) - 1) || irq < GICV3_LPI_INTID_START) {
+        return;
+    }
+
+    /* set/clear the pending bit for this irq */
+    gicv3_redist_lpi_pending(cs, irq, level);
+}
+
+void gicv3_redist_mov_lpi(GICv3CPUState *src, GICv3CPUState *dest, int irq)
+{
+    /*
+     * Move the specified LPI's pending state from the source redistributor
+     * to the destination.
+     *
+     * If LPIs are disabled on dest this is CONSTRAINED UNPREDICTABLE:
+     * we choose to NOP. If LPIs are disabled on source there's nothing
+     * to be transferred anyway.
+     */
+    AddressSpace *as = &src->gic->dma_as;
+    uint64_t idbits;
+    uint32_t pendt_size;
+    uint64_t src_baddr;
+    uint8_t src_pend;
+
+    if (!(src->gicr_ctlr & GICR_CTLR_ENABLE_LPIS) ||
+        !(dest->gicr_ctlr & GICR_CTLR_ENABLE_LPIS)) {
+        return;
+    }
+
+    idbits = MIN(FIELD_EX64(src->gicr_propbaser, GICR_PROPBASER, IDBITS),
+                 GICD_TYPER_IDBITS);
+    idbits = MIN(FIELD_EX64(dest->gicr_propbaser, GICR_PROPBASER, IDBITS),
+                 idbits);
+
+    pendt_size = 1ULL << (idbits + 1);
+    if ((irq / 8) >= pendt_size) {
+        return;
+    }
+
+    src_baddr = src->gicr_pendbaser & R_GICR_PENDBASER_PHYADDR_MASK;
+
+    address_space_read(as, src_baddr + (irq / 8),
+                       MEMTXATTRS_UNSPECIFIED, &src_pend, sizeof(src_pend));
+    if (!extract32(src_pend, irq % 8, 1)) {
+        /* Not pending on source, nothing to do */
+        return;
+    }
+    src_pend &= ~(1 << (irq % 8));
+    address_space_write(as, src_baddr + (irq / 8),
+                        MEMTXATTRS_UNSPECIFIED, &src_pend, sizeof(src_pend));
+    if (irq == src->hpplpi.irq) {
+        /*
+         * We just made this LPI not-pending so only need to update
+         * if it was previously the highest priority pending LPI
+         */
+        gicv3_redist_update_lpi(src);
+    }
+    /* Mark it pending on the destination */
+    gicv3_redist_lpi_pending(dest, irq, 1);
+}
+
+void gicv3_redist_movall_lpis(GICv3CPUState *src, GICv3CPUState *dest)
+{
+    /*
+     * We must move all pending LPIs from the source redistributor
+     * to the destination. That is, for every pending LPI X on
+     * src, we must set it not-pending on src and pending on dest.
+     * LPIs that are already pending on dest are not cleared.
+     *
+     * If LPIs are disabled on dest this is CONSTRAINED UNPREDICTABLE:
+     * we choose to NOP. If LPIs are disabled on source there's nothing
+     * to be transferred anyway.
+     */
+    AddressSpace *as = &src->gic->dma_as;
+    uint64_t idbits;
+    uint32_t pendt_size;
+    uint64_t src_baddr, dest_baddr;
+    int i;
+
+    if (!(src->gicr_ctlr & GICR_CTLR_ENABLE_LPIS) ||
+        !(dest->gicr_ctlr & GICR_CTLR_ENABLE_LPIS)) {
+        return;
+    }
+
+    idbits = MIN(FIELD_EX64(src->gicr_propbaser, GICR_PROPBASER, IDBITS),
+                 GICD_TYPER_IDBITS);
+    idbits = MIN(FIELD_EX64(dest->gicr_propbaser, GICR_PROPBASER, IDBITS),
+                 idbits);
+
+    pendt_size = 1ULL << (idbits + 1);
+    src_baddr = src->gicr_pendbaser & R_GICR_PENDBASER_PHYADDR_MASK;
+    dest_baddr = dest->gicr_pendbaser & R_GICR_PENDBASER_PHYADDR_MASK;
+
+    for (i = GICV3_LPI_INTID_START / 8; i < pendt_size / 8; i++) {
+        uint8_t src_pend, dest_pend;
+
+        address_space_read(as, src_baddr + i, MEMTXATTRS_UNSPECIFIED,
+                           &src_pend, sizeof(src_pend));
+        if (!src_pend) {
+            continue;
+        }
+        address_space_read(as, dest_baddr + i, MEMTXATTRS_UNSPECIFIED,
+                           &dest_pend, sizeof(dest_pend));
+        dest_pend |= src_pend;
+        src_pend = 0;
+        address_space_write(as, src_baddr + i, MEMTXATTRS_UNSPECIFIED,
+                            &src_pend, sizeof(src_pend));
+        address_space_write(as, dest_baddr + i, MEMTXATTRS_UNSPECIFIED,
+                            &dest_pend, sizeof(dest_pend));
+    }
+
+    gicv3_redist_update_lpi(src);
+    gicv3_redist_update_lpi(dest);
 }
 
 void gicv3_redist_set_irq(GICv3CPUState *cs, int irq, int level)

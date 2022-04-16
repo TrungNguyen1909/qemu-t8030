@@ -48,7 +48,9 @@ long neon_element_offset(int reg, int element, MemOp memop);
 void gen_rev16(TCGv_i32 dest, TCGv_i32 var);
 void clear_eci_state(DisasContext *s);
 bool mve_eci_check(DisasContext *s);
+void mve_update_eci(DisasContext *s);
 void mve_update_and_store_eci(DisasContext *s);
+bool mve_skip_vmov(DisasContext *s, int vn, int index, int size);
 
 static inline TCGv_i32 load_cpu_offset(int offset)
 {
@@ -67,6 +69,9 @@ static inline void store_cpu_offset(TCGv_i32 var, int offset)
 
 #define store_cpu_field(var, name) \
     store_cpu_offset(var, offsetof(CPUARMState, name))
+
+#define store_cpu_field_constant(val, name) \
+    tcg_gen_st_i32(tcg_constant_i32(val), cpu_env, offsetof(CPUARMState, name))
 
 /* Create a new temporary and set it to the value of a CPU register.  */
 static inline TCGv_i32 load_reg(DisasContext *s, int reg)
@@ -112,13 +117,13 @@ void gen_aa32_st_i64(DisasContext *s, TCGv_i64 val, TCGv_i32 a32,
 static inline void gen_aa32_ld64(DisasContext *s, TCGv_i64 val,
                                  TCGv_i32 a32, int index)
 {
-    gen_aa32_ld_i64(s, val, a32, index, MO_Q);
+    gen_aa32_ld_i64(s, val, a32, index, MO_UQ);
 }
 
 static inline void gen_aa32_st64(DisasContext *s, TCGv_i64 val,
                                  TCGv_i32 a32, int index)
 {
-    gen_aa32_st_i64(s, val, a32, index, MO_Q);
+    gen_aa32_st_i64(s, val, a32, index, MO_UQ);
 }
 
 DO_GEN_LD(8u, MO_UB)

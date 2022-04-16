@@ -29,6 +29,7 @@
 #include "parallels.h"
 #include "crypto/hash.h"
 #include "qemu/uuid.h"
+#include "qemu/memalign.h"
 
 #define PARALLELS_FORMAT_EXTENSION_MAGIC 0xAB234CEF23DCEA87ULL
 
@@ -260,7 +261,7 @@ static int parallels_parse_format_extension(BlockDriverState *bs,
             break;
 
         default:
-            error_setg(errp, "Unknown feature: 0x%" PRIu64, fh.magic);
+            error_setg(errp, "Unknown feature: 0x%" PRIx64, fh.magic);
             goto fail;
         }
 

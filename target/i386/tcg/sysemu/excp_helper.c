@@ -19,40 +19,8 @@
 
 #include "qemu/osdep.h"
 #include "cpu.h"
+#include "exec/exec-all.h"
 #include "tcg/helper-tcg.h"
-
-int get_pg_mode(CPUX86State *env)
-{
-    int pg_mode = 0;
-    if (env->cr[0] & CR0_WP_MASK) {
-        pg_mode |= PG_MODE_WP;
-    }
-    if (env->cr[4] & CR4_PAE_MASK) {
-        pg_mode |= PG_MODE_PAE;
-    }
-    if (env->cr[4] & CR4_PSE_MASK) {
-        pg_mode |= PG_MODE_PSE;
-    }
-    if (env->cr[4] & CR4_PKE_MASK) {
-        pg_mode |= PG_MODE_PKE;
-    }
-    if (env->cr[4] & CR4_PKS_MASK) {
-        pg_mode |= PG_MODE_PKS;
-    }
-    if (env->cr[4] & CR4_SMEP_MASK) {
-        pg_mode |= PG_MODE_SMEP;
-    }
-    if (env->cr[4] & CR4_LA57_MASK) {
-        pg_mode |= PG_MODE_LA57;
-    }
-    if (env->hflags & HF_LMA_MASK) {
-        pg_mode |= PG_MODE_LMA;
-    }
-    if (env->efer & MSR_EFER_NXE) {
-        pg_mode |= PG_MODE_NXE;
-    }
-    return pg_mode;
-}
 
 #define PG_ERROR_OK (-1)
 
@@ -90,19 +58,10 @@ static int mmu_translate(CPUState *cs, hwaddr addr, MMUTranslateFunc get_hphys_f
         target_ulong pdpe_addr;
 
 #ifdef TARGET_X86_64
-        if (env->hflags & HF_LMA_MASK) {
+        if (pg_mode & PG_MODE_LMA) {
             bool la57 = pg_mode & PG_MODE_LA57;
             uint64_t pml5e_addr, pml5e;
             uint64_t pml4e_addr, pml4e;
-            int32_t sext;
-
-            /* test virtual address sign extension */
-            sext = la57 ? (int64_t)addr >> 56 : (int64_t)addr >> 47;
-            if (get_hphys_func && sext != 0 && sext != -1) {
-                env->error_code = 0;
-                cs->exception_index = EXCP0D_GPF;
-                return 1;
-            }
 
             if (la57) {
                 pml5e_addr = ((cr3 & ~0xfff) +
@@ -287,9 +246,7 @@ do_check_protect_pse36:
         *prot |= PAGE_EXEC;
     }
 
-    if (!(env->hflags & HF_LMA_MASK)) {
-        pkr = 0;
-    } else if (ptep & PG_USER_MASK) {
+    if (ptep & PG_USER_MASK) {
         pkr = pg_mode & PG_MODE_PKE ? env->pkru : 0;
     } else {
         pkr = pg_mode & PG_MODE_PKS ? env->pkrs : 0;
@@ -352,13 +309,12 @@ do_check_protect_pse36:
     if (is_user)
         error_code |= PG_ERROR_U_MASK;
     if (is_write1 == 2 &&
-        (((pg_mode & PG_MODE_NXE) && (pg_mode & PG_MODE_PAE)) ||
-         (pg_mode & PG_MODE_SMEP)))
+        ((pg_mode & PG_MODE_NXE) || (pg_mode & PG_MODE_SMEP)))
         error_code |= PG_ERROR_I_D_MASK;
     return error_code;
 }
 
-static hwaddr get_hphys(CPUState *cs, hwaddr gphys, MMUAccessType access_type,
+hwaddr get_hphys(CPUState *cs, hwaddr gphys, MMUAccessType access_type,
                         int *prot)
 {
     CPUX86State *env = &X86_CPU(cs)->env;
@@ -423,6 +379,18 @@ static int handle_mmu_fault(CPUState *cs, vaddr addr, int size,
         page_size = 4096;
     } else {
         pg_mode = get_pg_mode(env);
+        if (pg_mode & PG_MODE_LMA) {
+            int32_t sext;
+
+            /* test virtual address sign extension */
+            sext = (int64_t)addr >> (pg_mode & PG_MODE_LA57 ? 56 : 47);
+            if (sext != 0 && sext != -1) {
+                env->error_code = 0;
+                cs->exception_index = EXCP0D_GPF;
+                return 1;
+            }
+        }
+
         error_code = mmu_translate(cs, addr, get_hphys, env->cr[3], is_write1,
                                    mmu_idx, pg_mode,
                                    &paddr, &page_size, &prot);

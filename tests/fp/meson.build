@@ -37,6 +37,11 @@ tfcflags = [
   '-Wno-error',
 ]
 
+if cc.get_id() == 'clang'
+  # Clang does not support '#pragma STDC FENV_ACCESS'
+  tfcflags += [ '-Wno-ignored-pragmas' ]
+endif
+
 tfgencases = [
   tfdir / 'genCases_ui32.c',
   tfdir / 'genCases_ui64.c',
@@ -622,7 +627,7 @@ test('fp-test-mulAdd', fptest,
      # no fptest_rounding_args
      args: fptest_args +
            ['f16_mulAdd', 'f32_mulAdd', 'f64_mulAdd', 'f128_mulAdd'],
-     suite: ['softfloat-slow', 'softfloat-ops-slow'], timeout: 90)
+     suite: ['softfloat-slow', 'softfloat-ops-slow', 'slow'], timeout: 90)
 
 fpbench = executable(
   'fp-bench',

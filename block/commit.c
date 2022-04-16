@@ -20,6 +20,7 @@
 #include "qapi/error.h"
 #include "qapi/qmp/qerror.h"
 #include "qemu/ratelimit.h"
+#include "qemu/memalign.h"
 #include "sysemu/block-backend.h"
 
 enum {
@@ -207,7 +208,7 @@ static const BlockJobDriver commit_job_driver = {
 };
 
 static int coroutine_fn bdrv_commit_top_preadv(BlockDriverState *bs,
-    uint64_t offset, uint64_t bytes, QEMUIOVector *qiov, int flags)
+    int64_t offset, int64_t bytes, QEMUIOVector *qiov, BdrvRequestFlags flags)
 {
     return bdrv_co_preadv(bs->backing, offset, bytes, qiov, flags);
 }
@@ -252,6 +253,8 @@ void commit_start(const char *job_id, BlockDriverState *bs,
     int64_t base_size, top_size;
     uint64_t base_perms, iter_shared_perms;
     int ret;
+
+    GLOBAL_STATE_CODE();
 
     assert(top != bs);
     if (bdrv_skip_filters(top) == bdrv_skip_filters(base)) {
@@ -370,7 +373,6 @@ void commit_start(const char *job_id, BlockDriverState *bs,
     s->base = blk_new(s->common.job.aio_context,
                       base_perms,
                       BLK_PERM_CONSISTENT_READ
-                      | BLK_PERM_GRAPH_MOD
                       | BLK_PERM_WRITE_UNCHANGED);
     ret = blk_insert_bs(s->base, base, errp);
     if (ret < 0) {
@@ -432,6 +434,8 @@ int bdrv_commit(BlockDriverState *bs)
     int ret = 0;
     QEMU_AUTO_VFREE uint8_t *buf = NULL;
     Error *local_err = NULL;
+
+    GLOBAL_STATE_CODE();
 
     if (!drv)
         return -ENOMEDIUM;

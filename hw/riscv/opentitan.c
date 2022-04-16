@@ -19,6 +19,7 @@
  */
 
 #include "qemu/osdep.h"
+#include "qemu/cutils.h"
 #include "hw/riscv/opentitan.h"
 #include "qapi/error.h"
 #include "hw/boards.h"
@@ -33,51 +34,58 @@ static const MemMapEntry ibex_memmap[] = {
     [IBEX_DEV_FLASH] =          {  0x20000000,  0x80000 },
     [IBEX_DEV_UART] =           {  0x40000000,  0x1000  },
     [IBEX_DEV_GPIO] =           {  0x40040000,  0x1000  },
-    [IBEX_DEV_SPI] =            {  0x40050000,  0x1000  },
+    [IBEX_DEV_SPI_DEVICE] =     {  0x40050000,  0x1000  },
     [IBEX_DEV_I2C] =            {  0x40080000,  0x1000  },
     [IBEX_DEV_PATTGEN] =        {  0x400e0000,  0x1000  },
     [IBEX_DEV_TIMER] =          {  0x40100000,  0x1000  },
     [IBEX_DEV_SENSOR_CTRL] =    {  0x40110000,  0x1000  },
     [IBEX_DEV_OTP_CTRL] =       {  0x40130000,  0x4000  },
+    [IBEX_DEV_USBDEV] =         {  0x40150000,  0x1000  },
+    [IBEX_DEV_SPI_HOST0] =      {  0x40300000,  0x1000  },
+    [IBEX_DEV_SPI_HOST1] =      {  0x40310000,  0x1000  },
     [IBEX_DEV_PWRMGR] =         {  0x40400000,  0x1000  },
     [IBEX_DEV_RSTMGR] =         {  0x40410000,  0x1000  },
     [IBEX_DEV_CLKMGR] =         {  0x40420000,  0x1000  },
     [IBEX_DEV_PINMUX] =         {  0x40460000,  0x1000  },
     [IBEX_DEV_PADCTRL] =        {  0x40470000,  0x1000  },
-    [IBEX_DEV_USBDEV] =         {  0x40500000,  0x1000  },
     [IBEX_DEV_FLASH_CTRL] =     {  0x41000000,  0x1000  },
-    [IBEX_DEV_PLIC] =           {  0x41010000,  0x1000  },
     [IBEX_DEV_AES] =            {  0x41100000,  0x1000  },
     [IBEX_DEV_HMAC] =           {  0x41110000,  0x1000  },
     [IBEX_DEV_KMAC] =           {  0x41120000,  0x1000  },
-    [IBEX_DEV_KEYMGR] =         {  0x41130000,  0x1000  },
+    [IBEX_DEV_OTBN] =           {  0x41130000,  0x10000 },
+    [IBEX_DEV_KEYMGR] =         {  0x41140000,  0x1000  },
     [IBEX_DEV_CSRNG] =          {  0x41150000,  0x1000  },
     [IBEX_DEV_ENTROPY] =        {  0x41160000,  0x1000  },
     [IBEX_DEV_EDNO] =           {  0x41170000,  0x1000  },
     [IBEX_DEV_EDN1] =           {  0x41180000,  0x1000  },
     [IBEX_DEV_ALERT_HANDLER] =  {  0x411b0000,  0x1000  },
     [IBEX_DEV_NMI_GEN] =        {  0x411c0000,  0x1000  },
-    [IBEX_DEV_OTBN] =           {  0x411d0000,  0x10000 },
     [IBEX_DEV_PERI] =           {  0x411f0000,  0x10000 },
+    [IBEX_DEV_PLIC] =           {  0x48000000,  0x4005000  },
     [IBEX_DEV_FLASH_VIRTUAL] =  {  0x80000000,  0x80000 },
 };
 
 static void opentitan_board_init(MachineState *machine)
 {
+    MachineClass *mc = MACHINE_GET_CLASS(machine);
     const MemMapEntry *memmap = ibex_memmap;
     OpenTitanState *s = g_new0(OpenTitanState, 1);
     MemoryRegion *sys_mem = get_system_memory();
-    MemoryRegion *main_mem = g_new(MemoryRegion, 1);
+
+    if (machine->ram_size != mc->default_ram_size) {
+        char *sz = size_to_str(mc->default_ram_size);
+        error_report("Invalid RAM size, should be %s", sz);
+        g_free(sz);
+        exit(EXIT_FAILURE);
+    }
 
     /* Initialize SoC */
     object_initialize_child(OBJECT(machine), "soc", &s->soc,
                             TYPE_RISCV_IBEX_SOC);
-    qdev_realize(DEVICE(&s->soc), NULL, &error_abort);
+    qdev_realize(DEVICE(&s->soc), NULL, &error_fatal);
 
-    memory_region_init_ram(main_mem, NULL, "riscv.lowrisc.ibex.ram",
-        memmap[IBEX_DEV_RAM].size, &error_fatal);
     memory_region_add_subregion(sys_mem,
-        memmap[IBEX_DEV_RAM].base, main_mem);
+        memmap[IBEX_DEV_RAM].base, machine->ram);
 
     if (machine->firmware) {
         riscv_load_firmware(machine->firmware, memmap[IBEX_DEV_RAM].base, NULL);
@@ -95,6 +103,8 @@ static void opentitan_machine_init(MachineClass *mc)
     mc->init = opentitan_board_init;
     mc->max_cpus = 1;
     mc->default_cpu_type = TYPE_RISCV_CPU_IBEX;
+    mc->default_ram_id = "riscv.lowrisc.ibex.ram";
+    mc->default_ram_size = ibex_memmap[IBEX_DEV_RAM].size;
 }
 
 DEFINE_MACHINE("opentitan", opentitan_machine_init)
@@ -105,7 +115,7 @@ static void lowrisc_ibex_soc_init(Object *obj)
 
     object_initialize_child(obj, "cpus", &s->cpus, TYPE_RISCV_HART_ARRAY);
 
-    object_initialize_child(obj, "plic", &s->plic, TYPE_IBEX_PLIC);
+    object_initialize_child(obj, "plic", &s->plic, TYPE_SIFIVE_PLIC);
 
     object_initialize_child(obj, "uart", &s->uart, TYPE_IBEX_UART);
 
@@ -118,6 +128,7 @@ static void lowrisc_ibex_soc_realize(DeviceState *dev_soc, Error **errp)
     MachineState *ms = MACHINE(qdev_get_machine());
     LowRISCIbexSoCState *s = RISCV_IBEX_SOC(dev_soc);
     MemoryRegion *sys_mem = get_system_memory();
+    int i;
 
     object_property_set_str(OBJECT(&s->cpus), "cpu-type", ms->cpu_type,
                             &error_abort);
@@ -144,10 +155,29 @@ static void lowrisc_ibex_soc_realize(DeviceState *dev_soc, Error **errp)
                                 &s->flash_alias);
 
     /* PLIC */
+    qdev_prop_set_string(DEVICE(&s->plic), "hart-config", "M");
+    qdev_prop_set_uint32(DEVICE(&s->plic), "hartid-base", 0);
+    qdev_prop_set_uint32(DEVICE(&s->plic), "num-sources", 180);
+    qdev_prop_set_uint32(DEVICE(&s->plic), "num-priorities", 3);
+    qdev_prop_set_uint32(DEVICE(&s->plic), "priority-base", 0x00);
+    qdev_prop_set_uint32(DEVICE(&s->plic), "pending-base", 0x1000);
+    qdev_prop_set_uint32(DEVICE(&s->plic), "enable-base", 0x2000);
+    qdev_prop_set_uint32(DEVICE(&s->plic), "enable-stride", 32);
+    qdev_prop_set_uint32(DEVICE(&s->plic), "context-base", 0x200000);
+    qdev_prop_set_uint32(DEVICE(&s->plic), "context-stride", 8);
+    qdev_prop_set_uint32(DEVICE(&s->plic), "aperture-size", memmap[IBEX_DEV_PLIC].size);
+
     if (!sysbus_realize(SYS_BUS_DEVICE(&s->plic), errp)) {
         return;
     }
     sysbus_mmio_map(SYS_BUS_DEVICE(&s->plic), 0, memmap[IBEX_DEV_PLIC].base);
+
+    for (i = 0; i < ms->smp.cpus; i++) {
+        CPUState *cpu = qemu_get_cpu(i);
+
+        qdev_connect_gpio_out(DEVICE(&s->plic), ms->smp.cpus + i,
+                              qdev_get_gpio_in(DEVICE(cpu), IRQ_M_EXT));
+    }
 
     /* UART */
     qdev_prop_set_chr(DEVICE(&(s->uart)), "chardev", serial_hd(0));
@@ -175,11 +205,18 @@ static void lowrisc_ibex_soc_realize(DeviceState *dev_soc, Error **errp)
     sysbus_connect_irq(SYS_BUS_DEVICE(&s->timer),
                        0, qdev_get_gpio_in(DEVICE(&s->plic),
                        IBEX_TIMER_TIMEREXPIRED0_0));
+    qdev_connect_gpio_out(DEVICE(&s->timer), 0,
+                          qdev_get_gpio_in(DEVICE(qemu_get_cpu(0)),
+                                           IRQ_M_TIMER));
 
     create_unimplemented_device("riscv.lowrisc.ibex.gpio",
         memmap[IBEX_DEV_GPIO].base, memmap[IBEX_DEV_GPIO].size);
-    create_unimplemented_device("riscv.lowrisc.ibex.spi",
-        memmap[IBEX_DEV_SPI].base, memmap[IBEX_DEV_SPI].size);
+    create_unimplemented_device("riscv.lowrisc.ibex.spi_device",
+        memmap[IBEX_DEV_SPI_DEVICE].base, memmap[IBEX_DEV_SPI_DEVICE].size);
+    create_unimplemented_device("riscv.lowrisc.ibex.spi_host0",
+        memmap[IBEX_DEV_SPI_HOST0].base, memmap[IBEX_DEV_SPI_HOST0].size);
+    create_unimplemented_device("riscv.lowrisc.ibex.spi_host1",
+        memmap[IBEX_DEV_SPI_HOST1].base, memmap[IBEX_DEV_SPI_HOST1].size);
     create_unimplemented_device("riscv.lowrisc.ibex.i2c",
         memmap[IBEX_DEV_I2C].base, memmap[IBEX_DEV_I2C].size);
     create_unimplemented_device("riscv.lowrisc.ibex.pattgen",

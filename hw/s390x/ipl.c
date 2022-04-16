@@ -37,7 +37,9 @@
 
 #define KERN_IMAGE_START                0x010000UL
 #define LINUX_MAGIC_ADDR                0x010008UL
+#define KERN_PARM_AREA_SIZE_ADDR        0x010430UL
 #define KERN_PARM_AREA                  0x010480UL
+#define LEGACY_KERN_PARM_AREA_SIZE      0x000380UL
 #define INITRD_START                    0x800000UL
 #define INITRD_PARM_START               0x010408UL
 #define PARMFILE_START                  0x001000UL
@@ -107,6 +109,21 @@ static uint64_t bios_translate_addr(void *opaque, uint64_t srcaddr)
      * we can simply add the destination address for the final location
      */
     return srcaddr + dstaddr;
+}
+
+static uint64_t get_max_kernel_cmdline_size(void)
+{
+    uint64_t *size_ptr = rom_ptr(KERN_PARM_AREA_SIZE_ADDR, sizeof(*size_ptr));
+
+    if (size_ptr) {
+        uint64_t size;
+
+        size = be64_to_cpu(*size_ptr);
+        if (size) {
+            return size;
+        }
+    }
+    return LEGACY_KERN_PARM_AREA_SIZE;
 }
 
 static void s390_ipl_realize(DeviceState *dev, Error **errp)
@@ -190,10 +207,22 @@ static void s390_ipl_realize(DeviceState *dev, Error **errp)
          * loader) and it won't work. For this case we force it to 0x10000, too.
          */
         if (pentry == KERN_IMAGE_START || pentry == 0x800) {
-            char *parm_area = rom_ptr(KERN_PARM_AREA, strlen(ipl->cmdline) + 1);
+            size_t cmdline_size = strlen(ipl->cmdline) + 1;
+            char *parm_area = rom_ptr(KERN_PARM_AREA, cmdline_size);
+
             ipl->start_addr = KERN_IMAGE_START;
             /* Overwrite parameters in the kernel image, which are "rom" */
             if (parm_area) {
+                uint64_t max_cmdline_size = get_max_kernel_cmdline_size();
+
+                if (cmdline_size > max_cmdline_size) {
+                    error_setg(errp,
+                               "kernel command line exceeds maximum size:"
+                               " %zu > %" PRIu64,
+                               cmdline_size, max_cmdline_size);
+                    return;
+                }
+
                 strcpy(parm_area, ipl->cmdline);
             }
         } else {
@@ -711,7 +740,6 @@ int s390_ipl_pv_unpack(void)
 void s390_ipl_prepare_cpu(S390CPU *cpu)
 {
     S390IPLState *ipl = get_ipl_device();
-    Error *err = NULL;
 
     cpu->env.psw.addr = ipl->start_addr;
     cpu->env.psw.mask = IPL_PSW_MASK;
@@ -723,10 +751,7 @@ void s390_ipl_prepare_cpu(S390CPU *cpu)
         }
     }
     if (ipl->netboot) {
-        if (load_netboot_image(&err) < 0) {
-            error_report_err(err);
-            exit(1);
-        }
+        load_netboot_image(&error_fatal);
         ipl->qipl.netboot_start_addr = cpu_to_be64(ipl->start_addr);
     }
     s390_ipl_set_boot_menu(ipl);

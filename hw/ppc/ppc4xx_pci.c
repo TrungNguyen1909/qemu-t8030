@@ -20,6 +20,7 @@
  * 4xx SoCs, such as the 440EP. */
 
 #include "qemu/osdep.h"
+#include "qemu/log.h"
 #include "hw/irq.h"
 #include "hw/ppc/ppc.h"
 #include "hw/ppc/ppc4xx.h"
@@ -48,12 +49,14 @@ OBJECT_DECLARE_SIMPLE_TYPE(PPC4xxPCIState, PPC4xx_PCI_HOST_BRIDGE)
 #define PPC4xx_PCI_NR_PMMS 3
 #define PPC4xx_PCI_NR_PTMS 2
 
+#define PPC4xx_PCI_NUM_DEVS 5
+
 struct PPC4xxPCIState {
     PCIHostState parent_obj;
 
     struct PCIMasterMap pmm[PPC4xx_PCI_NR_PMMS];
     struct PCITargetMap ptm[PPC4xx_PCI_NR_PTMS];
-    qemu_irq irq[PCI_NUM_PINS];
+    qemu_irq irq[PPC4xx_PCI_NUM_DEVS];
 
     MemoryRegion container;
     MemoryRegion iomem;
@@ -150,8 +153,9 @@ static void ppc4xx_pci_reg_write4(void *opaque, hwaddr offset,
         break;
 
     default:
-        printf("%s: unhandled PCI internal register 0x%lx\n", __func__,
-               (unsigned long)offset);
+        qemu_log_mask(LOG_GUEST_ERROR,
+                     "%s: unhandled PCI internal register 0x%" HWADDR_PRIx "\n",
+                     __func__, offset);
         break;
     }
 }
@@ -216,8 +220,9 @@ static uint64_t ppc4xx_pci_reg_read4(void *opaque, hwaddr offset,
         break;
 
     default:
-        printf("%s: invalid PCI internal register 0x%lx\n", __func__,
-               (unsigned long)offset);
+        qemu_log_mask(LOG_GUEST_ERROR,
+                      "%s: invalid PCI internal register 0x%" HWADDR_PRIx "\n",
+                      __func__, offset);
         value = 0;
     }
 
@@ -246,7 +251,7 @@ static int ppc4xx_pci_map_irq(PCIDevice *pci_dev, int irq_num)
 
     trace_ppc4xx_pci_map_irq(pci_dev->devfn, irq_num, slot);
 
-    return slot - 1;
+    return slot > 0 ? slot - 1 : PPC4xx_PCI_NUM_DEVS - 1;
 }
 
 static void ppc4xx_pci_set_irq(void *opaque, int irq_num, int level)
@@ -254,7 +259,7 @@ static void ppc4xx_pci_set_irq(void *opaque, int irq_num, int level)
     qemu_irq *pci_irqs = opaque;
 
     trace_ppc4xx_pci_set_irq(irq_num);
-    assert(irq_num >= 0);
+    assert(irq_num >= 0 && irq_num < PPC4xx_PCI_NUM_DEVS);
     qemu_set_irq(pci_irqs[irq_num], level);
 }
 

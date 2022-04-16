@@ -72,7 +72,7 @@ struct alsa_params_obt {
     snd_pcm_uframes_t samples;
 };
 
-static void GCC_FMT_ATTR (2, 3) alsa_logerr (int err, const char *fmt, ...)
+static void G_GNUC_PRINTF (2, 3) alsa_logerr (int err, const char *fmt, ...)
 {
     va_list ap;
 
@@ -83,7 +83,7 @@ static void GCC_FMT_ATTR (2, 3) alsa_logerr (int err, const char *fmt, ...)
     AUD_log (AUDIO_CAP, "Reason: %s\n", snd_strerror (err));
 }
 
-static void GCC_FMT_ATTR (3, 4) alsa_logerr2 (
+static void G_GNUC_PRINTF (3, 4) alsa_logerr2 (
     int err,
     const char *typ,
     const char *fmt,
@@ -916,6 +916,7 @@ static struct audio_pcm_ops alsa_pcm_ops = {
     .init_out = alsa_init_out,
     .fini_out = alsa_fini_out,
     .write    = alsa_write,
+    .buffer_get_free = audio_generic_buffer_get_free,
     .run_buffer_out = audio_generic_run_buffer_out,
     .enable_out = alsa_enable_out,
 

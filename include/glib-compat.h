@@ -46,9 +46,9 @@
  *    int g_foo(const char *wibble)
  *
  * We must define a static inline function with the same signature that does
- * what we need, but with a "_qemu" suffix e.g.
+ * what we need, but with a "_compat" suffix e.g.
  *
- * static inline void g_foo_qemu(const char *wibble)
+ * static inline void g_foo_compat(const char *wibble)
  * {
  *     #if GLIB_CHECK_VERSION(X, Y, 0)
  *        g_foo(wibble)
@@ -61,12 +61,49 @@
  * ensuring this wrapper function impl doesn't trigger the compiler warning
  * about using too new glib APIs. Finally we can do
  *
- *   #define g_foo(a) g_foo_qemu(a)
+ *   #define g_foo(a) g_foo_compat(a)
  *
  * So now the code elsewhere in QEMU, which *does* have the
  * -Wdeprecated-declarations warning active, can call g_foo(...) as normal,
  * without generating warnings.
  */
+
+/*
+ * g_memdup2_qemu:
+ * @mem: (nullable): the memory to copy.
+ * @byte_size: the number of bytes to copy.
+ *
+ * Allocates @byte_size bytes of memory, and copies @byte_size bytes into it
+ * from @mem. If @mem is %NULL it returns %NULL.
+ *
+ * This replaces g_memdup(), which was prone to integer overflows when
+ * converting the argument from a #gsize to a #guint.
+ *
+ * This static inline version is a backport of the new public API from
+ * GLib 2.68, kept internal to GLib for backport to older stable releases.
+ * See https://gitlab.gnome.org/GNOME/glib/-/issues/2319.
+ *
+ * Returns: (nullable): a pointer to the newly-allocated copy of the memory,
+ *          or %NULL if @mem is %NULL.
+ */
+static inline gpointer g_memdup2_qemu(gconstpointer mem, gsize byte_size)
+{
+#if GLIB_CHECK_VERSION(2, 68, 0)
+    return g_memdup2(mem, byte_size);
+#else
+    gpointer new_mem;
+
+    if (mem && byte_size != 0) {
+        new_mem = g_malloc(byte_size);
+        memcpy(new_mem, mem, byte_size);
+    } else {
+        new_mem = NULL;
+    }
+
+    return new_mem;
+#endif
+}
+#define g_memdup2(m, s) g_memdup2_qemu(m, s)
 
 #if defined(G_OS_UNIX)
 /*

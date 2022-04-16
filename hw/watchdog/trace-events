@@ -12,3 +12,7 @@ apple_wdt_write(uint64_t addr, uint64_t orig, uint32_t old, uint32_t val) "0x%04
 apple_wdt_chip_reset(void) "Apple Watch Dog Timer: chip reset"
 apple_wdt_system_reset(void) "Apple Watch Dog Timer: system reset"
 apple_wdt_set_irq(int level) "level: %d"
+
+# wdt-aspeed.c
+aspeed_wdt_read(uint64_t addr, uint32_t size) "@0x%" PRIx64 " size=%d"
+aspeed_wdt_write(uint64_t addr, uint32_t size, uint64_t data) "@0x%" PRIx64 " size=%d value=0x%"PRIx64

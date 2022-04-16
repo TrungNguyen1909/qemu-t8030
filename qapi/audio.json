@@ -1,4 +1,5 @@
 # -*- mode: python -*-
+# vim: filetype=python
 #
 # Copyright (C) 2015-2019 Zoltán Kővágó <DirtY.iCE.hu@gmail.com>
 #
@@ -386,7 +387,7 @@
 # Since: 4.0
 ##
 { 'enum': 'AudiodevDriver',
-  'data': [ 'none', 'alsa', 'coreaudio', 'dsound', 'jack', 'oss', 'pa',
+  'data': [ 'none', 'alsa', 'coreaudio', 'dbus', 'dsound', 'jack', 'oss', 'pa',
             'sdl', 'spice', 'wav' ] }
 
 ##
@@ -412,6 +413,7 @@
     'none':      'AudiodevGenericOptions',
     'alsa':      'AudiodevAlsaOptions',
     'coreaudio': 'AudiodevCoreaudioOptions',
+    'dbus':      'AudiodevGenericOptions',
     'dsound':    'AudiodevDsoundOptions',
     'jack':      'AudiodevJackOptions',
     'oss':       'AudiodevOssOptions',

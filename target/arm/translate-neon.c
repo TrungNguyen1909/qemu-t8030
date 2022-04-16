@@ -28,12 +28,6 @@
 #include "translate.h"
 #include "translate-a32.h"
 
-static inline int neon_3same_fp_size(DisasContext *s, int x)
-{
-    /* Convert 0==fp32, 1==fp16 into a MO_* value */
-    return MO_32 - x;
-}
-
 /* Include the generated Neon decoder */
 #include "decode-neon-dp.c.inc"
 #include "decode-neon-ls.c.inc"
@@ -79,7 +73,7 @@ static void neon_load_element64(TCGv_i64 var, int reg, int ele, MemOp mop)
     case MO_UL:
         tcg_gen_ld32u_i64(var, cpu_env, offset);
         break;
-    case MO_Q:
+    case MO_UQ:
         tcg_gen_ld_i64(var, cpu_env, offset);
         break;
     default:
@@ -663,18 +657,21 @@ static bool trans_VLDST_single(DisasContext *s, arg_VLDST_single *a)
     /* Catch the UNDEF cases. This is unavoidably a bit messy. */
     switch (nregs) {
     case 1:
+        if (a->stride != 1) {
+            return false;
+        }
         if (((a->align & (1 << a->size)) != 0) ||
             (a->size == 2 && (a->align == 1 || a->align == 2))) {
             return false;
         }
         break;
-    case 3:
-        if ((a->align & 1) != 0) {
-            return false;
-        }
-        /* fall through */
     case 2:
         if (a->size == 2 && (a->align & 2) != 0) {
+            return false;
+        }
+        break;
+    case 3:
+        if (a->align != 0) {
             return false;
         }
         break;
@@ -1836,7 +1833,7 @@ static bool do_prewiden_3d(DisasContext *s, arg_3diff *a,
         return false;
     }
 
-    if ((a->vd & 1) || (src1_mop == MO_Q && (a->vn & 1))) {
+    if ((a->vd & 1) || (src1_mop == MO_UQ && (a->vn & 1))) {
         return false;
     }
 
@@ -1916,7 +1913,7 @@ static bool do_prewiden_3d(DisasContext *s, arg_3diff *a,
         };                                                              \
         int narrow_mop = a->size == MO_32 ? MO_32 | SIGN : -1;          \
         return do_prewiden_3d(s, a, widenfn[a->size], addfn[a->size],   \
-                              SRC1WIDE ? MO_Q : narrow_mop,             \
+                              SRC1WIDE ? MO_UQ : narrow_mop,             \
                               narrow_mop);                              \
     }
 

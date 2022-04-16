@@ -194,8 +194,9 @@ struct VirtIONet {
     NICConf nic_conf;
     DeviceState *qdev;
     int multiqueue;
-    uint16_t max_queues;
-    uint16_t curr_queues;
+    uint16_t max_queue_pairs;
+    uint16_t curr_queue_pairs;
+    uint16_t max_ncs;
     size_t config_size;
     char *netclient_name;
     char *netclient_type;
@@ -209,6 +210,8 @@ struct VirtIONet {
     bool failover_primary_hidden;
     bool failover;
     DeviceListener primary_listener;
+    QDict *primary_opts;
+    bool primary_opts_from_json;
     Notifier migration_state;
     VirtioNetRssData rss_data;
     struct NetRxPkt *rx_pkt;

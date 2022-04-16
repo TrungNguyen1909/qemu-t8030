@@ -164,8 +164,7 @@ static void spapr_phb_pci_collect_nvgpu(PCIBus *bus, PCIDevice *pdev,
         return;
     }
 
-    pci_for_each_device(sec_bus, pci_bus_num(sec_bus),
-                        spapr_phb_pci_collect_nvgpu, opaque);
+    pci_for_each_device_under_bus(sec_bus, spapr_phb_pci_collect_nvgpu, opaque);
 }
 
 void spapr_phb_nvgpu_setup(SpaprPhbState *sphb, Error **errp)
@@ -183,8 +182,8 @@ void spapr_phb_nvgpu_setup(SpaprPhbState *sphb, Error **errp)
     sphb->nvgpus->nv2_atsd_current = sphb->nv2_atsd_win_addr;
 
     bus = PCI_HOST_BRIDGE(sphb)->bus;
-    pci_for_each_device(bus, pci_bus_num(bus),
-                        spapr_phb_pci_collect_nvgpu, sphb->nvgpus);
+    pci_for_each_device_under_bus(bus, spapr_phb_pci_collect_nvgpu,
+                                  sphb->nvgpus);
 
     if (sphb->nvgpus->err) {
         error_propagate(errp, sphb->nvgpus->err);
@@ -321,7 +320,7 @@ void spapr_phb_nvgpu_populate_dt(SpaprPhbState *sphb, void *fdt, int bus_off,
 void spapr_phb_nvgpu_ram_populate_dt(SpaprPhbState *sphb, void *fdt)
 {
     int i, j, linkidx, npuoff;
-    char *npuname;
+    g_autofree char *npuname = NULL;
 
     if (!sphb->nvgpus) {
         return;
@@ -334,11 +333,10 @@ void spapr_phb_nvgpu_ram_populate_dt(SpaprPhbState *sphb, void *fdt)
     _FDT(fdt_setprop_cell(fdt, npuoff, "#size-cells", 0));
     /* Advertise NPU as POWER9 so the guest can enable NPU2 contexts */
     _FDT((fdt_setprop_string(fdt, npuoff, "compatible", "ibm,power9-npu")));
-    g_free(npuname);
 
     for (i = 0, linkidx = 0; i < sphb->nvgpus->num; ++i) {
         for (j = 0; j < sphb->nvgpus->slots[i].linknum; ++j) {
-            char *linkname = g_strdup_printf("link@%d", linkidx);
+            g_autofree char *linkname = g_strdup_printf("link@%d", linkidx);
             int off = fdt_add_subnode(fdt, npuoff, linkname);
 
             _FDT(off);
@@ -348,7 +346,6 @@ void spapr_phb_nvgpu_ram_populate_dt(SpaprPhbState *sphb, void *fdt)
             _FDT((fdt_setprop_cell(fdt, off, "phandle",
                                    PHANDLE_NVLINK(sphb, i, j))));
             _FDT((fdt_setprop_cell(fdt, off, "ibm,npu-link-index", linkidx)));
-            g_free(linkname);
             ++linkidx;
         }
     }
@@ -361,7 +358,8 @@ void spapr_phb_nvgpu_ram_populate_dt(SpaprPhbState *sphb, void *fdt)
                                                     &error_abort);
         uint64_t size = object_property_get_uint(nv_mrobj, "size", NULL);
         uint64_t mem_reg[2] = { cpu_to_be64(nvslot->gpa), cpu_to_be64(size) };
-        char *mem_name = g_strdup_printf("memory@%"PRIx64, nvslot->gpa);
+        g_autofree char *mem_name = g_strdup_printf("memory@%"PRIx64,
+                                                    nvslot->gpa);
         int off = fdt_add_subnode(fdt, 0, mem_name);
 
         _FDT(off);
@@ -379,7 +377,6 @@ void spapr_phb_nvgpu_ram_populate_dt(SpaprPhbState *sphb, void *fdt)
                           sizeof(mem_reg))));
         _FDT((fdt_setprop_cell(fdt, off, "phandle",
                                PHANDLE_GPURAM(sphb, i))));
-        g_free(mem_name);
     }
 
 }

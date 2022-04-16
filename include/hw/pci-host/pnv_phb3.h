@@ -16,6 +16,7 @@
 #include "qom/object.h"
 
 typedef struct PnvPHB3 PnvPHB3;
+typedef struct PnvChip PnvChip;
 
 /*
  * PHB3 XICS Source for MSIs
@@ -104,7 +105,7 @@ struct PnvPBCQState {
 /*
  * PHB3 PCIe Root port
  */
-#define TYPE_PNV_PHB3_ROOT_BUS "pnv-phb3-root-bus"
+#define TYPE_PNV_PHB3_ROOT_BUS "pnv-phb3-root"
 
 #define TYPE_PNV_PHB3_ROOT_PORT "pnv-phb3-root-port"
 
@@ -154,9 +155,9 @@ struct PnvPHB3 {
 
     PnvPBCQState pbcq;
 
-    PnvPHB3RootPort root;
-
     QLIST_HEAD(, PnvPhb3DMASpace) dma_spaces;
+
+    PnvChip *chip;
 };
 
 uint64_t pnv_phb3_reg_read(void *opaque, hwaddr off, unsigned size);

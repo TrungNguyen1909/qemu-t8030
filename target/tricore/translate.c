@@ -246,7 +246,7 @@ static void gen_st_2regs_64(TCGv rh, TCGv rl, TCGv address, DisasContext *ctx)
     TCGv_i64 temp = tcg_temp_new_i64();
 
     tcg_gen_concat_i32_i64(temp, rl, rh);
-    tcg_gen_qemu_st_i64(temp, address, ctx->mem_idx, MO_LEQ);
+    tcg_gen_qemu_st_i64(temp, address, ctx->mem_idx, MO_LEUQ);
 
     tcg_temp_free_i64(temp);
 }
@@ -264,7 +264,7 @@ static void gen_ld_2regs_64(TCGv rh, TCGv rl, TCGv address, DisasContext *ctx)
 {
     TCGv_i64 temp = tcg_temp_new_i64();
 
-    tcg_gen_qemu_ld_i64(temp, address, ctx->mem_idx, MO_LEQ);
+    tcg_gen_qemu_ld_i64(temp, address, ctx->mem_idx, MO_LEUQ);
     /* write back to two 32 bit regs */
     tcg_gen_extr_i64_i32(rl, rh, temp);
 
@@ -3225,14 +3225,6 @@ static inline void gen_save_pc(target_ulong pc)
     tcg_gen_movi_tl(cpu_PC, pc);
 }
 
-static void generate_qemu_excp(DisasContext *ctx, int excp)
-{
-    TCGv_i32 tmp = tcg_const_i32(excp);
-    gen_helper_qemu_excp(cpu_env, tmp);
-    ctx->base.is_jmp = DISAS_NORETURN;
-    tcg_temp_free(tmp);
-}
-
 static void gen_goto_tb(DisasContext *ctx, int n, target_ulong dest)
 {
     if (translator_use_goto_tb(&ctx->base, dest)) {
@@ -3241,11 +3233,7 @@ static void gen_goto_tb(DisasContext *ctx, int n, target_ulong dest)
         tcg_gen_exit_tb(ctx->base.tb, n);
     } else {
         gen_save_pc(dest);
-        if (ctx->base.singlestep_enabled) {
-            generate_qemu_excp(ctx, EXCP_DEBUG);
-        } else {
-            tcg_gen_lookup_and_goto_ptr();
-        }
+        tcg_gen_lookup_and_goto_ptr();
     }
 }
 

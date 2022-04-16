@@ -32,6 +32,11 @@ static bool ppc_radix64_get_fully_qualified_addr(const CPUPPCState *env,
                                                  vaddr eaddr,
                                                  uint64_t *lpid, uint64_t *pid)
 {
+    /* When EA(2:11) are nonzero, raise a segment interrupt */
+    if (eaddr & ~R_EADDR_VALID_MASK) {
+        return false;
+    }
+
     if (msr_hv) { /* MSR[HV] -> Hypervisor/bare metal */
         switch (eaddr & R_EADDR_QUADRANT) {
         case R_EADDR_QUADRANT0:
@@ -97,11 +102,21 @@ static void ppc_radix64_raise_segi(PowerPCCPU *cpu, MMUAccessType access_type,
     env->error_code = 0;
 }
 
+static inline const char *access_str(MMUAccessType access_type)
+{
+    return access_type == MMU_DATA_LOAD ? "reading" :
+        (access_type == MMU_DATA_STORE ? "writing" : "execute");
+}
+
 static void ppc_radix64_raise_si(PowerPCCPU *cpu, MMUAccessType access_type,
                                  vaddr eaddr, uint32_t cause)
 {
     CPUState *cs = CPU(cpu);
     CPUPPCState *env = &cpu->env;
+
+    qemu_log_mask(CPU_LOG_MMU, "%s for %s @0x%"VADDR_PRIx" cause %08x\n",
+                  __func__, access_str(access_type),
+                  eaddr, cause);
 
     switch (access_type) {
     case MMU_INST_FETCH:
@@ -129,6 +144,11 @@ static void ppc_radix64_raise_hsi(PowerPCCPU *cpu, MMUAccessType access_type,
 {
     CPUState *cs = CPU(cpu);
     CPUPPCState *env = &cpu->env;
+
+    qemu_log_mask(CPU_LOG_MMU, "%s for %s @0x%"VADDR_PRIx" 0x%"
+                  HWADDR_PRIx" cause %08x\n",
+                  __func__, access_str(access_type),
+                  eaddr, g_raddr, cause);
 
     switch (access_type) {
     case MMU_INST_FETCH:
@@ -184,7 +204,8 @@ static bool ppc_radix64_check_prot(PowerPCCPU *cpu, MMUAccessType access_type,
     /* Check if requested access type is allowed */
     need_prot = prot_for_access_type(access_type);
     if (need_prot & ~*prot) { /* Page Protected for that Access */
-        *fault_cause |= DSISR_PROTFAULT;
+        *fault_cause |= access_type == MMU_INST_FETCH ? SRR1_NOEXEC_GUARD :
+                                                        DSISR_PROTFAULT;
         return true;
     }
 
@@ -306,6 +327,11 @@ static int ppc_radix64_partition_scoped_xlate(PowerPCCPU *cpu,
     hwaddr pte_addr;
     uint64_t pte;
 
+    qemu_log_mask(CPU_LOG_MMU, "%s for %s @0x%"VADDR_PRIx
+                  " mmu_idx %u 0x%"HWADDR_PRIx"\n",
+                  __func__, access_str(access_type),
+                  eaddr, mmu_idx, g_raddr);
+
     *h_page_size = PRTBE_R_GET_RTS(pate.dw0);
     /* No valid pte or access denied due to protection */
     if (ppc_radix64_walk_tree(CPU(cpu)->as, g_raddr, pate.dw0 & PRTBE_R_RPDB,
@@ -329,6 +355,24 @@ static int ppc_radix64_partition_scoped_xlate(PowerPCCPU *cpu,
     return 0;
 }
 
+/*
+ * The spapr vhc has a flat partition scope provided by qemu memory when
+ * not nested.
+ *
+ * When running a nested guest, the addressing is 2-level radix on top of the
+ * vhc memory, so it works practically identically to the bare metal 2-level
+ * radix. So that code is selected directly. A cleaner and more flexible nested
+ * hypervisor implementation would allow the vhc to provide a ->nested_xlate()
+ * function but that is not required for the moment.
+ */
+static bool vhyp_flat_addressing(PowerPCCPU *cpu)
+{
+    if (cpu->vhyp) {
+        return !vhyp_cpu_in_nested(cpu);
+    }
+    return false;
+}
+
 static int ppc_radix64_process_scoped_xlate(PowerPCCPU *cpu,
                                             MMUAccessType access_type,
                                             vaddr eaddr, uint64_t pid,
@@ -343,6 +387,11 @@ static int ppc_radix64_process_scoped_xlate(PowerPCCPU *cpu,
     hwaddr h_raddr, pte_addr;
     int ret;
 
+    qemu_log_mask(CPU_LOG_MMU, "%s for %s @0x%"VADDR_PRIx
+                  " mmu_idx %u pid %"PRIu64"\n",
+                  __func__, access_str(access_type),
+                  eaddr, mmu_idx, pid);
+
     /* Index Process Table by PID to Find Corresponding Process Table Entry */
     offset = pid * sizeof(struct prtb_entry);
     size = 1ULL << ((pate.dw1 & PATE1_R_PRTS) + 12);
@@ -355,7 +404,7 @@ static int ppc_radix64_process_scoped_xlate(PowerPCCPU *cpu,
     }
     prtbe_addr = (pate.dw1 & PATE1_R_PRTB) + offset;
 
-    if (cpu->vhyp) {
+    if (vhyp_flat_addressing(cpu)) {
         prtbe0 = ldq_phys(cs->as, prtbe_addr);
     } else {
         /*
@@ -381,7 +430,7 @@ static int ppc_radix64_process_scoped_xlate(PowerPCCPU *cpu,
     *g_page_size = PRTBE_R_GET_RTS(prtbe0);
     base_addr = prtbe0 & PRTBE_R_RPDB;
     nls = prtbe0 & PRTBE_R_RPDS;
-    if (msr_hv || cpu->vhyp) {
+    if (msr_hv || vhyp_flat_addressing(cpu)) {
         /*
          * Can treat process table addresses as real addresses
          */
@@ -468,9 +517,10 @@ static int ppc_radix64_process_scoped_xlate(PowerPCCPU *cpu,
  *              | = On        | Process Scoped |    Scoped     |
  *              +-------------+----------------+---------------+
  */
-bool ppc_radix64_xlate(PowerPCCPU *cpu, vaddr eaddr, MMUAccessType access_type,
-                       hwaddr *raddr, int *psizep, int *protp, int mmu_idx,
-                       bool guest_visible)
+static bool ppc_radix64_xlate_impl(PowerPCCPU *cpu, vaddr eaddr,
+                                   MMUAccessType access_type, hwaddr *raddr,
+                                   int *psizep, int *protp, int mmu_idx,
+                                   bool guest_visible)
 {
     CPUPPCState *env = &cpu->env;
     uint64_t lpid, pid;
@@ -484,7 +534,7 @@ bool ppc_radix64_xlate(PowerPCCPU *cpu, vaddr eaddr, MMUAccessType access_type,
     relocation = !mmuidx_real(mmu_idx);
 
     /* HV or virtual hypervisor Real Mode Access */
-    if (!relocation && (mmuidx_hv(mmu_idx) || cpu->vhyp)) {
+    if (!relocation && (mmuidx_hv(mmu_idx) || vhyp_flat_addressing(cpu))) {
         /* In real mode top 4 effective addr bits (mostly) ignored */
         *raddr = eaddr & 0x0FFFFFFFFFFFFFFFULL;
 
@@ -521,17 +571,25 @@ bool ppc_radix64_xlate(PowerPCCPU *cpu, vaddr eaddr, MMUAccessType access_type,
     if (cpu->vhyp) {
         PPCVirtualHypervisorClass *vhc;
         vhc = PPC_VIRTUAL_HYPERVISOR_GET_CLASS(cpu->vhyp);
-        vhc->get_pate(cpu->vhyp, &pate);
+        if (!vhc->get_pate(cpu->vhyp, cpu, lpid, &pate)) {
+            if (guest_visible) {
+                ppc_radix64_raise_hsi(cpu, access_type, eaddr, eaddr,
+                                      DSISR_R_BADCONFIG);
+            }
+            return false;
+        }
     } else {
         if (!ppc64_v3_get_pate(cpu, lpid, &pate)) {
             if (guest_visible) {
-                ppc_radix64_raise_si(cpu, access_type, eaddr, DSISR_NOPTE);
+                ppc_radix64_raise_hsi(cpu, access_type, eaddr, eaddr,
+                                      DSISR_R_BADCONFIG);
             }
             return false;
         }
         if (!validate_pate(cpu, lpid, &pate)) {
             if (guest_visible) {
-                ppc_radix64_raise_si(cpu, access_type, eaddr, DSISR_R_BADCONFIG);
+                ppc_radix64_raise_hsi(cpu, access_type, eaddr, eaddr,
+                                      DSISR_R_BADCONFIG);
             }
             return false;
         }
@@ -561,7 +619,7 @@ bool ppc_radix64_xlate(PowerPCCPU *cpu, vaddr eaddr, MMUAccessType access_type,
         g_raddr = eaddr & R_EADDR_MASK;
     }
 
-    if (cpu->vhyp) {
+    if (vhyp_flat_addressing(cpu)) {
         *raddr = g_raddr;
     } else {
         /*
@@ -587,4 +645,23 @@ bool ppc_radix64_xlate(PowerPCCPU *cpu, vaddr eaddr, MMUAccessType access_type,
     }
 
     return true;
+}
+
+bool ppc_radix64_xlate(PowerPCCPU *cpu, vaddr eaddr, MMUAccessType access_type,
+                       hwaddr *raddrp, int *psizep, int *protp, int mmu_idx,
+                       bool guest_visible)
+{
+    bool ret = ppc_radix64_xlate_impl(cpu, eaddr, access_type, raddrp,
+                                      psizep, protp, mmu_idx, guest_visible);
+
+    qemu_log_mask(CPU_LOG_MMU, "%s for %s @0x%"VADDR_PRIx
+                  " mmu_idx %u (prot %c%c%c) -> 0x%"HWADDR_PRIx"\n",
+                  __func__, access_str(access_type),
+                  eaddr, mmu_idx,
+                  *protp & PAGE_READ ? 'r' : '-',
+                  *protp & PAGE_WRITE ? 'w' : '-',
+                  *protp & PAGE_EXEC ? 'x' : '-',
+                  *raddrp);
+
+    return ret;
 }
