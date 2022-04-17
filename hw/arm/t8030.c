@@ -851,7 +851,7 @@ static void t8030_create_i2c(MachineState *machine, const char *name)
     DTBNode *child = find_dtb_node(tms->device_tree, "arm-io");
 
     child = find_dtb_node(child, name);
-    assert(child);
+    if (!child) return;
     i2c = apple_hw_i2c_create(name);
     assert(i2c);
     object_property_add_child(OBJECT(machine), name, OBJECT(i2c));
