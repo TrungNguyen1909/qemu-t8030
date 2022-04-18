@@ -140,19 +140,19 @@ static bool kpf_amfi_callback(struct xnu_pf_patch *patch, uint32_t *opcode_strea
         }
     }
 
-    fprintf(stderr, "%s: start @ 0x%llx\n", __func__,
-            ptov_static((hwaddr)start));
-
     pac = find_prev_insn(start, 5, PACIBSP, 0xffffffff) != NULL;
     switch (cdhash_param) {
     case 0: {
+        fprintf(stderr, "%s: Found lookup_in_static_trust_cache @ 0x%llx\n",
+                __func__, ptov_static((hwaddr)start));
         *(start++) = 0x52800020; /* MOV W0, 1 */
         *(start++) = (pac ? RETAB : RET);
         found_something = true;
-        puts("kpf_amfi_callback: Found lookup_in_trust_cache_module");
         break;
     }
     case 1:
+        fprintf(stderr, "%s: Found lookup_in_trust_cache_module @ 0x%llx\n",
+                __func__, ptov_static((hwaddr)start));
         *(start++) = 0x52800040; /* mov w0, 2 */
         *(start++) = 0x39000040; /* strb w0, [x2] */
         *(start++) = 0x52800000; /* mov w0, 0 */
@@ -160,7 +160,6 @@ static bool kpf_amfi_callback(struct xnu_pf_patch *patch, uint32_t *opcode_strea
         *(start++) = 0x52800020; /* MOV W0, 1 */
         *(start++) = (pac ? RETAB : RET);
         found_something = true;
-        puts("kpf_amfi_callback: Found lookup_in_static_trust_cache");
         break;
     default:
         puts("kpf_amfi_callback: Found unexpected prototype");
