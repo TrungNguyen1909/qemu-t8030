@@ -145,7 +145,10 @@ static bool kpf_amfi_callback(struct xnu_pf_patch *patch, uint32_t *opcode_strea
     case 0: {
         fprintf(stderr, "%s: Found lookup_in_static_trust_cache @ 0x%llx\n",
                 __func__, ptov_static((hwaddr)start));
-        *(start++) = 0x52800020; /* MOV W0, 1 */
+        /* XXX: allows amfid to do its work
+         * this also allows amfid impersonation
+         */
+        *(start++) = 0x52802020; /* MOV W0, 0x101 */
         *(start++) = (pac ? RETAB : RET);
         found_something = true;
         break;
@@ -155,7 +158,10 @@ static bool kpf_amfi_callback(struct xnu_pf_patch *patch, uint32_t *opcode_strea
                 __func__, ptov_static((hwaddr)start));
         *(start++) = 0x52800040; /* mov w0, 2 */
         *(start++) = 0x39000040; /* strb w0, [x2] */
-        *(start++) = 0x52800000; /* mov w0, 0 */
+        /* XXX: allows amfid to do its work
+         * this also allows amfid impersonation
+         */
+        *(start++) = 0x52800020; /* mov w0, 1 */
         *(start++) = 0x39000060; /* strb w0, [x3] */
         *(start++) = 0x52800020; /* MOV W0, 1 */
         *(start++) = (pac ? RETAB : RET);
