@@ -346,11 +346,6 @@ void macho_load_dtb(DTBNode *root, AddressSpace *as, MemoryRegion *mem,
     uint64_t seed[8] = {0xdead000d, 0xdead000d, 0xdead000d, 0xdead000d,
                         0xdead000d, 0xdead000d, 0xdead000d, 0xdead000d};
 
-    child = get_dtb_node(root, "arm-io");
-    prop = find_dtb_prop(child, "chip-revision");
-    assert(prop);
-    *(uint32_t *)prop->value = 0x10;
-
     child = get_dtb_node(root, "chosen");
     assert(child != NULL);
     prop = find_dtb_prop(child, "random-seed");

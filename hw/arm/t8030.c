@@ -1359,6 +1359,9 @@ static void t8030_machine_init(MachineState *machine)
     child = find_dtb_node(tms->device_tree, "arm-io");
     assert(child != NULL);
 
+    data = 0x11; /* B1 */
+    set_dtb_prop(child, "chip-revision", 4, (uint8_t *)&data);
+
     set_dtb_prop(child, "clock-frequencies", sizeof(clock_freq), clock_freq);
     set_dtb_prop(child, "clock-frequencies-nclk", sizeof(clock_freq_nclk),
                  clock_freq_nclk);
