@@ -1212,10 +1212,13 @@ static void dwc2_device_process_packet(DWC2State *s, USBPacket *p)
             p->status = USB_RET_STALL;
             break;
         }
-        if ((s->diepctl(ep) & DXEPCTL_EPENA)
-            && (s->diepctl(ep) & DXEPCTL_USBACTEP)
-            && !(s->diepctl(ep) & DXEPCTL_NAKSTS)
-            && !(s->gintsts & GINTSTS_GINNAKEFF)) {
+        if ((!(s->diepctl(ep) & DXEPCTL_USBACTEP))
+            || (s->diepctl(ep) & DXEPCTL_NAKSTS)
+            || (s->gintsts & GINTSTS_GINNAKEFF)) {
+            p->status = USB_RET_NAK;
+            break;
+        }
+        if (s->diepctl(ep) & DXEPCTL_EPENA) {
             int sz, amtDone, pktcnt, txfz, mps, fifo;
             g_autofree void *buffer = NULL;
             // IN transfer
@@ -1306,7 +1309,7 @@ static void dwc2_device_process_packet(DWC2State *s, USBPacket *p)
 
                 if (pktsize != 0 && amtDone == 0) {
                     s->diepint(ep) |= DXEPINT_INTKNTXFEMP;
-                    p->status = USB_RET_NAK;
+                    p->status = USB_RET_ASYNC;
                     break;
                 }
 
@@ -1355,7 +1358,7 @@ static void dwc2_device_process_packet(DWC2State *s, USBPacket *p)
                 p->status = USB_RET_SUCCESS;
             }
         } else {
-            p->status = USB_RET_NAK;
+            p->status = USB_RET_ASYNC;
         }
         break;
     case USB_TOKEN_SETUP:
@@ -1533,18 +1536,20 @@ static void dwc2_device_process_packet(DWC2State *s, USBPacket *p)
 
                 s->doepint(ep) |= DXEPINT_SETUP;
                 s->doepint(ep) |= DXEPINT_SETUP_RCVD;
+                #if 0
                 if (ep == 0) {
                     s->diepctl(0) |= DXEPCTL_NAKSTS;
+                    s->doepctl(0) |= DXEPCTL_NAKSTS;
                 }
+                #endif
             }
             s->doepctl(ep) &= ~DXEPCTL_EPENA;
             s->doepint(ep) |= DXEPINT_XFERCOMPL;
-            s->doepctl(ep) |= DXEPCTL_NAKSTS;
         } else {
             if (ep == 0) {
                 s->doepint(ep) |= DXEPINT_OUTTKNEPDIS;
             }
-            p->status = USB_RET_NAK;
+            p->status = USB_RET_ASYNC;
         }
         break;
     default:
@@ -1572,7 +1577,7 @@ static void dwc2_device_process_async(DWC2State *s, USBEndpoint *ep)
     dwc2_device_process_packet(s, p);
 
     if (p->status == USB_RET_NAK) {
-        p->status = USB_RET_ASYNC;
+        p->status = USB_RET_IOERROR;
     }
     if (p->status != USB_RET_ASYNC) {
         usb_packet_complete(USB_DEVICE(s->device), p);
@@ -2353,7 +2358,7 @@ static void dwc2_usb_device_handle_packet(USBDevice *dev, USBPacket *p)
 
     if (usb_packet_is_inflight(p)) {
         if (p->status == USB_RET_NAK) {
-            p->status = USB_RET_ASYNC;
+            p->status = USB_RET_IOERROR;
         }
     }
 }
