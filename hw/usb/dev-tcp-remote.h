@@ -10,12 +10,8 @@
 
 typedef struct USBTCPInflightPacket {
     USBPacket *p;
-    uint32_t handled;
-    QemuCond c;
-    QemuMutex m;
-
+    uint64_t handled;
     QTAILQ_ENTRY(USBTCPInflightPacket) queue;
-
     uint8_t addr;
 } USBTCPInflightPacket;
 
