@@ -480,9 +480,6 @@ static const ARMCPRegInfo apple_a13_cp_reginfo_tcg[] = {
     A13_CPREG_DEF(PMC1, 3, 2, 15, 1, 0, PL1_RW, 0),
     A13_CPREG_DEF(PMCR1, 3, 1, 15, 1, 0, PL1_RW, 0),
     A13_CPREG_DEF(PMSR, 3, 1, 15, 13, 0, PL1_RW, 0),
-    A13_CPREG_DEF(ARM64_REG_APCTL_EL1, 3, 4, 15, 0, 4, PL1_RW, 2),
-    A13_CPREG_DEF(ARM64_REG_KERNELKEYLO_EL1, 3, 4, 15, 1, 0, PL1_RW, 0),
-    A13_CPREG_DEF(ARM64_REG_KERNELKEYHI_EL1, 3, 4, 15, 1, 1, PL1_RW, 0),
     A13_CPREG_DEF(S3_4_c15_c0_5, 3, 4, 15, 0, 5, PL1_RW, 0),
     A13_CPREG_DEF(AMX_STATUS_EL1, 3, 4, 15, 1, 3, PL1_R, 0),
     A13_CPREG_DEF(AMX_CTL_EL1, 3, 4, 15, 1, 4, PL1_RW, 0),
@@ -656,6 +653,8 @@ AppleA13State *apple_a13_create(DTBNode *node)
     } else {
         object_property_set_bool(obj, "start-powered-off", true, NULL);
     }
+    /* XXX: QARMA is too slow */
+    object_property_set_bool(obj, "pauth-impdef", true, NULL);
     #if 0
     object_property_set_bool(obj, "start-powered-off", true, NULL);
     #endif
@@ -749,9 +748,6 @@ static const VMStateDescription vmstate_apple_a13 = {
         VMSTATE_A13_CPREG(PMC1),
         VMSTATE_A13_CPREG(PMCR1),
         VMSTATE_A13_CPREG(PMSR),
-        VMSTATE_A13_CPREG(ARM64_REG_APCTL_EL1),
-        VMSTATE_A13_CPREG(ARM64_REG_KERNELKEYLO_EL1),
-        VMSTATE_A13_CPREG(ARM64_REG_KERNELKEYHI_EL1),
         VMSTATE_A13_CPREG(S3_4_c15_c0_5),
         VMSTATE_A13_CPREG(AMX_STATUS_EL1),
         VMSTATE_A13_CPREG(AMX_CTL_EL1),

@@ -558,27 +558,28 @@ typedef struct CPUArchState {
         uint64_t gcr_el1;
         uint64_t rgsr_el1;
         uint64_t vmsa_lock_el1;
+        uint64_t apctl_el1;
     } cp15;
 
     struct {
-        uint64_t gxf_config_el[3];
-        uint64_t gxf_enter_el[3];
-        uint64_t gxf_status_el[3];
-        uint64_t gxf_abort_el[3];
-        uint64_t sp_gl[3];
-        uint64_t tpidr_gl[3];
-        uint64_t vbar_gl[3];
-        uint64_t spsr_gl[3];
-        uint64_t aspsr_gl[3];
-        uint64_t esr_gl[3];
-        uint64_t elr_gl[3];
-        uint64_t far_gl[3];
+        uint64_t gxf_config_el[4];
+        uint64_t gxf_enter_el[4];
+        uint64_t gxf_status_el[4];
+        uint64_t gxf_abort_el[4];
+        uint64_t sp_gl[4];
+        uint64_t tpidr_gl[4];
+        uint64_t vbar_gl[4];
+        uint64_t spsr_gl[4];
+        uint64_t aspsr_gl[4];
+        uint64_t esr_gl[4];
+        uint64_t elr_gl[4];
+        uint64_t far_gl[4];
     } gxf;
 
     struct {
-        uint64_t sprr_perm_el[3];
-        uint64_t sprr_config_el[3];
-        uint64_t sprr_unk_el[3];
+        uint64_t sprr_perm_el[4];
+        uint64_t sprr_config_el[4];
+        uint64_t sprr_unk_el[4];
         uint32_t sprr_umask;
     } sprr;
 
@@ -735,6 +736,7 @@ typedef struct CPUArchState {
         ARMPACKey apda;
         ARMPACKey apdb;
         ARMPACKey apga;
+        ARMPACKey kernel;
     } keys;
 #endif
 
@@ -1418,6 +1420,12 @@ void pmu_init(ARMCPU *cpu);
 #define VMSA_LOCK_TTBR0_EL1     (1ULL << 3)
 #define VMSA_LOCK_TTBR1_EL1     (1ULL << 4)
 #define VMSA_LOCK_SCTLR_M_BIT   (1ULL << 63)
+/* APCTL_EL1 */
+#define APCTL_AppleMode         (1ULL << 0)
+#define APCTL_MKEYVld           (1ULL << 1)
+#define APCTL_KernKeyEn         (1ULL << 2)
+/* APCFG_EL1 */
+#define APCFG_EL1_ELXENKEY      (1ULL << 1)
 
 /* Write a new value to v7m.exception, thus transitioning into or out
  * of Handler mode; this may result in a change of active stack pointer.
