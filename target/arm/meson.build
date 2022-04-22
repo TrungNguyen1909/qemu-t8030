@@ -48,7 +48,9 @@ arm_ss.add(when: 'TARGET_AARCH64', if_true: files(
   'pauth_helper.c',
   'sve_helper.c',
   'translate-a64.c',
-  'translate-sve.c')
+  'translate-sve.c',
+  'WKdmCompress.c',
+  'WKdmDecompress.c')
 )
 
 arm_softmmu_ss = ss.source_set()

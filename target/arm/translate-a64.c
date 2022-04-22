@@ -14580,31 +14580,60 @@ static void disas_data_proc_simd_fp(DisasContext *s, uint32_t insn)
     }
 }
 
-static void disas_gxf_insn(DisasContext *s, uint32_t insn)
+static void disas_apple_insn(DisasContext *s, uint32_t insn)
 {
-    switch (insn) {
-        case 0x00201420: /* GENTER */
-            if (s->current_el == 0 || s->guarded) {
-                unallocated_encoding(s);
-                break;
-            }
-            gen_a64_set_pc_im(s->pc_curr);
-            gen_ss_advance(s);
-            gen_exception_insn(s, s->base.pc_next, EXCP_GENTER, syn_aa64_genter(), s->current_el);
-            break;
+    TCGv_i64 tcg_rd;
+    unsigned int opcode, rn, rd;
+    opcode = extract32(insn, 10, 6);
+    rn = extract32(insn, 5, 5);
+    rd = extract32(insn, 0, 5);
 
-        case 0x00201400: /* GEXIT */
-            if (s->current_el == 0 || !s->guarded) {
-                unallocated_encoding(s);
-                break;
-            }
-            gen_helper_gexit(cpu_env);
-            s->base.is_jmp = DISAS_EXIT;
-            break;
+    if (s->current_el == 0) {
+        unallocated_encoding(s);
+        return;
+    }
 
-        default:
-            unallocated_encoding(s);
-            break;
+    switch (opcode) {
+    case 2: /* WKdmC */
+        tcg_rd = cpu_reg(s, rd);
+        gen_helper_wkdmc(tcg_rd, cpu_env, tcg_rd, cpu_reg_sp(s, rn));
+        break;
+    case 3: /* WKdmD */
+        tcg_rd = cpu_reg(s, rd);
+        gen_helper_wkdmd(tcg_rd, cpu_env, tcg_rd, cpu_reg_sp(s, rn));
+        break;
+    case 5:
+        if (s->gxf_active) {
+            switch (insn) {
+                case 0x00201420: /* GENTER */
+                    if (s->guarded) {
+                        unallocated_encoding(s);
+                        break;
+                    }
+                    gen_a64_set_pc_im(s->pc_curr);
+                    gen_ss_advance(s);
+                    gen_exception_insn(s, s->base.pc_next, EXCP_GENTER,
+                                       syn_aa64_genter(), s->current_el);
+                    break;
+
+                case 0x00201400: /* GEXIT */
+                    if (!s->guarded) {
+                        unallocated_encoding(s);
+                        break;
+                    }
+                    gen_helper_gexit(cpu_env);
+                    s->base.is_jmp = DISAS_EXIT;
+                    break;
+
+                default:
+                    unallocated_encoding(s);
+                    break;
+            }
+        }
+        break;
+    default:
+        unallocated_encoding(s);
+        break;
     }
 }
 
@@ -14891,11 +14920,7 @@ static void aarch64_tr_translate_insn(DisasContextBase *dcbase, CPUState *cpu)
 
     switch (extract32(insn, 25, 4)) {
     case 0x0:
-        if (s->gxf_active) {
-            disas_gxf_insn(s, insn);
-        } else {
-            unallocated_encoding(s);
-        }
+        disas_apple_insn(s, insn);
         break;
     case 0x1: case 0x3: /* UNALLOCATED */
         unallocated_encoding(s);
