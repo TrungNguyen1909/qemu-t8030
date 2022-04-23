@@ -27,6 +27,7 @@
 #include "qemu/log.h"
 #include "qemu/units.h"
 #include "qapi/error.h"
+#include "qapi/visitor.h"
 #include "qemu-common.h"
 #include "hw/arm/boot.h"
 #include "exec/address-spaces.h"
@@ -1347,18 +1348,21 @@ static void t8030_machine_init(MachineState *machine)
                                              BUILD_VERSION_MAJOR(build_version),
                                              BUILD_VERSION_MINOR(build_version));
     tms->build_version = build_version;
-    switch (BUILD_VERSION_MAJOR(build_version)) {
-        case 13:
-            tms->rtbuddyv2_protocol_version = 10;
-            break;
-        case 14:
-            tms->rtbuddyv2_protocol_version = 11;
-            break;
-        case 15:
-            tms->rtbuddyv2_protocol_version = 12;
-            break;
-        default:
-            break;
+
+    if (tms->rtbuddyv2_protocol_version == 0) {
+        switch (BUILD_VERSION_MAJOR(build_version)) {
+            case 13:
+                tms->rtbuddyv2_protocol_version = 10;
+                break;
+            case 14:
+                tms->rtbuddyv2_protocol_version = 11;
+                break;
+            case 15:
+                tms->rtbuddyv2_protocol_version = 12;
+                break;
+            default:
+                break;
+        }
     }
 
     macho_highest_lowest(hdr, &kernel_low, &kernel_high);
@@ -1531,6 +1535,30 @@ static char *t8030_get_boot_mode(Object *obj, Error **errp)
     }
 }
 
+static void t8030_get_rtbuddyv2_protocol_version(Object *obj, Visitor *v,
+                                                 const char *name, void *opaque,
+                                                 Error **errp)
+{
+    T8030MachineState *tms = T8030_MACHINE(obj);
+    int64_t value = tms->rtbuddyv2_protocol_version;
+
+    visit_type_int(v, name, &value, errp);
+}
+
+static void t8030_set_rtbuddyv2_protocol_version(Object *obj, Visitor *v,
+                                                 const char *name, void *opaque,
+                                                 Error **errp)
+{
+    T8030MachineState *tms = T8030_MACHINE(obj);
+    int64_t value;
+
+    if (!visit_type_int(v, name, &value, errp)) {
+        return;
+    }
+
+    tms->rtbuddyv2_protocol_version = value;
+}
+
 static ram_addr_t t8030_machine_fixup_ram_size(ram_addr_t size)
 {
     if (size != T8030_DRAM_SIZE) {
@@ -1573,6 +1601,12 @@ static void t8030_machine_class_init(ObjectClass *oc, void *data)
                                   t8030_set_boot_mode);
     object_class_property_set_description(oc, "boot-mode",
                                     "Set boot mode of the machine");
+    object_class_property_add(oc, "rtbuddyv2-protocol-version", "int",
+        t8030_get_rtbuddyv2_protocol_version,
+        t8030_set_rtbuddyv2_protocol_version,
+        NULL, NULL);
+    object_class_property_set_description(oc, "rtbuddyv2-protocol-version",
+        "Override RTBuddyV2 protocol version");
 }
 
 static const TypeInfo t8030_machine_info = {
