@@ -223,6 +223,7 @@ struct USBEndpoint {
     uint8_t pid;
     uint8_t type;
     uint8_t ifnum;
+    int64_t last_packet_ms; /* Use for timeout condition */
     int max_packet_size;
     int max_streams;
     bool pipeline;
@@ -260,7 +261,10 @@ struct USBDevice {
     bool attached;
 
     int32_t state;
-    uint8_t setup_buf[8];
+    union {
+        uint8_t setup_buf[8];
+        struct usb_control_packet setup_packet;
+    };
     uint8_t data_buf[4096];
     int32_t remote_wakeup;
     int32_t setup_state;

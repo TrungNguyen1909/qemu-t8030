@@ -106,7 +106,7 @@
 
 static inline uint64_t apple_aic_emulate_timer(void)
 {
-    int period_ns = NANOSECONDS_PER_SECOND > kCNTFRQ ? 
+    int period_ns = NANOSECONDS_PER_SECOND > kCNTFRQ ?
                     NANOSECONDS_PER_SECOND / kCNTFRQ : 1;
     return qemu_clock_get_ns(QEMU_CLOCK_VIRTUAL) / period_ns;
 }
@@ -126,7 +126,11 @@ static void apple_aic_update(AppleAICState *s)
     }
 
     for (i = 0; i < s->numCPU; i++) {
-        if (s->cpus[i].pendingIPI & (~s->cpus[i].ipi_mask)) {
+        if ((s->cpus[i].pendingIPI & AIC_IPI_SELF) & (~s->cpus[i].ipi_mask)) {
+            intr |= (1 << i);
+        }
+        if ((~s->cpus[i].ipi_mask & AIC_IPI_NORMAL)
+            && (s->cpus[i].pendingIPI & ((1 << s->numCPU) - 1))) {
             intr |= (1 << i);
         }
     }
@@ -147,7 +151,7 @@ static void apple_aic_update(AppleAICState *s)
                 int k;
                 for (k = 0; k < s->numCPU; k++) {
                     if (((intr & (1 << k)) == 0) && (potential & (1 << k))) {
-                        /* 
+                        /*
                          * cpu K isn't in the interrupt list
                          * and can handle some of the previous interrupts
                          */
@@ -156,7 +160,7 @@ static void apple_aic_update(AppleAICState *s)
                     }
                 }
             }
-        }     
+        }
     }
     for (i = 0; i < s->numCPU; i++) {
         if (intr & (1 << i)) {
@@ -373,11 +377,11 @@ static void apple_aic_write(void *opaque, hwaddr addr, uint64_t data,
 
         case rAIC_WHOAMI_Pn(0) ... rAIC_WHOAMI_Pn(AIC_CPU_COUNT) - 4:
             {
-                uint32_t cpu = (addr - 0x5000) / 0x80;
-                if (unlikely(cpu > s->numCPU)) {
+                uint32_t cpu = ((addr - 0x5000) / 0x80);
+                if (unlikely(cpu >= s->numCPU)) {
                     break;
                 }
-                addr = addr - 0x5000 + 0x2000;
+                addr = addr - 0x5000 + 0x2000 - 0x80 * cpu;
                 qemu_mutex_unlock(&s->mutex);
                 apple_aic_write(&s->cpus[cpu], addr, data, size);
                 qemu_mutex_lock(&s->mutex);
@@ -386,7 +390,7 @@ static void apple_aic_write(void *opaque, hwaddr addr, uint64_t data,
 
         default:
             qemu_log_mask(LOG_UNIMP, "AIC: Write to unspported reg 0x" TARGET_FMT_plx
-                        " cpu %u\n", addr, o->cpu_id);
+                        " cpu %u: 0x%x\n", addr, o->cpu_id, val);
             break;
         }
     }
@@ -417,17 +421,14 @@ static uint64_t apple_aic_read(void *opaque, hwaddr addr, unsigned size)
 
                 qemu_irq_lower(o->irq);
                 if (o->pendingIPI & AIC_IPI_SELF & ~o->ipi_mask) {
-                    o->ipi_mask |= kAIC_INT_IPI_SELF;
+                    o->ipi_mask |= AIC_IPI_SELF;
                     return kAIC_INT_IPI | kAIC_INT_IPI_SELF;
                 }
 
                 if (~o->ipi_mask & AIC_IPI_NORMAL) {
-
-                    for (i = 0; i < s->numCPU; i++) {
-                        if (o->pendingIPI & (1 << i)) {
-                            o->ipi_mask |= kAIC_INT_IPI_NORM;
-                            return kAIC_INT_IPI | kAIC_INT_IPI_NORM;
-                        }
+                    if (o->pendingIPI & ((1 << s->numCPU) - 1)) {
+                        o->ipi_mask |= AIC_IPI_NORMAL;
+                        return kAIC_INT_IPI | kAIC_INT_IPI_NORM;
                     }
                 }
 
@@ -489,14 +490,14 @@ static uint64_t apple_aic_read(void *opaque, hwaddr addr, unsigned size)
 
         case rAIC_WHOAMI_Pn(0) ... rAIC_WHOAMI_Pn(AIC_CPU_COUNT) - 4:
             {
-                uint32_t cpu = (addr - 0x5000) / 0x80;
+                uint32_t cpu = ((addr - 0x5000) / 0x80);
                 uint64_t val;
 
-                if (unlikely(cpu > s->numCPU)) {
+                if (unlikely(cpu >= s->numCPU)) {
                     break;
                 }
 
-                addr = addr - 0x5000 + 0x2000;
+                addr = addr - 0x5000 + 0x2000 - 0x80 * cpu;
                 qemu_mutex_unlock(&s->mutex);
 
                 val = apple_aic_read(&s->cpus[cpu], addr, size);
@@ -593,7 +594,7 @@ SysBusDevice *apple_aic_create(uint32_t numCPU, DTBNode *node,
     reg = (hwaddr *)prop->value;
     s->base_size = reg[1];
     prop = find_dtb_prop(node, "ipid-mask");
-    s->numEIR = prop->length / 4;
+    s->numEIR = (prop->length / 4 + 1) & (~1);
     s->numIRQ = s->numEIR * 32;
 
     s->numCPU = numCPU;
