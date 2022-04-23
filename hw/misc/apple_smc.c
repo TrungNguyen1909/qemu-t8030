@@ -442,7 +442,7 @@ static const MemoryRegionOps ascv2_core_reg_ops = {
 static const struct AppleMboxOps smc_mailbox_ops = {
 };
 
-SysBusDevice *apple_smc_create(DTBNode *node, uint32_t build_version)
+SysBusDevice *apple_smc_create(DTBNode *node, uint32_t protocol_version)
 {
     DeviceState  *dev;
     AppleSMCState *s;
@@ -450,23 +450,12 @@ SysBusDevice *apple_smc_create(DTBNode *node, uint32_t build_version)
     DTBNode *child;
     DTBProp *prop;
     uint64_t *reg;
-    uint32_t protocol_version = 0;
     uint32_t data;
 
     dev = qdev_new(TYPE_APPLE_SMC_IOP);
     s = APPLE_SMC_IOP(dev);
     sbd = SYS_BUS_DEVICE(dev);
 
-    switch (BUILD_VERSION_MAJOR(build_version)) {
-        case 14:
-            protocol_version = 11;
-            break;
-        case 15:
-            protocol_version = 12;
-            break;
-        default:
-            break;
-    }
 
     child = find_dtb_node(node, "iop-smc-nub");
     assert(child);

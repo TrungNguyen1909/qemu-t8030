@@ -73,6 +73,7 @@ typedef struct
     char *trustcache_filename;
     char *ticket_filename;
     BootMode boot_mode;
+    uint32_t rtbuddyv2_protocol_version;
     uint32_t build_version;
     Notifier init_done_notifier;
     hwaddr panic_base;

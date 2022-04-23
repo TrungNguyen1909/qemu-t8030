@@ -775,7 +775,7 @@ static void t8030_create_ans(MachineState* machine)
     sart = SYS_BUS_DEVICE(object_property_get_link(OBJECT(machine),
                           "sart-ans", &error_fatal));
 
-    ans = apple_ans_create(child, tms->build_version);
+    ans = apple_ans_create(child, tms->rtbuddyv2_protocol_version);
     assert(ans);
     assert(object_property_add_const_link(OBJECT(ans),
           "dma-mr", OBJECT(sysbus_mmio_get_region(sart, 1))));
@@ -1208,7 +1208,7 @@ static void t8030_create_smc(MachineState* machine)
     data = T8030_SMC_SRAM_BASE;
     set_dtb_prop(iop_nub, "sram-addr", 8, (uint8_t *)&data);
 
-    smc = apple_smc_create(child, tms->build_version);
+    smc = apple_smc_create(child, tms->rtbuddyv2_protocol_version);
     assert(smc);
 
     object_property_add_child(OBJECT(machine), "smc", OBJECT(smc));
@@ -1347,6 +1347,20 @@ static void t8030_machine_init(MachineState *machine)
                                              BUILD_VERSION_MAJOR(build_version),
                                              BUILD_VERSION_MINOR(build_version));
     tms->build_version = build_version;
+    switch (BUILD_VERSION_MAJOR(build_version)) {
+        case 13:
+            tms->rtbuddyv2_protocol_version = 10;
+            break;
+        case 14:
+            tms->rtbuddyv2_protocol_version = 11;
+            break;
+        case 15:
+            tms->rtbuddyv2_protocol_version = 12;
+            break;
+        default:
+            break;
+    }
+
     macho_highest_lowest(hdr, &kernel_low, &kernel_high);
     fprintf(stderr, "kernel_low: 0x" TARGET_FMT_lx "\nkernel_high: 0x" TARGET_FMT_lx "\n", kernel_low, kernel_high);
 

@@ -127,7 +127,7 @@ static const struct AppleMboxOps ans_mailbox_ops = {
     .wakeup = apple_ans_start,
 };
 
-SysBusDevice *apple_ans_create(DTBNode *node, uint32_t build_version)
+SysBusDevice *apple_ans_create(DTBNode *node, uint32_t protocol_version)
 {
     DeviceState  *dev;
     AppleANSState *s;
@@ -137,7 +137,6 @@ SysBusDevice *apple_ans_create(DTBNode *node, uint32_t build_version)
     DTBNode *child;
     DTBProp *prop;
     uint64_t *reg;
-    uint32_t protocol_version = 0;
     uint32_t data;
 
     dev = qdev_new(TYPE_APPLE_ANS);
@@ -146,16 +145,6 @@ SysBusDevice *apple_ans_create(DTBNode *node, uint32_t build_version)
     sbd = SYS_BUS_DEVICE(dev);
     pex = PCIE_HOST_BRIDGE(dev);
 
-    switch (BUILD_VERSION_MAJOR(build_version)) {
-        case 14:
-            protocol_version = 11;
-            break;
-        case 15:
-            protocol_version = 12;
-            break;
-        default:
-            break;
-    }
     prop = find_dtb_prop(node, "reg");
     assert(prop);
 
