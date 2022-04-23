@@ -294,7 +294,7 @@ static void apple_a13_ipi_rr_local(CPUARMState *env, const ARMCPRegInfo *ri,
 {
     AppleA13State *tcpu = APPLE_A13(env_archcpu(env));
 
-    uint32_t phys_id = MPIDR_CPU_ID(value) | (tcpu->cluster_id << 8);
+    uint32_t phys_id = (value & 0xff) | (tcpu->cluster_id << 8);
     AppleA13Cluster *c = apple_a13_find_cluster(tcpu->cluster_id);
     uint32_t cpu_id = -1;
     int i;
@@ -347,14 +347,14 @@ static void apple_a13_ipi_rr_global(CPUARMState *env, const ARMCPRegInfo *ri,
                                 uint64_t value)
 {
     AppleA13State *tcpu = APPLE_A13(env_archcpu(env));
-    uint32_t cluster_id = MPIDR_CLUSTER_ID(value >> IPI_RR_TARGET_CLUSTER_SHIFT);
+    uint32_t cluster_id = (value >> IPI_RR_TARGET_CLUSTER_SHIFT) & 0xff;
     AppleA13Cluster *c = apple_a13_find_cluster(cluster_id);
 
     if (!c) {
         return;
     }
 
-    uint32_t phys_id = MPIDR_CPU_ID(value) | cluster_id << 8;
+    uint32_t phys_id = (value & 0xff) | (cluster_id << 8);
     uint32_t cpu_id = -1;
     int i;
 
@@ -614,8 +614,7 @@ AppleA13State *apple_a13_create(DTBNode *node)
     assert(prop->length == 4);
     tcpu->cluster_id = *(unsigned int*)prop->value;
 
-    mpidr = 0LL | tcpu->phys_id | (tcpu->phys_id << MPIDR_AFF2_SHIFT)
-            | (1LL << 31);
+    mpidr = 0LL | tcpu->phys_id | (1LL << 31);
 
     prop = find_dtb_prop(node, "cluster-type");
     switch (prop->value[0]) {
