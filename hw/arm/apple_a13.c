@@ -580,7 +580,14 @@ static void apple_a13_reset(DeviceState *dev)
 
 static void apple_a13_instance_init(Object *obj)
 {
+    ARMCPU *cpu = ARM_CPU(obj);
     object_property_set_uint(obj, "cntfrq", 24000000, &error_fatal);
+    object_property_add_uint64_ptr(obj, "pauth-mlo",
+                                   &cpu->m_key_lo,
+                                   OBJ_PROP_FLAG_READWRITE);
+    object_property_add_uint64_ptr(obj, "pauth-mhi",
+                                   &cpu->m_key_hi,
+                                   OBJ_PROP_FLAG_READWRITE);
 }
 
 AppleA13State *apple_a13_create(DTBNode *node)
@@ -756,6 +763,8 @@ static const VMStateDescription vmstate_apple_a13 = {
         VMSTATE_A13_CPREG(UPMPCM),
         VMSTATE_A13_CPREG(UPMCR0),
         VMSTATE_A13_CPREG(UPMSR),
+        VMSTATE_UINT64(env.keys.m.lo, ARMCPU),
+        VMSTATE_UINT64(env.keys.m.hi, ARMCPU),
         VMSTATE_END_OF_LIST()
     }
 };

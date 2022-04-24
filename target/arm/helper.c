@@ -6911,46 +6911,76 @@ static CPAccessResult access_pauth(CPUARMState *env, const ARMCPRegInfo *ri,
     return CP_ACCESS_OK;
 }
 
+static void pauth_write_lo(CPUARMState *env, const ARMCPRegInfo *ri,
+                           uint64_t value)
+{
+    assert(ri->fieldoffset);
+    if (env->cp15.apctl_el1 & APCTL_AppleMode) {
+        value ^= env->keys.m.lo;
+    }
+    CPREG_FIELD64(env, ri) = value;
+}
+
+static void pauth_write_hi(CPUARMState *env, const ARMCPRegInfo *ri,
+                           uint64_t value)
+{
+    assert(ri->fieldoffset);
+    if (env->cp15.apctl_el1 & APCTL_AppleMode) {
+        value ^= env->keys.m.hi;
+    }
+    CPREG_FIELD64(env, ri) = value;
+}
+
 static const ARMCPRegInfo pauth_reginfo[] = {
     { .name = "APDAKEYLO_EL1", .state = ARM_CP_STATE_AA64,
       .opc0 = 3, .opc1 = 0, .crn = 2, .crm = 2, .opc2 = 0,
       .access = PL1_RW, .accessfn = access_pauth,
+      .writefn = pauth_write_lo, .raw_writefn = raw_write,
       .fieldoffset = offsetof(CPUARMState, keys.apda.lo) },
     { .name = "APDAKEYHI_EL1", .state = ARM_CP_STATE_AA64,
       .opc0 = 3, .opc1 = 0, .crn = 2, .crm = 2, .opc2 = 1,
       .access = PL1_RW, .accessfn = access_pauth,
+      .writefn = pauth_write_hi, .raw_writefn = raw_write,
       .fieldoffset = offsetof(CPUARMState, keys.apda.hi) },
     { .name = "APDBKEYLO_EL1", .state = ARM_CP_STATE_AA64,
       .opc0 = 3, .opc1 = 0, .crn = 2, .crm = 2, .opc2 = 2,
       .access = PL1_RW, .accessfn = access_pauth,
+      .writefn = pauth_write_lo, .raw_writefn = raw_write,
       .fieldoffset = offsetof(CPUARMState, keys.apdb.lo) },
     { .name = "APDBKEYHI_EL1", .state = ARM_CP_STATE_AA64,
       .opc0 = 3, .opc1 = 0, .crn = 2, .crm = 2, .opc2 = 3,
       .access = PL1_RW, .accessfn = access_pauth,
+      .writefn = pauth_write_hi, .raw_writefn = raw_write,
       .fieldoffset = offsetof(CPUARMState, keys.apdb.hi) },
     { .name = "APGAKEYLO_EL1", .state = ARM_CP_STATE_AA64,
       .opc0 = 3, .opc1 = 0, .crn = 2, .crm = 3, .opc2 = 0,
       .access = PL1_RW, .accessfn = access_pauth,
+      .writefn = pauth_write_lo, .raw_writefn = raw_write,
       .fieldoffset = offsetof(CPUARMState, keys.apga.lo) },
     { .name = "APGAKEYHI_EL1", .state = ARM_CP_STATE_AA64,
       .opc0 = 3, .opc1 = 0, .crn = 2, .crm = 3, .opc2 = 1,
       .access = PL1_RW, .accessfn = access_pauth,
+      .writefn = pauth_write_hi, .raw_writefn = raw_write,
       .fieldoffset = offsetof(CPUARMState, keys.apga.hi) },
     { .name = "APIAKEYLO_EL1", .state = ARM_CP_STATE_AA64,
       .opc0 = 3, .opc1 = 0, .crn = 2, .crm = 1, .opc2 = 0,
       .access = PL1_RW, .accessfn = access_pauth,
+      .writefn = pauth_write_lo, .raw_writefn = raw_write,
       .fieldoffset = offsetof(CPUARMState, keys.apia.lo) },
     { .name = "APIAKEYHI_EL1", .state = ARM_CP_STATE_AA64,
       .opc0 = 3, .opc1 = 0, .crn = 2, .crm = 1, .opc2 = 1,
       .access = PL1_RW, .accessfn = access_pauth,
+      .writefn = pauth_write_hi, .raw_writefn = raw_write,
       .fieldoffset = offsetof(CPUARMState, keys.apia.hi) },
     { .name = "APIBKEYLO_EL1", .state = ARM_CP_STATE_AA64,
       .opc0 = 3, .opc1 = 0, .crn = 2, .crm = 1, .opc2 = 2,
       .access = PL1_RW, .accessfn = access_pauth,
+      .writefn = pauth_write_lo, .raw_writefn = raw_write,
       .fieldoffset = offsetof(CPUARMState, keys.apib.lo) },
     { .name = "APIBKEYHI_EL1", .state = ARM_CP_STATE_AA64,
       .opc0 = 3, .opc1 = 0, .crn = 2, .crm = 1, .opc2 = 3,
       .access = PL1_RW, .accessfn = access_pauth,
+      .writefn = pauth_write_hi, .raw_writefn = raw_write,
       .fieldoffset = offsetof(CPUARMState, keys.apib.hi) },
     { .name = "KERNELKEYLO_EL1", .state = ARM_CP_STATE_AA64,
       .opc0 = 3, .opc1 = 4, .crn = 15, .crm = 1, .opc2 = 0,
@@ -6965,6 +6995,11 @@ static const ARMCPRegInfo pauth_reginfo[] = {
       .access = PL1_RW, .accessfn = access_pauth,
       .resetvalue = APCTL_MKEYVld,
       .fieldoffset = offsetof(CPUARMState, cp15.apctl_el1) },
+    { .name = "APCFG_EL1", .state = ARM_CP_STATE_AA64,
+      .opc0 = 3, .opc1 = 4, .crn = 15, .crm = 0, .opc2 = 6,
+      .access = PL1_RW, .accessfn = access_pauth,
+      .resetvalue = APCFG_EL1_ELXENKEY,
+      .fieldoffset = offsetof(CPUARMState, cp15.apcfg_el1) },
     REGINFO_SENTINEL
 };
 

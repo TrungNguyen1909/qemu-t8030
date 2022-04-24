@@ -559,6 +559,7 @@ typedef struct CPUArchState {
         uint64_t rgsr_el1;
         uint64_t vmsa_lock_el1;
         uint64_t apctl_el1;
+        uint64_t apcfg_el1;
     } cp15;
 
     struct {
@@ -737,6 +738,7 @@ typedef struct CPUArchState {
         ARMPACKey apdb;
         ARMPACKey apga;
         ARMPACKey kernel;
+        ARMPACKey m;
     } keys;
 #endif
 
@@ -1094,6 +1096,10 @@ struct ArchCPU {
 
     /* Generic timer counter frequency, in Hz */
     uint64_t gt_cntfrq_hz;
+
+    /* Apple PAC boot diversifier */
+    uint64_t m_key_lo;
+    uint64_t m_key_hi;
 };
 
 unsigned int gt_cntfrq_period_ns(ARMCPU *cpu);

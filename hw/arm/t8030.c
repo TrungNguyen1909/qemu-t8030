@@ -26,6 +26,7 @@
 #include "qemu/osdep.h"
 #include "qemu/log.h"
 #include "qemu/units.h"
+#include "qemu/guest-random.h"
 #include "qapi/error.h"
 #include "qapi/visitor.h"
 #include "qemu-common.h"
@@ -1277,13 +1278,24 @@ static void t8030_cpu_reset(void *opaque)
     CPUState *cs;
     CPUARMState *env;
     bool found_first = false;
+    uint64_t m_lo = 0;
+    uint64_t m_hi = 0;
+    qemu_guest_getrandom(&m_lo, sizeof(m_lo), NULL);
+    qemu_guest_getrandom(&m_hi, sizeof(m_hi), NULL);
+
 
     CPU_FOREACH(cpu) {
         AppleA13State *tcpu = (AppleA13State *)object_dynamic_cast(OBJECT(cpu),
                                                                TYPE_APPLE_A13);
         if (tcpu) {
-            object_property_set_int(OBJECT(cpu), "rvbar",
+            object_property_set_uint(OBJECT(cpu), "rvbar",
                                     tms->bootinfo.entry & ~0xfff,
+                                    &error_abort);
+            object_property_set_uint(OBJECT(cpu), "pauth-mlo",
+                                    m_lo,
+                                    &error_abort);
+            object_property_set_uint(OBJECT(cpu), "pauth-mhi",
+                                    m_hi,
                                     &error_abort);
             cpu_reset(cpu);
             if (!found_first) {
