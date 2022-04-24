@@ -84,10 +84,9 @@ static WK_word *WK_pack_3_tenbits(WK_word *source_buf,
 
 unsigned int WKdm_compress(WK_word *src_buf,
                            WK_word *dest_buf,
-                           unsigned int size)
+                           int byte_budget)
 {
-    unsigned num_input_words = size / BYTES_PER_WORD;
-    int byte_budget = size;
+    unsigned num_input_words = TARGET_PAGE_SIZE / BYTES_PER_WORD;
     DictionaryElement dictionary[DICTIONARY_SIZE];
 
     /*
@@ -99,9 +98,9 @@ unsigned int WKdm_compress(WK_word *src_buf,
      * sizes of these arrays should be increased if you want to compress
      * pages larger than 16KB
      */
-    WK_word tempTagsArray[1024];         /* tags for everything          */
-    WK_word tempQPosArray[1024];         /* queue positions for matches  */
-    WK_word tempLowBitsArray[1024];     /* low bits for partial matches */
+    WK_word tempTagsArray[4096];         /* tags for everything          */
+    WK_word tempQPosArray[4096];         /* queue positions for matches  */
+    WK_word tempLowBitsArray[4096];     /* low bits for partial matches */
 
     /*
      * boundary_tmp will be used for keeping track of what's where in
@@ -125,7 +124,8 @@ unsigned int WKdm_compress(WK_word *src_buf,
 
     WK_word *next_input_word = src_buf;
     WK_word *end_of_input = src_buf + num_input_words;
-    byte_budget -= (TAGS_AREA_OFFSET + TAGS_AREA_SIZE) * BYTES_PER_WORD;
+    int header_size = (TAGS_AREA_OFFSET + TAGS_AREA_SIZE) * BYTES_PER_WORD;
+    byte_budget -= header_size;
     if (byte_budget <= 0) {
         return -1;
     }
@@ -160,8 +160,11 @@ unsigned int WKdm_compress(WK_word *src_buf,
                 RECORD_PARTIAL(dict_location - dictionary, LOW_BITS(input_word));
                 *dict_location = input_word;
             } else {
-                RECORD_MISS(input_word);
                 byte_budget -= 4;
+                if (byte_budget < 0) {
+                    return -1;
+                }
+                RECORD_MISS(input_word);
                 *dict_location = input_word;
             }
         }
@@ -191,6 +194,24 @@ unsigned int WKdm_compress(WK_word *src_buf,
         && (tempTagsArray[0] & 0xff) == 1) {
         /* same value page */
         return SV_RETURN;
+    }
+    int sparse_csize = (miss + hits) * 6 + 4;
+    int normal_csize = 2*partial/3 + miss*4 + hits/2 + header_size;
+
+    if (sparse_csize < normal_csize) {
+        /* Mostly Zero */
+        *(dest_buf++) = MZV_MAGIC;
+        unsigned short *output = (unsigned short *)dest_buf;
+        next_input_word = (WK_word *)src_buf;
+        while (next_input_word < end_of_input) {
+            WK_word input_word = *next_input_word;
+            if (input_word != 0) {
+                *(uint32_t *)(output += 2) = input_word;
+                *(output++) = (char *)next_input_word - (char *)src_buf;
+            }
+            next_input_word++;
+        }
+        return sparse_csize;
     }
 
     /*

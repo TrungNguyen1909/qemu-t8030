@@ -1137,8 +1137,7 @@ void HELPER(dc_zva)(CPUARMState *env, uint64_t vaddr_in)
     memset(mem, 0, blocklen);
 }
 
-static void *get_page(CPUARMState *env, uint64_t vaddr_in,
-                      MMUAccessType access_type, int mmu_idx)
+static void *get_page_read(CPUARMState *env, uint64_t vaddr_in, int mmu_idx)
 {
     uint64_t vaddr = vaddr_in & TARGET_PAGE_MASK;
 
@@ -1158,21 +1157,53 @@ static void *get_page(CPUARMState *env, uint64_t vaddr_in,
     return mem;
 }
 
+static void *get_page_write(CPUARMState *env, uint64_t vaddr_in, int mmu_idx)
+{
+    uint64_t vaddr = vaddr_in & TARGET_PAGE_MASK;
+
+    void *mem = tlb_vaddr_to_host(env, vaddr, MMU_DATA_STORE, mmu_idx);
+#ifndef CONFIG_USER_ONLY
+    if (unlikely(!mem)) {
+        uintptr_t ra = GETPC();
+
+        /*
+         * Trap if accessing an invalid page.
+         */
+        (void) probe_write(env, vaddr_in, 1, mmu_idx, ra);
+        mem = probe_write(env, vaddr, TARGET_PAGE_SIZE, mmu_idx, ra);
+    }
+#endif
+
+    return mem;
+}
+
 uint64_t HELPER(wkdmc)(CPUARMState *env, uint64_t vaddr_in, uint64_t vaddr_out)
 {
     int mmu_idx = cpu_mmu_index(env, false);
-    void *in_mem, *out_mem;
+    char *in_mem, *out_mem;
+    uint8_t scratch[TARGET_PAGE_SIZE];
+    uint8_t scratch1[TARGET_PAGE_SIZE];
     vaddr_in &= TARGET_PAGE_MASK;
-    vaddr_out &= TARGET_PAGE_MASK;
+    vaddr_out &= ~0x3f;
+    int out_offset = vaddr_out - (vaddr_out & TARGET_PAGE_MASK);
+    int csize = TARGET_PAGE_SIZE - out_offset;
 
     if (TARGET_PAGE_BITS < 10 || TARGET_PAGE_BITS > 14) {
         return -1;
     }
 
-    in_mem = get_page(env, vaddr_in, MMU_DATA_LOAD, mmu_idx);
-    out_mem = get_page(env, vaddr_out, MMU_DATA_STORE, mmu_idx);
+    in_mem = get_page_read(env, vaddr_in, mmu_idx);
+    out_mem = get_page_write(env, vaddr_out, mmu_idx);
     if (in_mem && out_mem) {
-        int n = WKdm_compress(in_mem, out_mem, TARGET_PAGE_SIZE);
+        memcpy(scratch1, in_mem, TARGET_PAGE_SIZE);
+        int n = WKdm_compress(scratch1, scratch, csize);
+        if (n <= 0) {
+            return n;
+        }
+        if (n > csize) {
+            return -1;
+        }
+        memcpy(out_mem + out_offset, scratch, n);
         return n >> 6;
     }
     return -1;
@@ -1181,18 +1212,24 @@ uint64_t HELPER(wkdmc)(CPUARMState *env, uint64_t vaddr_in, uint64_t vaddr_out)
 uint64_t HELPER(wkdmd)(CPUARMState *env, uint64_t vaddr_in, uint64_t vaddr_out)
 {
     int mmu_idx = cpu_mmu_index(env, false);
-    void *in_mem, *out_mem;
-    vaddr_in &= TARGET_PAGE_MASK;
+    uint8_t *in_mem, *out_mem;
+    uint8_t scratch[TARGET_PAGE_SIZE];
+    uint8_t scratch2[TARGET_PAGE_SIZE];
     vaddr_out &= TARGET_PAGE_MASK;
+    vaddr_in &= ~0x3f;
+    int in_offset = vaddr_in - (vaddr_in & TARGET_PAGE_MASK);
+    int csize = TARGET_PAGE_SIZE - in_offset;
 
     if (TARGET_PAGE_BITS < 10 || TARGET_PAGE_BITS > 14) {
         return 0x3000;
     }
 
-    in_mem = get_page(env, vaddr_in, MMU_DATA_LOAD, mmu_idx);
-    out_mem = get_page(env, vaddr_out, MMU_DATA_STORE, mmu_idx);
+    in_mem = get_page_read(env, vaddr_in, mmu_idx);
+    out_mem = get_page_write(env, vaddr_out, mmu_idx);
     if (in_mem && out_mem) {
-        if (WKdm_decompress(in_mem, out_mem, TARGET_PAGE_SIZE)) {
+        memcpy(scratch, in_mem + in_offset, csize);
+        if (WKdm_decompress(scratch, scratch2, csize)) {
+            memcpy(out_mem, scratch2, TARGET_PAGE_SIZE);
             return 0;
         }
     }

@@ -90,6 +90,8 @@ typedef WK_word DictionaryElement;
 /* ============================================================ */
 /* Misc constants */
 
+#define MZV_MAGIC     0x4321
+
 #define BITS_PER_WORD 32
 #define BYTES_PER_WORD 4
 #define NUM_LOW_BITS 10
@@ -110,9 +112,10 @@ typedef WK_word DictionaryElement;
 #define MISS_TAG 0x2
 #define EXACT_TAG 0x3
 
-#ifndef BITS_PER_BYTE
-#define BITS_PER_BYTE 8
+#ifdef BITS_PER_BYTE
+#undef BITS_PER_BYTE
 #endif
+#define BITS_PER_BYTE 8
 
 /* ============================================================ */
 /* Global macros */
@@ -209,10 +212,10 @@ extern const char hashLookupTable[];
 
 unsigned int WKdm_compress(WK_word *src_buf,
                            WK_word *dest_buf,
-                           unsigned int num_input_words);
+                           int byte_budget);
 
 bool WKdm_decompress(WK_word *src_buf,
                      WK_word *dest_buf,
-                     unsigned int words);
+                     unsigned int size);
 
 #endif /* WKDM_INTERNAL_H */

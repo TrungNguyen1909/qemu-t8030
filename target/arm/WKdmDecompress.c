@@ -119,13 +119,25 @@ bool WKdm_decompress(WK_word *src_buf,
     /* and whose contents are packed into the actual output after modeling */
 
     /* sizes of these arrays should be increased if you want to compress
-     * pages larger than 4KB
+     * pages larger than 16KB
      */
-    WK_word tempTagsArray[1024];        /* tags for everything          */
-    WK_word tempQPosArray[1024];        /* queue positions for matches  */
-    WK_word tempLowBitsArray[1024];    /* low bits for partial matches */
+    WK_word tempTagsArray[4096];        /* tags for everything          */
+    WK_word tempQPosArray[4096];        /* queue positions for matches  */
+    WK_word tempLowBitsArray[4096];    /* low bits for partial matches */
 
     (void)words;
+
+    if (*src_buf == MZV_MAGIC) {
+        unsigned short *input = (unsigned short *)(src_buf + 1);
+        assert(src_buf != dest_buf);
+        memset(dest_buf, 0, TARGET_PAGE_SIZE);
+        WK_word word = *(WK_word *)(input);
+        input += 2;
+        int index = *(input++);
+        *(WK_word *)(((char *)dest_buf) + index) = word;
+        return true;
+    }
+
 
     PRELOAD_DICTIONARY;
 
