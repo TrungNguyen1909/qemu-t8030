@@ -551,6 +551,10 @@ config APPLE_DART
     bool
     depends on APPLE_SOC
 
+config APPLE_SART
+    bool
+    depends on APPLE_SOC
+
 config APPLE_SOC
     bool
     select EXYNOS4 # UART
@@ -563,3 +567,4 @@ config APPLE_SOC
     select APPLE_SPMI
     select APPLE_SPMI_PMU
     select APPLE_DART
+    select APPLE_SART

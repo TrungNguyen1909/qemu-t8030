@@ -48,7 +48,7 @@ static unsigned int frq_to_period_ns(unsigned int freq_hz)
       NANOSECONDS_PER_SECOND / freq_hz : 1;
 }
 
-static uint64_t __unused tick_to_ns(AppleSPMIPMUState *p, uint64_t tick)
+static uint64_t G_GNUC_UNUSED tick_to_ns(AppleSPMIPMUState *p, uint64_t tick)
 {
     return (tick >> 15) * NANOSECONDS_PER_SECOND
            + (tick & 0x7fff) * p->tick_period;

@@ -45,6 +45,7 @@
 #include "hw/or-irq.h"
 #include "hw/intc/apple_aic.h"
 #include "hw/block/apple_ans.h"
+#include "hw/arm/apple_sart.h"
 #include "hw/gpio/apple_gpio.h"
 #include "hw/i2c/apple_i2c.h"
 #include "hw/usb/apple_otg.h"
@@ -58,9 +59,11 @@
 
 #include "hw/arm/exynos4210.h"
 #include "hw/arm/xnu_pf.h"
+#include "hw/display/m1_fb.h"
 #include "afl/trace.h"
 
 #define T8030_DRAM_BASE 0x800000000
+#define T8030_DISPLAY_SIZE (64 * 1024 * 1024)
 #define T8030_PANIC_LOG_SIZE (0x100000)
 #define T8030_USB_OTG_BASE 0x39000000
 #define NOP_INST 0xd503201f
@@ -118,7 +121,15 @@ static void t8030_create_s3c_uart(const T8030MachineState *tms, Chardev *chr)
 static void t8030_patch_kernel(struct mach_header_64 *hdr)
 {
     //disable_kprintf_output = 0
-    // *(uint32_t *)vtop_static(0xFFFFFFF0077142C8) = 0;
+    *(uint32_t *)vtop_static(0xFFFFFFF0077142C8) = 0;
+
+    /* MAP JIT w/o sandbox */
+    *(uint32_t *)vtop_static(0xFFFFFFF007E6E3DC) = 0x52800000; // MOV W0, #0
+    *(uint32_t *)vtop_static(0xFFFFFFF0097E75B8) = NOP_INST;
+
+    *(uint32_t *)vtop_static(0xFFFFFFF00910242C) = 0x52800008; // MOV w8, #0x0
+
+    //*(uint32_t *)vtop_static(0xfffffff007c5a558) = 0xffffffff; //ether_demux trap
     kpf();
 }
 
@@ -273,7 +284,7 @@ static void t8030_memory_setup(MachineState *machine)
         }
     }
 
-    mem_size = machine->ram_size - T8030_PANIC_LOG_SIZE;
+    mem_size = machine->ram_size - T8030_DISPLAY_SIZE - T8030_PANIC_LOG_SIZE;
 
     DTBNode *pram = find_dtb_node(tms->device_tree, "pram");
     if (pram) {
@@ -352,23 +363,6 @@ static uint64_t pmgr_reg_read(void *opaque, hwaddr addr, unsigned size)
 static const MemoryRegionOps pmgr_reg_ops = {
     .write = pmgr_reg_write,
     .read = pmgr_reg_read,
-};
-
-static void sart_reg_write(void *opaque, hwaddr addr, uint64_t data, unsigned size)
-{
-    qemu_log_mask(LOG_UNIMP, "SART reg WRITE @ 0x" TARGET_FMT_lx " value: 0x" TARGET_FMT_lx "\n", addr, data);
-}
-
-static uint64_t sart_reg_read(void *opaque, hwaddr addr, unsigned size)
-{
-    qemu_log_mask(LOG_UNIMP, "SART reg READ @ 0x" TARGET_FMT_lx "\n", addr);
-
-    return 0;
-}
-
-static const MemoryRegionOps sart_reg_ops = {
-    .write = sart_reg_write,
-    .read = sart_reg_read,
 };
 
 static void t8030_cluster_setup(MachineState *machine)
@@ -570,25 +564,28 @@ static void t8030_create_dart(MachineState *machine, const char *name)
     sysbus_realize_and_unref(SYS_BUS_DEVICE(dart), &error_fatal);
 }
 
-static void t8030_sart_setup(MachineState* machine)
+static void t8030_create_sart(MachineState* machine)
 {
     uint64_t *reg;
     T8030MachineState *tms = T8030_MACHINE(machine);
     DTBNode *child = find_dtb_node(tms->device_tree, "arm-io");
     DTBProp *prop;
-    MemoryRegion *sart;
+    SysBusDevice *sart;
 
     assert(child != NULL);
     child = find_dtb_node(child, "sart-ans");
     assert(child != NULL);
 
+    sart = apple_sart_create(child);
+    assert(sart);
+    object_property_add_child(OBJECT(machine), "sart-ans", OBJECT(sart));
+
     prop = find_dtb_prop(child, "reg");
     assert(prop);
     reg = (uint64_t*)prop->value;
 
-    sart = g_new(MemoryRegion, 1);
-    memory_region_init_io(sart, OBJECT(machine), &sart_reg_ops, tms, "sart-reg", reg[1]);
-    memory_region_add_subregion(tms->sysmem, tms->soc_base_pa + reg[0], sart);
+    sysbus_mmio_map(sart, 0, tms->soc_base_pa + reg[0]);
+    sysbus_realize_and_unref(sart, &error_fatal);
 }
 
 static void t8030_create_ans(MachineState* machine)
@@ -598,6 +595,7 @@ static void t8030_create_ans(MachineState* machine)
     DTBProp *prop;
     uint64_t *reg;
     T8030MachineState *tms = T8030_MACHINE(machine);
+    SysBusDevice *sart;
     SysBusDevice *ans;
     DTBNode *child = find_dtb_node(tms->device_tree, "arm-io");
 
@@ -605,8 +603,14 @@ static void t8030_create_ans(MachineState* machine)
     child = find_dtb_node(child, "ans");
     assert(child != NULL);
 
+    t8030_create_sart(machine);
+    sart = SYS_BUS_DEVICE(object_property_get_link(OBJECT(machine),
+                          "sart-ans", &error_fatal));
+
     ans = apple_ans_create(child, tms->build_version);
     assert(ans);
+    assert(object_property_add_const_link(OBJECT(ans),
+          "dma-mr", OBJECT(sysbus_mmio_get_region(sart, 1))));
 
     object_property_add_child(OBJECT(machine), "ans", OBJECT(ans));
     prop = find_dtb_prop(child, "reg");
@@ -1169,6 +1173,37 @@ static void t8030_create_smc(MachineState* machine)
     sysbus_realize_and_unref(smc, &error_fatal);
 }
 
+static void t8030_create_boot_display(MachineState *machine)
+{
+    T8030MachineState *tms = T8030_MACHINE(machine);
+    SysBusDevice *fb = NULL;
+    MemoryRegion *vram = NULL;
+    tms->video.v_baseAddr = T8030_DRAM_BASE + machine->ram_size - (T8030_DISPLAY_SIZE);
+    tms->video.v_rowBytes = 480 * 4;
+    tms->video.v_width = 480;
+    tms->video.v_height = 640;
+    tms->video.v_depth = 32 | ((2 - 1) << 16);
+    tms->video.v_display = 1;
+
+    if (xnu_contains_boot_arg(machine->kernel_cmdline, "-s", false)
+        || xnu_contains_boot_arg(machine->kernel_cmdline, "-v", false)) {
+        tms->video.v_display = 0;
+    }
+
+    fb = SYS_BUS_DEVICE(qdev_new(TYPE_M1_FB));
+    object_property_set_uint(OBJECT(fb), "width", 480, &error_fatal);
+    object_property_set_uint(OBJECT(fb), "height", 640, &error_fatal);
+
+    vram = g_new(MemoryRegion, 1);
+    memory_region_init_ram(vram, OBJECT(fb), "vram", T8030_DISPLAY_SIZE, &error_fatal);
+    memory_region_add_subregion_overlap(tms->sysmem, tms->video.v_baseAddr, vram, 1);
+
+    object_property_add_const_link(OBJECT(fb), "vram", OBJECT(vram));
+    object_property_add_child(OBJECT(machine), "fb", OBJECT(fb));
+
+    sysbus_realize_and_unref(fb, &error_fatal);
+}
+
 static void t8030_cpu_reset(void *opaque)
 {
     MachineState *machine = MACHINE(opaque);
@@ -1264,8 +1299,6 @@ static void t8030_machine_init(MachineState *machine)
 
     t8030_pmgr_setup(machine);
 
-    t8030_sart_setup(machine);
-
     t8030_create_ans(machine);
 
     t8030_create_gpio(machine, "gpio");
@@ -1282,6 +1315,7 @@ static void t8030_machine_init(MachineState *machine)
     t8030_create_dart(machine, "dart-usb");
     t8030_create_dart(machine, "dart-sio");
     t8030_create_dart(machine, "dart-disp0");
+
     t8030_create_usb(machine);
 
     t8030_create_wdt(machine);
@@ -1295,6 +1329,8 @@ static void t8030_machine_init(MachineState *machine)
     t8030_create_pmu(machine, "spmi0", "spmi-pmu");
 
     t8030_create_smc(machine);
+
+    t8030_create_boot_display(machine);
 
     tms->init_done_notifier.notify = t8030_machine_init_done;
     qemu_add_machine_init_done_notifier(&tms->init_done_notifier);

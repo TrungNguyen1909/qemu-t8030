@@ -1189,7 +1189,7 @@ void HELPER(hint)(CPUARMState *env, uint32_t selector)
     }
     case 0x31: {
         afl_filter_tid(env->cp15.tpidr_el[1]);
-        env->daif_fuzz_mask = PSTATE_F;
+        //env->daif_fuzz_mask = PSTATE_F;
         break;
     }
     case 0x32: { /* read input */

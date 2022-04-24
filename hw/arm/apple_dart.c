@@ -490,7 +490,7 @@ AppleDARTState *apple_dart_create(DTBNode *node)
     sbd = SYS_BUS_DEVICE(dev);
 
     prop = find_dtb_prop(node, "name");
-    strlcpy(s->name, (char *)prop->value, sizeof(s->name));
+    g_strlcpy(s->name, (char *)prop->value, sizeof(s->name));
     dev->id = g_strdup((char *)prop->value);
 
     prop = find_dtb_prop(node, "page-size");
