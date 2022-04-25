@@ -81,5 +81,6 @@ typedef struct
     uint8_t pmgr_reg[0x100000];
     MemoryRegion amcc;
     uint8_t amcc_reg[0x100000];
+    bool kaslr_off;
 } T8030MachineState;
 #endif

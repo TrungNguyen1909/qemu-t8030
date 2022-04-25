@@ -840,31 +840,196 @@ char *macho_platform_string(struct mach_header_64 *mh)
     }
 }
 
+static struct segment_command_64 *macho_get_firstseg(struct mach_header_64 *header)
+{
+    struct segment_command_64 *sgp;
+    uint32_t i;
+
+    sgp = (struct segment_command_64 *)
+        ((char *)header + sizeof(struct mach_header_64));
+
+    for(i = 0; i < header->ncmds; i++) {
+        if (sgp->cmd == LC_SEGMENT_64) {
+            return sgp;
+        }
+
+        sgp = (struct segment_command_64 *)((char *)sgp + sgp->cmdsize);
+    }
+
+    // not found
+    return NULL;
+}
+
+static struct segment_command_64 *macho_get_nextseg(struct mach_header_64 *header,
+                                                    struct segment_command_64 *seg)
+{
+    struct segment_command_64 *sgp;
+    uint32_t i;
+    bool found = false;
+
+    sgp = (struct segment_command_64 *)
+        ((char *)header + sizeof(struct mach_header_64));
+
+    for(i = 0; i < header->ncmds; i++) {
+        if (found && sgp->cmd == LC_SEGMENT_64) {
+            return sgp;
+        }
+        if (seg == sgp) {
+            found = true;
+        }
+
+        sgp = (struct segment_command_64 *)((char *)sgp + sgp->cmdsize);
+    }
+
+    // not found
+    return NULL;
+}
+
+static struct section_64 *firstsect(struct segment_command_64 *seg)
+{
+    return (struct section_64 *)(seg + 1);
+}
+
+static struct section_64 *nextsect(struct section_64 *sp)
+{
+    return sp + 1;
+}
+
+static struct section_64 *endsect(struct segment_command_64 *seg)
+{
+    struct section_64 *sp;
+
+    sp = (struct section_64 *)((char *)seg + sizeof(struct segment_command_64));
+    return &sp[seg->nsects];
+}
+
+static void macho_process_symbols(struct mach_header_64 *mh, uint64_t slide)
+{
+    struct load_command *cmd;
+    uint8_t *data = macho_get_buffer(mh);
+    uint64_t kernel_low, kernel_high;
+    unsigned int index;
+    macho_highest_lowest(mh, &kernel_low, &kernel_high);
+
+    cmd = (struct load_command *)((char *)mh + sizeof(struct mach_header_64));
+    for (index = 0; index < mh->ncmds; index++) {
+        if (cmd->cmd == LC_SYMTAB) {
+            struct symtab_command *symtab = (struct symtab_command *)cmd;
+            struct segment_command_64 *linkedit_seg = macho_get_segment(mh, "__LINKEDIT");
+            void *base;
+            uint32_t off;
+            struct nlist_64 *sym;
+            if (linkedit_seg == NULL) {
+                fprintf(stderr, "%s: cannot find __LINKEDIT segment\n", __func__);
+                return;
+            }
+            base = (data + linkedit_seg->vmaddr - kernel_low);
+            off = linkedit_seg->fileoff;
+            sym = (struct nlist_64 *)(base + symtab->symoff - off);
+            for (int i = 0; i < symtab->nsyms; i++) {
+                if (sym[i].n_type & N_STAB) {
+                    continue;
+                }
+                sym[i].n_value += slide;
+            }
+        }
+        cmd = (struct load_command *)((char *)cmd + cmd->cmdsize);
+    }
+}
+
 hwaddr arm_load_macho(struct mach_header_64 *mh, AddressSpace *as, MemoryRegion *mem,
-                    const char *name, hwaddr phys_base, hwaddr virt_base)
+                    const char *name, hwaddr phys_base, uint64_t virt_slide)
 {
     uint8_t *data = NULL;
     unsigned int index;
     struct load_command *cmd;
     hwaddr pc = 0;
     data = macho_get_buffer(mh);
+    uint64_t kernel_low, kernel_high;
+    macho_highest_lowest(mh, &kernel_low, &kernel_high);
 
     cmd = (struct load_command *)((char *)mh + sizeof(struct mach_header_64));
+    macho_process_symbols(mh, virt_slide);
     for (index = 0; index < mh->ncmds; index++) {
         switch (cmd->cmd) {
         case LC_SEGMENT_64: {
             struct segment_command_64 *segCmd =
                 (struct segment_command_64 *)cmd;
             char region_name[32] = {0};
+            void *load_from = (void *)(data + segCmd->vmaddr - kernel_low);
+            hwaddr load_to = (phys_base + segCmd->vmaddr - kernel_low);
 
             snprintf(region_name, sizeof(region_name), "%s-%s", name, segCmd->segname);
             if (segCmd->vmsize == 0) {
                 break;
             }
-            allocate_and_copy(mem, as, region_name,
-                              phys_base + segCmd->vmaddr - virt_base, segCmd->vmsize,
-                              data + segCmd->vmaddr - virt_base);
 
+            {
+                 struct section_64 *sp;
+                 for (sp = firstsect(segCmd); sp != endsect(segCmd); sp = nextsect(sp)) {
+                    if ((sp->flags & SECTION_TYPE) == S_NON_LAZY_SYMBOL_POINTERS) {
+                        void *load_from = (void *)(data + sp->addr - kernel_low);
+                        void **nl_symbol_ptr;
+                        for (nl_symbol_ptr = load_from;
+                             nl_symbol_ptr < (void **)(load_from + sp->size);
+                             nl_symbol_ptr++) {
+                             *nl_symbol_ptr += virt_slide;
+                        }
+                    }
+                 }
+            }
+
+            if (strcmp(segCmd->segname, "__TEXT") == 0) {
+                struct mach_header_64 *mh = load_from;
+                struct segment_command_64 *seg;
+                assert(mh->magic == MACH_MAGIC_64);
+                for (seg = macho_get_firstseg(mh); seg != NULL;
+                     seg = macho_get_nextseg(mh, seg)) {
+                     struct section_64 *sp;
+                     seg->vmaddr += virt_slide;
+                     for (sp = firstsect(seg); sp != endsect(seg); sp = nextsect(sp)) {
+                        sp->addr += virt_slide;
+                     }
+                }
+
+            }
+
+            
+            #if 0
+            fprintf(stderr, "%s: Loading %s to 0x%llx \n", __func__, region_name, load_to);
+            #endif
+            allocate_and_copy(mem, as, region_name,
+                              load_to, segCmd->vmsize,
+                              load_from);
+
+            if (strcmp(segCmd->segname, "__TEXT") == 0) {
+                struct mach_header_64 *mh = load_from;
+                struct segment_command_64 *seg;
+                for (seg = macho_get_firstseg(mh); seg != NULL;
+                     seg = macho_get_nextseg(mh, seg)) {
+                     struct section_64 *sp;
+                     seg->vmaddr -= virt_slide;
+                     for (sp = firstsect(seg); sp != endsect(seg); sp = nextsect(sp)) {
+                        sp->addr -= virt_slide;
+                     }
+                }
+
+            }
+
+            {
+                 struct section_64 *sp;
+                 for (sp = firstsect(segCmd); sp != endsect(segCmd); sp = nextsect(sp)) {
+                    if ((sp->flags & SECTION_TYPE) == S_NON_LAZY_SYMBOL_POINTERS) {
+                        void *load_from = (void *)(data + sp->addr - kernel_low);
+                        void **nl_symbol_ptr;
+                        for (nl_symbol_ptr = load_from;
+                             nl_symbol_ptr < (void **)(load_from + sp->size);
+                             nl_symbol_ptr++) {
+                             *nl_symbol_ptr -= virt_slide;
+                        }
+                    }
+                 }
+            }
             break;
         }
 
@@ -873,7 +1038,7 @@ hwaddr arm_load_macho(struct mach_header_64 *mh, AddressSpace *as, MemoryRegion 
             uint64_t *ptrPc = (uint64_t *)((char *)cmd + 0x110);
 
             // 0x110 for arm64 only.
-            pc = vtop_bases(*ptrPc, phys_base, virt_base);
+            pc = vtop_bases(*ptrPc, phys_base, kernel_low);
 
             break;
         }
@@ -884,6 +1049,8 @@ hwaddr arm_load_macho(struct mach_header_64 *mh, AddressSpace *as, MemoryRegion 
 
         cmd = (struct load_command *)((char *)cmd + cmd->cmdsize);
     }
+
+    macho_process_symbols(mh, -virt_slide);
 
     return pc;
 }

@@ -34,10 +34,22 @@
 #define xnu_arm64_kBootArgsVersion2 2
 #define xnu_arm64_BOOT_LINE_LENGTH 608
 
+
+#define	LC_SYMTAB           0x2
 #define LC_UNIXTHREAD       0x5
+#define	LC_DYSYMTAB         0xb
 #define LC_SEGMENT_64       0x19
 #define LC_SOURCE_VERSION   0x2A
 #define LC_BUILD_VERSION    0x32
+
+struct symtab_command {
+	uint32_t	cmd;		/* LC_SYMTAB */
+	uint32_t	cmdsize;	/* sizeof(struct symtab_command) */
+	uint32_t	symoff;		/* symbol table offset */
+	uint32_t	nsyms;		/* number of symbol table entries */
+	uint32_t	stroff;		/* string table offset */
+	uint32_t	strsize;	/* string table size in bytes */
+};
 
 struct segment_command_64 { /* for 64-bit architectures */
     uint32_t    cmd;        /* LC_SEGMENT_64 */
@@ -52,6 +64,7 @@ struct segment_command_64 { /* for 64-bit architectures */
     uint32_t    nsects;     /* number of sections in segment */
     uint32_t    flags;      /* flags */
 };
+
 struct section_64 { /* for 64-bit architectures */
     char        sectname[16];   /* name of this section */
     char        segname[16];    /* segment this section goes in */
@@ -66,6 +79,10 @@ struct section_64 { /* for 64-bit architectures */
     uint32_t    reserved2;      /* reserved (for count or sizeof) */
     uint32_t    reserved3;      /* reserved */
 };
+
+#define SECTION_TYPE         0x000000ff /* 256 section types */
+#define S_NON_LAZY_SYMBOL_POINTERS  0x6 /* section with only non-lazy
+                                           symbol pointers */
 struct source_version_command {
     uint32_t  cmd;  /* LC_SOURCE_VERSION */
     uint32_t  cmdsize;  /* 16 */
@@ -111,6 +128,22 @@ struct load_command {
     uint32_t cmdsize;   /* total size of command in bytes */
 };
 
+struct nlist_64 {
+    union {
+        uint32_t  n_strx; /* index into the string table */
+    } n_un;
+    uint8_t n_type;        /* type flag, see below */
+    uint8_t n_sect;        /* section number or NO_SECT */
+    uint16_t n_desc;       /* see <mach-o/stab.h> */
+    uint64_t n_value;      /* value of this symbol (or stab offset) */
+};
+
+#define	N_STAB	0xe0  /* if any of these bits set, a symbolic debugging entry */
+#define	N_PEXT	0x10  /* private external symbol bit */
+#define	N_TYPE	0x0e  /* mask for the type bits */
+#define	N_EXT	0x01  /* external symbol bit, set for external symbols */
+
+
 typedef struct xnu_arm64_video_boot_args {
     unsigned long v_baseAddr; /* Base address of video memory */
     unsigned long v_display;  /* Display Code (if Applicable */
@@ -121,15 +154,15 @@ typedef struct xnu_arm64_video_boot_args {
 } video_boot_args;
 
 typedef struct xnu_arm64_monitor_boot_args {
-    uint64_t    version;                        /* structure version - this is version 2 */
-    uint64_t    virtBase;                       /* virtual base of memory assigned to the monitor */
-    uint64_t    physBase;                       /* physical address corresponding to the virtual base */
-    uint64_t    memSize;                        /* size of memory assigned to the monitor */
-    uint64_t    kernArgs;                       /* physical address of the kernel boot_args structure */
-    uint64_t    kernEntry;                      /* kernel entrypoint */
-    uint64_t    kernPhysBase;                   /* physical base of the kernel's address space */
-    uint64_t    kernPhysSlide;                  /* offset from kernPhysBase to kernel load address */
-    uint64_t    kernVirtSlide;                  /* virtual slide applied to kernel at load time */
+    uint64_t    version;         /* structure version - this is version 2 */
+    uint64_t    virtBase;        /* virtual base of memory assigned to the monitor */
+    uint64_t    physBase;        /* physical address corresponding to the virtual base */
+    uint64_t    memSize;         /* size of memory assigned to the monitor */
+    uint64_t    kernArgs;        /* physical address of the kernel boot_args structure */
+    uint64_t    kernEntry;       /* kernel entrypoint */
+    uint64_t    kernPhysBase;    /* physical base of the kernel's address space */
+    uint64_t    kernPhysSlide;   /* offset from kernPhysBase to kernel load address */
+    uint64_t    kernVirtSlide;   /* virtual slide applied to kernel at load time */
 } monitor_boot_args;
 
 struct xnu_arm64_boot_args {
@@ -260,7 +293,7 @@ void macho_setup_bootargs(const char *name, AddressSpace *as,
                           char *kern_args);
 
 hwaddr arm_load_macho(struct mach_header_64 *mh, AddressSpace *as, MemoryRegion *mem,
-                      const char *name, hwaddr phys_base, hwaddr virt_base);
+                      const char *name, hwaddr phys_base, hwaddr virt_slide);
 
 void macho_map_raw_file(const char *filename, AddressSpace *as, MemoryRegion *mem,
                          const char *name, hwaddr file_pa, uint64_t *size);

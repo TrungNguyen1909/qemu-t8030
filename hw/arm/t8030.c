@@ -170,6 +170,41 @@ static bool t8030_check_panic(MachineState *machine)
     return panic_info->eph_magic == EMBEDDED_PANIC_MAGIC;
 }
 
+static size_t get_kaslr_random()
+{
+    size_t value = 0;
+    qemu_guest_getrandom(&value, sizeof(value), NULL);
+    return value;
+}
+
+#define L2_GRANULE          ((16384) * (16384 / 8))
+#define L2_GRANULE_MASK     (L2_GRANULE - 1)
+
+static void get_kaslr_slides(T8030MachineState *tms,
+                             hwaddr *phys_slide_out, hwaddr *virt_slide_out)
+{
+    hwaddr slide_phys = 0, slide_virt = 0;
+    const size_t slide_granular = (1 << 21);
+    const size_t slide_granular_mask = slide_granular - 1;
+    const size_t slide_virt_max = 0x100 * (2 * 1024 * 1024);
+    size_t random_value = get_kaslr_random();
+
+    if (tms->kaslr_off) {
+        *phys_slide_out = 0;
+        *virt_slide_out = 0;
+        return;
+    }
+
+    slide_virt = (random_value & ~slide_granular_mask) % slide_virt_max;
+    if (slide_virt == 0) {
+        slide_virt = slide_virt_max;
+    }
+    slide_phys = slide_virt & L2_GRANULE_MASK;
+
+    *phys_slide_out = slide_phys;
+    *virt_slide_out = slide_virt;
+}
+
 static void t8030_memory_setup(MachineState *machine)
 {
     struct mach_header_64 *hdr;
@@ -180,6 +215,8 @@ static void t8030_memory_setup(MachineState *machine)
     hwaddr phys_ptr;
     hwaddr amcc_lower;
     hwaddr amcc_upper;
+    hwaddr slide_phys = 0;
+    hwaddr slide_virt = 0;
     T8030MachineState *tms = T8030_MACHINE(machine);
     MemoryRegion *sysmem = tms->sysmem;
     AddressSpace *nsas = &address_space_memory;
@@ -220,23 +257,33 @@ static void t8030_memory_setup(MachineState *machine)
     last_range = xnu_pf_segment(hdr, "__LAST");
     phys_ptr = T8030_DRAM_BASE;
 
+    get_kaslr_slides(tms, &slide_phys, &slide_virt);
+
     // //now account for the trustcache
     phys_ptr += align_16k_high(0x2000000);
     g_phys_base = phys_ptr;
+    phys_ptr += slide_phys;
     info->trustcache_pa = phys_ptr;
-    macho_load_trustcache(tms->trustcache_filename, nsas, sysmem, info->trustcache_pa, &info->trustcache_size);
+    macho_load_trustcache(tms->trustcache_filename, nsas, sysmem,
+                          info->trustcache_pa, &info->trustcache_size);
 
+    g_virt_base += slide_virt - slide_phys;
     //now account for the loaded kernel
-    info->entry = arm_load_macho(hdr, nsas, sysmem, "Kernel", g_phys_base, g_virt_base);
+    info->entry = arm_load_macho(hdr, nsas, sysmem, "Kernel",
+                                 g_phys_base + slide_phys, slide_virt);
     fprintf(stderr, "g_virt_base: 0x" TARGET_FMT_lx "\n"
                     "g_phys_base: 0x" TARGET_FMT_lx "\n",
                     g_virt_base, g_phys_base);
+    fprintf(stderr, "slide_virt: 0x" TARGET_FMT_lx "\n"
+                    "slide_phys: 0x" TARGET_FMT_lx "\n",
+                    slide_virt, slide_phys);
     fprintf(stderr, "entry: 0x" TARGET_FMT_lx "\n", info->entry);
 
+    virt_end += slide_virt;
     phys_ptr = vtop_static(align_16k_high(virt_end));
 
-    amcc_lower = g_phys_base;
-    amcc_upper = vtop_static(last_range->va) + last_range->size - 1;
+    amcc_lower = g_phys_base + slide_phys;
+    amcc_upper = vtop_static(last_range->va + slide_virt) + last_range->size - 1;
     for (int i = 0; i < 4; i++) {
         AMCC_REG(tms, AMCC_LOWER(i)) = (amcc_lower - T8030_DRAM_BASE) >> 14;
         AMCC_REG(tms, AMCC_UPPER(i)) = (amcc_upper - T8030_DRAM_BASE) >> 14;
@@ -367,6 +414,7 @@ static void t8030_memory_setup(MachineState *machine)
                          g_virt_base, g_phys_base, mem_size,
                          top_of_kernel_data_pa, dtb_va, info->dtb_size,
                          tms->video, cmdline);
+    g_virt_base -= slide_virt - slide_phys;
 }
 
 static void pmgr_unk_reg_write(void *opaque, hwaddr addr, uint64_t data, unsigned size)
@@ -1571,6 +1619,20 @@ static void t8030_set_rtbuddyv2_protocol_version(Object *obj, Visitor *v,
     tms->rtbuddyv2_protocol_version = value;
 }
 
+static void t8030_set_kaslr_off(Object *obj, bool value, Error **errp)
+{
+    T8030MachineState *tms = T8030_MACHINE(obj);
+
+    tms->kaslr_off = value;
+}
+
+static bool t8030_get_kaslr_off(Object *obj, Error **errp)
+{
+    T8030MachineState *tms = T8030_MACHINE(obj);
+
+    return tms->kaslr_off;
+}
+
 static ram_addr_t t8030_machine_fixup_ram_size(ram_addr_t size)
 {
     if (size != T8030_DRAM_SIZE) {
@@ -1619,6 +1681,11 @@ static void t8030_machine_class_init(ObjectClass *oc, void *data)
         NULL, NULL);
     object_class_property_set_description(oc, "rtbuddyv2-protocol-version",
         "Override RTBuddyV2 protocol version");
+    object_class_property_add_bool(oc, "kaslr-off",
+                                  t8030_get_kaslr_off,
+                                  t8030_set_kaslr_off);
+    object_class_property_set_description(oc, "kaslr-off",
+                                          "Disable KASLR");
 }
 
 static const TypeInfo t8030_machine_info = {
