@@ -23,6 +23,7 @@
  */
 
 #include "qemu/osdep.h"
+#include "qemu/guest-random.h"
 #include "qapi/error.h"
 #include "qemu-common.h"
 #include "hw/arm/boot.h"
@@ -342,16 +343,12 @@ void macho_load_dtb(DTBNode *root, AddressSpace *as, MemoryRegion *mem,
     uint32_t data;
     uint64_t memmap[2] = {0};
     g_autofree uint8_t *buf = NULL;
-    // need to set the random seed insread of iboot
-    uint64_t seed[8] = {0xdead000d, 0xdead000d, 0xdead000d, 0xdead000d,
-                        0xdead000d, 0xdead000d, 0xdead000d, 0xdead000d};
 
     child = get_dtb_node(root, "chosen");
     assert(child != NULL);
     prop = find_dtb_prop(child, "random-seed");
     assert(prop != NULL);
-    remove_dtb_prop(child, prop);
-    set_dtb_prop(child, "random-seed", sizeof(seed), (uint8_t *)&seed[0]);
+    qemu_guest_getrandom_nofail(prop->value, prop->length);
 
     set_dtb_prop(child, "dram-base", 8, (uint8_t *)&info->dram_base);
     set_dtb_prop(child, "dram-size", 8, (uint8_t *)&info->dram_size);
