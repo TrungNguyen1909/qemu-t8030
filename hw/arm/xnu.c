@@ -452,8 +452,8 @@ void macho_load_dtb(DTBNode *root, AddressSpace *as, MemoryRegion *mem,
     allocate_and_copy(mem, as, name, info->dtb_pa, info->dtb_size, buf);
 }
 
-void macho_load_trustcache(const char *filename, AddressSpace *as, MemoryRegion *mem,
-                            hwaddr pa, uint64_t *size)
+hwaddr macho_load_trustcache(const char *filename, AddressSpace *as,
+                            MemoryRegion *mem, hwaddr text_pa, uint64_t *size)
 {
     uint32_t *trustcache_data = NULL;
     uint64_t trustcache_size = 0;
@@ -462,6 +462,7 @@ void macho_load_trustcache(const char *filename, AddressSpace *as, MemoryRegion 
     uint32_t length = 0;
     char payload_type[4];
     uint32_t trustcache_version, trustcache_entry_count, expected_file_size;
+    hwaddr pa = 0;
 
     extract_im4p_payload(filename, payload_type, &file_data, &length);
 
@@ -501,10 +502,12 @@ void macho_load_trustcache(const char *filename, AddressSpace *as, MemoryRegion 
         exit(EXIT_FAILURE);
     }
 
+    pa = text_pa - align_16k_high(trustcache_size);
     allocate_and_copy(mem, as, "TrustCache", pa, trustcache_size, trustcache_data);
-    *size = trustcache_size;
+    *size = align_16k_high(trustcache_size);
     g_free(file_data);
     g_free(trustcache_data);
+    return pa;
 }
 
 void macho_load_ramdisk(const char *filename, AddressSpace *as, MemoryRegion *mem,

@@ -306,8 +306,8 @@ DTBNode *load_dtb_from_file(char *filename);
 void macho_load_dtb(DTBNode *root, AddressSpace *as, MemoryRegion *mem,
                     const char *name, macho_boot_info_t info);
 
-void macho_load_trustcache(const char *filename, AddressSpace *as, MemoryRegion *mem,
-                            hwaddr pa, uint64_t *size);
+hwaddr macho_load_trustcache(const char *filename, AddressSpace *as,
+                            MemoryRegion *mem, hwaddr text_pa, uint64_t *size);
 void macho_load_ramdisk(const char *filename, AddressSpace *as, MemoryRegion *mem,
                             hwaddr pa, uint64_t *size);
 #endif

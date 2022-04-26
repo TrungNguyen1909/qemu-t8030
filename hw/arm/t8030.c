@@ -67,6 +67,14 @@
 
 #define T8030_DRAM_BASE         (0x800000000)
 #define T8030_DRAM_SIZE         (4 * GiB)
+
+/*
+ * This is from /chosen/carveout-memory-map/region-id-24
+ * However, PhysBase is required to be L2-aligned (32MiB)
+ */
+#define T8030_KERNEL_REGION_BASE (0x802000000)
+#define T8030_KERNEL_REGION_SIZE (0xf0330000)
+
 #define T8030_ANS_TEXT_BASE     (0x800024000)
 #define T8030_ANS_TEXT_SIZE     (0x124000)
 #define T8030_ANS_DATA_BASE     (0x8fc400000)
@@ -224,19 +232,19 @@ static void t8030_memory_setup(MachineState *machine)
     macho_boot_info_t info = &tms->bootinfo;
     g_autofree char *cmdline = NULL;
     g_autofree xnu_pf_range_t *last_range = NULL;
+    g_autofree xnu_pf_range_t *text_range = NULL;
     DTBNode *memory_map = get_dtb_node(tms->device_tree, "/chosen/memory-map");
 
-    //setup the memory layout:
+    /*
+     * Setup the memory layout:
+     * The trustcache is right in front of the __TEXT section, aligned to 16k
+     * Then we have all the kernel sections.
+     * After that we have ramdisk
+     * After that we have the kernel boot args
+     * After that we have the device tree
+     * After that we have the rest of the RAM
+     */
 
-    //At the beginning of the non-secure ram we have the raw kernel file.
-    //After that we have the static trust cache.
-    //After that we have all the kernel sections.
-    //After that we have ramdisk
-    //After that we have the kernel boot args
-    //After that we have the device tree
-    //After that we have the rest of the RAM
-
-    /* TODO: Pass these addresses to ANS and SMC */
     #if 0
     The end of DRAM:
     0x8f7fb4000, 0x4300000: VRAM
@@ -256,20 +264,24 @@ static void t8030_memory_setup(MachineState *machine)
     g_phys_base = (hwaddr)macho_get_buffer(hdr);
     macho_highest_lowest(hdr, NULL, &virt_end);
     last_range = xnu_pf_segment(hdr, "__LAST");
-    phys_ptr = T8030_DRAM_BASE;
+    text_range = xnu_pf_segment(hdr, "__TEXT");
 
     get_kaslr_slides(tms, &slide_phys, &slide_virt);
 
-    // //now account for the trustcache
-    phys_ptr += align_16k_high(0x2000000);
+    phys_ptr = T8030_KERNEL_REGION_BASE;
     g_phys_base = phys_ptr;
     phys_ptr += slide_phys;
-    info->trustcache_pa = phys_ptr;
-    macho_load_trustcache(tms->trustcache_filename, nsas, sysmem,
-                          info->trustcache_pa, &info->trustcache_size);
-
     g_virt_base += slide_virt - slide_phys;
-    //now account for the loaded kernel
+
+    info->dram_base = T8030_DRAM_BASE;
+    info->dram_size = T8030_DRAM_SIZE;
+
+    /* TrustCache */
+    info->trustcache_pa = macho_load_trustcache(tms->trustcache_filename, nsas,
+                                                sysmem,
+                                                vtop_static(text_range->va + slide_virt),
+                                                &info->trustcache_size);
+
     info->entry = arm_load_macho(hdr, nsas, sysmem, memory_map,
                                  g_phys_base + slide_phys, slide_virt);
     fprintf(stderr, "g_virt_base: 0x" TARGET_FMT_lx "\n"
@@ -283,15 +295,14 @@ static void t8030_memory_setup(MachineState *machine)
     virt_end += slide_virt;
     phys_ptr = vtop_static(align_16k_high(virt_end));
 
-    amcc_lower = g_phys_base + slide_phys;
+    amcc_lower = info->trustcache_pa;
     amcc_upper = vtop_static(last_range->va + slide_virt) + last_range->size - 1;
     for (int i = 0; i < 4; i++) {
         AMCC_REG(tms, AMCC_LOWER(i)) = (amcc_lower - T8030_DRAM_BASE) >> 14;
         AMCC_REG(tms, AMCC_UPPER(i)) = (amcc_upper - T8030_DRAM_BASE) >> 14;
     }
 
-    //now account for the ramdisk
-
+    /* ramdisk */
     if (machine->initrd_filename) {
         info->ramdisk_pa = phys_ptr;
         macho_load_ramdisk(machine->initrd_filename, nsas, sysmem, info->ramdisk_pa, &info->ramdisk_size);
@@ -299,15 +310,12 @@ static void t8030_memory_setup(MachineState *machine)
         phys_ptr += info->ramdisk_size;
     }
 
-    //now account for kernel boot args
+    /* Kernel boot args */
     info->bootargs_pa = phys_ptr;
     phys_ptr += align_16k_high(0x4000);
 
-    //now account for device tree
-    info->dram_base = T8030_DRAM_BASE;
-    info->dram_size = T8030_DRAM_SIZE;
+    /* device tree */
     info->dtb_pa = phys_ptr;
-
     dtb_va = ptov_static(info->dtb_pa);
 
     nvram = APPLE_NVRAM(qdev_find_recursive(sysbus_get_default(), "nvram"));
@@ -376,7 +384,7 @@ static void t8030_memory_setup(MachineState *machine)
         }
     }
 
-    mem_size = T8030_DISPLAY_BASE - g_phys_base;
+    mem_size = T8030_KERNEL_REGION_SIZE;
 
     DTBNode *pram = find_dtb_node(tms->device_tree, "pram");
     if (pram) {
