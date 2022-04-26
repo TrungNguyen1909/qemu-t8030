@@ -54,8 +54,8 @@ void remove_dtb_node(DTBNode *node, DTBNode *child);
 void remove_dtb_prop(DTBNode *node, DTBProp *prop);
 DTBProp *set_dtb_prop(DTBNode *n, const char *name, uint32_t size,
                       const void *val);
-DTBNode *find_dtb_node(DTBNode *n, const char *name);
-DTBNode *get_dtb_node(DTBNode *n, const char *name);
+DTBNode *find_dtb_node(DTBNode *n, const char *path);
+DTBNode *get_dtb_node(DTBNode *n, const char *path);
 uint64_t get_dtb_node_buffer_size(DTBNode *node);
 DTBProp *find_dtb_prop(DTBNode *node, const char *name);
 void overwrite_dtb_prop_val(DTBProp *prop, uint8_t chr);

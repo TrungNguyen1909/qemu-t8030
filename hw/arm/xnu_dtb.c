@@ -305,47 +305,84 @@ DTBProp *find_dtb_prop(DTBNode *node, const char *name)
     return NULL;
 }
 
-DTBNode *find_dtb_node(DTBNode *node, const char *name)
+DTBNode *find_dtb_node(DTBNode *node, const char *path)
 {
     GList *iter = NULL;
     DTBProp *prop = NULL;
     DTBNode *child = NULL;
+    g_autofree char *to_free = g_strdup(path);
+    char *s = to_free;
+    const char *next;
+    bool found = true;
 
-    assert(node && name);
+    assert(node && path);
 
-    for (iter = node->child_nodes; iter != NULL; iter = iter->next) {
-        child = (DTBNode *)iter->data;
+    while (node && found && ((next = strsep(&s, "/")) != NULL)) {
+        if (strlen(next) == 0) {
+            continue;
+        }
+        found = false;
+        for (iter = node->child_nodes; iter != NULL; iter = iter->next) {
+            child = (DTBNode *)iter->data;
 
-        assert(child);
+            assert(child);
 
-        prop = find_dtb_prop(child, "name");
+            prop = find_dtb_prop(child, "name");
 
-        if (!prop) continue;
+            if (!prop) continue;
 
-        if (!strncmp((const char *)prop->value, name, prop->length)) {
-            return child;
+            if (!strncmp((const char *)prop->value, next, prop->length)) {
+                node = child;
+                found = true;
+            }
         }
     }
-    return NULL;
+
+    return found ? node : NULL;
 }
 
-DTBNode *get_dtb_node(DTBNode *node, const char *name)
+DTBNode *get_dtb_node(DTBNode *node, const char *path)
 {
+    GList *iter = NULL;
+    DTBProp *prop = NULL;
     DTBNode *child = NULL;
-    assert(node && name);
-    
-    child = find_dtb_node(node, name);
-    if (child) {
-        return child;
+    g_autofree char *to_free = g_strdup(path);
+    char *s = to_free;
+    const char *name;
+
+    assert(node && path);
+
+    while (node && ((name = strsep(&s, "/")) != NULL)) {
+        bool found = false;
+        if (strlen(name) == 0) {
+            continue;
+        }
+        for (iter = node->child_nodes; iter != NULL; iter = iter->next) {
+            child = (DTBNode *)iter->data;
+
+            assert(child);
+
+            prop = find_dtb_prop(child, "name");
+
+            if (!prop) continue;
+
+            if (!strncmp((const char *)prop->value, name, prop->length)) {
+                node = child;
+                found = true;
+            }
+        }
+
+        if (!found) {
+            DTBNode *child = g_new0(DTBNode, 1);
+
+            set_dtb_prop(child, "name", strlen(name) + 1, (uint8_t *)name);
+            node->child_nodes = g_list_append(node->child_nodes, child);
+            node->child_node_count++;
+            node = child;
+        }
     }
-    /* not found */ 
-    child = g_new0(DTBNode, 1);
 
-    set_dtb_prop(child, "name", strlen(name) + 1, (uint8_t *)name);
-    node->child_nodes = g_list_append(node->child_nodes, child);
-    node->child_node_count++;
-
-    return child;
+    return node;
 }
 
 void overwrite_dtb_prop_val(DTBProp *prop, uint8_t chr)
