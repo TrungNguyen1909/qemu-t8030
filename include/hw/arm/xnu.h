@@ -293,7 +293,7 @@ void macho_setup_bootargs(const char *name, AddressSpace *as,
                           char *kern_args);
 
 hwaddr arm_load_macho(struct mach_header_64 *mh, AddressSpace *as, MemoryRegion *mem,
-                      const char *name, hwaddr phys_base, hwaddr virt_slide);
+                      DTBNode *memory_map, hwaddr phys_base, hwaddr virt_slide);
 
 void macho_map_raw_file(const char *filename, AddressSpace *as, MemoryRegion *mem,
                          const char *name, hwaddr file_pa, uint64_t *size);

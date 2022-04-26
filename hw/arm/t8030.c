@@ -224,6 +224,7 @@ static void t8030_memory_setup(MachineState *machine)
     macho_boot_info_t info = &tms->bootinfo;
     g_autofree char *cmdline = NULL;
     g_autofree xnu_pf_range_t *last_range = NULL;
+    DTBNode *memory_map = get_dtb_node(tms->device_tree, "/chosen/memory-map");
 
     //setup the memory layout:
 
@@ -269,7 +270,7 @@ static void t8030_memory_setup(MachineState *machine)
 
     g_virt_base += slide_virt - slide_phys;
     //now account for the loaded kernel
-    info->entry = arm_load_macho(hdr, nsas, sysmem, "Kernel",
+    info->entry = arm_load_macho(hdr, nsas, sysmem, memory_map,
                                  g_phys_base + slide_phys, slide_virt);
     fprintf(stderr, "g_virt_base: 0x" TARGET_FMT_lx "\n"
                     "g_phys_base: 0x" TARGET_FMT_lx "\n",

@@ -933,7 +933,7 @@ static void macho_process_symbols(struct mach_header_64 *mh, uint64_t slide)
 }
 
 hwaddr arm_load_macho(struct mach_header_64 *mh, AddressSpace *as, MemoryRegion *mem,
-                    const char *name, hwaddr phys_base, uint64_t virt_slide)
+                      DTBNode *memory_map, hwaddr phys_base, uint64_t virt_slide)
 {
     uint8_t *data = NULL;
     unsigned int index;
@@ -954,7 +954,14 @@ hwaddr arm_load_macho(struct mach_header_64 *mh, AddressSpace *as, MemoryRegion 
             void *load_from = (void *)(data + segCmd->vmaddr - kernel_low);
             hwaddr load_to = (phys_base + segCmd->vmaddr - kernel_low);
 
-            snprintf(region_name, sizeof(region_name), "%s-%s", name, segCmd->segname);
+            snprintf(region_name, sizeof(region_name), "Kernel-%s", segCmd->segname);
+            struct MemoryMapFileInfo {
+                uint64_t paddr;
+                uint64_t length;
+            } file_info = { load_to, segCmd->vmsize };
+            set_dtb_prop(memory_map, region_name, sizeof(file_info),
+                         &file_info);
+
             if (segCmd->vmsize == 0) {
                 break;
             }
