@@ -161,10 +161,10 @@ static bool t8030_check_panic(MachineState *machine)
     g_autofree void *buffer = g_malloc0(tms->panic_size);
 
     address_space_rw(&address_space_memory, tms->panic_base,
-                     MEMTXATTRS_UNSPECIFIED, (uint8_t *)panic_info,
+                     MEMTXATTRS_UNSPECIFIED, panic_info,
                      tms->panic_size, 0);
     address_space_rw(&address_space_memory, tms->panic_base,
-                     MEMTXATTRS_UNSPECIFIED, (uint8_t *)buffer,
+                     MEMTXATTRS_UNSPECIFIED, buffer,
                      tms->panic_size, 1);
 
     return panic_info->eph_magic == EMBEDDED_PANIC_MAGIC;
@@ -361,9 +361,9 @@ static void t8030_memory_setup(MachineState *machine)
 
     if (xnu_contains_boot_arg(cmdline, "-restore", false)) {
         /* HACK: Use DEV Hardware model to restore without FDR errors */
-        set_dtb_prop(tms->device_tree, "compatible", 28, (uint8_t *)"N104DEV\0iPhone12,1\0AppleARM\0$");
+        set_dtb_prop(tms->device_tree, "compatible", 28, "N104DEV\0iPhone12,1\0AppleARM\0$");
     } else {
-        set_dtb_prop(tms->device_tree, "compatible", 27, (uint8_t *)"N104AP\0iPhone12,1\0AppleARM\0$");
+        set_dtb_prop(tms->device_tree, "compatible", 27, "N104AP\0iPhone12,1\0AppleARM\0$");
     }
 
     if (!xnu_contains_boot_arg(cmdline, "rd=", true)) {
@@ -386,10 +386,10 @@ static void t8030_memory_setup(MachineState *machine)
         panic_reg[0] = panic_base;
         panic_reg[1] = panic_size;
 
-        set_dtb_prop(pram, "reg", 16, (uint8_t *)&panic_reg);
+        set_dtb_prop(pram, "reg", 16, &panic_reg);
         DTBNode *chosen = find_dtb_node(tms->device_tree, "chosen");
         set_dtb_prop(chosen, "embedded-panic-log-size", 8,
-                     (uint8_t *)&panic_size);
+                     &panic_size);
         tms->panic_base = panic_base;
         tms->panic_size = panic_size;
     }
@@ -401,7 +401,7 @@ static void t8030_memory_setup(MachineState *machine)
         uint64_t vram_size = T8030_DISPLAY_SIZE;
         vram_reg[0] = vram_base;
         vram_reg[1] = vram_size;
-        set_dtb_prop(vram, "reg", 16, (uint8_t *)&vram_reg);
+        set_dtb_prop(vram, "reg", 16, &vram_reg);
     }
     macho_load_dtb(tms->device_tree, nsas, sysmem, "DeviceTree", info);
 
@@ -569,7 +569,7 @@ static void t8030_create_aic(MachineState *machine)
     T8030MachineState *tms = T8030_MACHINE(machine);
     DTBNode *soc = find_dtb_node(tms->device_tree, "arm-io");
     DTBNode *child;
-    DTBNode *timebase; 
+    DTBNode *timebase;
 
     assert(soc != NULL);
     child = find_dtb_node(soc, "aic");
@@ -677,40 +677,40 @@ static void t8030_amcc_setup(MachineState *machine)
     child = get_dtb_node(child, "amcc");
     assert(child);
     data = 1;
-    set_dtb_prop(child, "aperture-count", 4, (uint8_t *)&data);
+    set_dtb_prop(child, "aperture-count", 4, &data);
     data = 0x100000;
-    set_dtb_prop(child, "aperture-size", 4, (uint8_t *)&data);
+    set_dtb_prop(child, "aperture-size", 4, &data);
     data = AMCC_PLANE_COUNT;
-    set_dtb_prop(child, "plane-count", 4, (uint8_t *)&data);
+    set_dtb_prop(child, "plane-count", 4, &data);
     data = AMCC_PLANE_STRIDE;
-    set_dtb_prop(child, "plane-stride", 4, (uint8_t *)&data);
+    set_dtb_prop(child, "plane-stride", 4, &data);
     data64 = T8030_AMCC_BASE;
-    set_dtb_prop(child, "aperture-phys-addr", 8, (uint8_t *)&data64);
+    set_dtb_prop(child, "aperture-phys-addr", 8, &data64);
     data = 0x1c00;
-    set_dtb_prop(child, "cache-status-reg-offset", 4, (uint8_t *)&data);
+    set_dtb_prop(child, "cache-status-reg-offset", 4, &data);
     data = 0x1f;
-    set_dtb_prop(child, "cache-status-reg-mask", 4, (uint8_t *)&data);
+    set_dtb_prop(child, "cache-status-reg-mask", 4, &data);
     data = 0;
-    set_dtb_prop(child, "cache-status-reg-value", 4, (uint8_t *)&data);
+    set_dtb_prop(child, "cache-status-reg-value", 4, &data);
     child = get_dtb_node(child, "amcc-ctrr-a");
 
     data = 14;
-    set_dtb_prop(child, "page-size-shift", 4, (uint8_t *)&data);
+    set_dtb_prop(child, "page-size-shift", 4, &data);
 
     data = AMCC_LOWER(0);
-    set_dtb_prop(child, "lower-limit-reg-offset", 4, (uint8_t *)&data);
+    set_dtb_prop(child, "lower-limit-reg-offset", 4, &data);
     data = 0xffffffff;
-    set_dtb_prop(child, "lower-limit-reg-mask", 4, (uint8_t *)&data);
+    set_dtb_prop(child, "lower-limit-reg-mask", 4, &data);
     data = AMCC_UPPER(0);
-    set_dtb_prop(child, "upper-limit-reg-offset", 4, (uint8_t *)&data);
+    set_dtb_prop(child, "upper-limit-reg-offset", 4, &data);
     data = 0xffffffff;
-    set_dtb_prop(child, "upper-limit-reg-mask", 4, (uint8_t *)&data);
+    set_dtb_prop(child, "upper-limit-reg-mask", 4, &data);
     data = 0x68c;
-    set_dtb_prop(child, "lock-reg-offset", 4, (uint8_t *)&data);
+    set_dtb_prop(child, "lock-reg-offset", 4, &data);
     data = 1;
-    set_dtb_prop(child, "lock-reg-mask", 4, (uint8_t *)&data);
+    set_dtb_prop(child, "lock-reg-mask", 4, &data);
     data = 1;
-    set_dtb_prop(child, "lock-reg-value", 4, (uint8_t *)&data);
+    set_dtb_prop(child, "lock-reg-value", 4, &data);
 
     memory_region_init_io(&tms->amcc, OBJECT(machine),
                           &amcc_reg_ops, tms, "amcc", T8030_AMCC_SIZE);
@@ -805,7 +805,7 @@ static void t8030_create_ans(MachineState* machine)
     prop = find_dtb_prop(iop_nub, "region-size");
     *(uint64_t *)prop->value = T8030_ANS_DATA_SIZE;
 
-    set_dtb_prop(iop_nub, "segment-names", 14, (uint8_t *)"__TEXT;__DATA");
+    set_dtb_prop(iop_nub, "segment-names", 14, "__TEXT;__DATA");
 
     segranges[0].phys = T8030_ANS_TEXT_BASE;
     segranges[0].virt = 0x0;
@@ -819,7 +819,7 @@ static void t8030_create_ans(MachineState* machine)
     segranges[1].size = T8030_ANS_DATA_SIZE;
     segranges[1].flag = 0x0;
 
-    set_dtb_prop(iop_nub, "segment-ranges", 64, (uint8_t *)segranges);
+    set_dtb_prop(iop_nub, "segment-ranges", 64, segranges);
 
     t8030_create_sart(machine);
     sart = SYS_BUS_DEVICE(object_property_get_link(OBJECT(machine),
@@ -979,7 +979,7 @@ static void t8030_create_usb(MachineState *machine)
 
     device = get_dtb_node(complex, "usb-device");
     assert(device);
-    set_dtb_prop(device, "disable-charger-detect", sizeof(value), (uint8_t *)&value);
+    set_dtb_prop(device, "disable-charger-detect", sizeof(value), &value);
     set_dtb_prop(device, "phy-interface", 4, (uint8_t*)&(uint32_t[]){ 0x8 });
     set_dtb_prop(device, "publish-criteria", 4, (uint8_t*)&(uint32_t[]){ 0x3 });
     prop = find_dtb_prop(drd, "configuration-string");
@@ -1237,7 +1237,7 @@ static void t8030_create_smc(MachineState* machine)
     iop_nub = find_dtb_node(child, "iop-smc-nub");
     assert(iop_nub != NULL);
 
-    set_dtb_prop(iop_nub, "segment-names", 14, (uint8_t *)"__TEXT;__DATA");
+    set_dtb_prop(iop_nub, "segment-names", 14, "__TEXT;__DATA");
 
     segranges[0].phys = T8030_SMC_TEXT_BASE;
     segranges[0].virt = 0x0;
@@ -1251,12 +1251,12 @@ static void t8030_create_smc(MachineState* machine)
     segranges[1].size = T8030_SMC_DATA_SIZE;
     segranges[1].flag = 0x0;
 
-    set_dtb_prop(iop_nub, "segment-ranges", 64, (uint8_t *)segranges);
+    set_dtb_prop(iop_nub, "segment-ranges", 64, segranges);
 
     data = T8030_SMC_REGION_SIZE;
-    set_dtb_prop(iop_nub, "region-size", 8, (uint8_t *)&data);
+    set_dtb_prop(iop_nub, "region-size", 8, &data);
     data = T8030_SMC_SRAM_BASE;
-    set_dtb_prop(iop_nub, "sram-addr", 8, (uint8_t *)&data);
+    set_dtb_prop(iop_nub, "sram-addr", 8, &data);
 
     smc = apple_smc_create(child, tms->rtbuddyv2_protocol_version);
     assert(smc);
@@ -1471,19 +1471,19 @@ static void t8030_machine_init(MachineState *machine)
 
     child = get_dtb_node(tms->device_tree, "chosen");
     data = 0x8030;
-    set_dtb_prop(child, "chip-id", 4, (uint8_t *)&data);
+    set_dtb_prop(child, "chip-id", 4, &data);
     data = 0x4;
-    set_dtb_prop(child, "board-id", 4, (uint8_t *)&data);
+    set_dtb_prop(child, "board-id", 4, &data);
 
     uint64_t ecid = 0x1122334455667788;
-    set_dtb_prop(child, "unique-chip-id", 8, (uint8_t *)&ecid);
+    set_dtb_prop(child, "unique-chip-id", 8, &ecid);
 
     /* update the display parameters */
     set_dtb_prop(child, "display-rotation", sizeof(display_rotation),
-                    (uint8_t *)&display_rotation);
+                    &display_rotation);
 
     set_dtb_prop(child, "display-scale", sizeof(display_scale),
-                    (uint8_t *)&display_scale);
+                    &display_scale);
 
     t8030_cpu_setup(machine);
 

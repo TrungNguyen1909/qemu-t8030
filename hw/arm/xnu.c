@@ -350,29 +350,29 @@ void macho_load_dtb(DTBNode *root, AddressSpace *as, MemoryRegion *mem,
     assert(prop != NULL);
     qemu_guest_getrandom_nofail(prop->value, prop->length);
 
-    set_dtb_prop(child, "dram-base", 8, (uint8_t *)&info->dram_base);
-    set_dtb_prop(child, "dram-size", 8, (uint8_t *)&info->dram_size);
+    set_dtb_prop(child, "dram-base", 8, &info->dram_base);
+    set_dtb_prop(child, "dram-size", 8, &info->dram_size);
     prop = find_dtb_prop(child, "firmware-version");
     remove_dtb_prop(child, prop);
-    set_dtb_prop(child, "firmware-version", 11, (uint8_t *)"qemu-t8030");
+    set_dtb_prop(child, "firmware-version", 11, "qemu-t8030");
 
     if (info->nvram_size > XNU_MAX_NVRAM_SIZE) {
         info->nvram_size = XNU_MAX_NVRAM_SIZE;
     }
-    set_dtb_prop(child, "nvram-total-size", 4, (uint8_t *)&info->nvram_size);
-    set_dtb_prop(child, "nvram-bank-size", 4, (uint8_t *)&info->nvram_size);
+    set_dtb_prop(child, "nvram-total-size", 4, &info->nvram_size);
+    set_dtb_prop(child, "nvram-bank-size", 4, &info->nvram_size);
     set_dtb_prop(child, "nvram-proxy-data", info->nvram_size, info->nvram_data);
 
     data = 1;
-    set_dtb_prop(child, "research-enabled", sizeof(data), (uint8_t *)&data);
-    prop = set_dtb_prop(child, "effective-production-status-ap", sizeof(data), (uint8_t *)&data);
+    set_dtb_prop(child, "research-enabled", sizeof(data), &data);
+    prop = set_dtb_prop(child, "effective-production-status-ap", sizeof(data), &data);
 
     //these are needed by the image4 parser module$
-    set_dtb_prop(child, "security-domain", sizeof(data), (uint8_t *)&data);
-    set_dtb_prop(child, "chip-epoch", sizeof(data), (uint8_t *)&data);
-    set_dtb_prop(child, "amfi-allows-trust-cache-load", sizeof(data), (uint8_t *)&data);
+    set_dtb_prop(child, "security-domain", sizeof(data), &data);
+    set_dtb_prop(child, "chip-epoch", sizeof(data), &data);
+    set_dtb_prop(child, "amfi-allows-trust-cache-load", sizeof(data), &data);
     data = 0;
-    set_dtb_prop(child, "debug-enabled", sizeof(data), (uint8_t *)&data);
+    set_dtb_prop(child, "debug-enabled", sizeof(data), &data);
 
     child = get_dtb_node(root, "filesystems");
     child = get_dtb_node(child, "fstab");
@@ -386,13 +386,13 @@ void macho_load_dtb(DTBNode *root, AddressSpace *as, MemoryRegion *mem,
     assert(child);
     data = 1;
     // TODO: Workaround: AppleKeyStore SEP(?)
-    set_dtb_prop(child, "no-effaceable-storage", sizeof(data), (uint8_t *)&data);
+    set_dtb_prop(child, "no-effaceable-storage", sizeof(data), &data);
 
     child = get_dtb_node(root, "product");
     assert(child);
     data = 1;
     // TODO: Workaround: AppleKeyStore SEP(?)
-    set_dtb_prop(child, "boot-ios-diagnostics", sizeof(data), (uint8_t *)&data);
+    set_dtb_prop(child, "boot-ios-diagnostics", sizeof(data), &data);
 
     if (info->ticket_data && info->ticket_length) {
         QCryptoHashAlgorithm alg = QCRYPTO_HASH_ALG_SHA1;
@@ -426,21 +426,19 @@ void macho_load_dtb(DTBNode *root, AddressSpace *as, MemoryRegion *mem,
     if ((info->ramdisk_pa) && (info->ramdisk_size)) {
         memmap[0] = info->ramdisk_pa;
         memmap[1] = info->ramdisk_size;
-        set_dtb_prop(child, "RAMDisk", sizeof(memmap),
-                           (uint8_t *)&memmap[0]);
+        set_dtb_prop(child, "RAMDisk", sizeof(memmap), memmap);
     }
 
     if ((info->trustcache_pa) && (info->trustcache_size)) {
         memmap[0] = info->trustcache_pa;
         memmap[1] = info->trustcache_size;
-        set_dtb_prop(child, "TrustCache", sizeof(memmap),
-                           (uint8_t *)&memmap[0]);
+        set_dtb_prop(child, "TrustCache", sizeof(memmap), memmap);
     }
 
     memmap[0] = info->bootargs_pa;
     memmap[1] = sizeof(struct xnu_arm64_boot_args);
-    set_dtb_prop(child, "BootArgs", sizeof(memmap), (uint8_t *)&memmap[0]);
-    set_dtb_prop(child, "DeviceTree", sizeof(memmap), (uint8_t *)&memmap[0]);
+    set_dtb_prop(child, "BootArgs", sizeof(memmap), &memmap);
+    set_dtb_prop(child, "DeviceTree", sizeof(memmap), &memmap);
 
     info->dtb_size = get_dtb_node_buffer_size(root);
     child = get_dtb_node(root, "chosen");
@@ -991,7 +989,7 @@ hwaddr arm_load_macho(struct mach_header_64 *mh, AddressSpace *as, MemoryRegion 
 
             }
 
-            
+
             #if 0
             fprintf(stderr, "%s: Loading %s to 0x%llx \n", __func__, region_name, load_to);
             #endif

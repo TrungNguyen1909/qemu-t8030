@@ -213,7 +213,8 @@ void remove_dtb_prop(DTBNode *node, DTBProp *prop)
     node->prop_count--;
 }
 
-DTBProp *set_dtb_prop(DTBNode *n, const char *name, uint32_t size, uint8_t *val)
+DTBProp *set_dtb_prop(DTBNode *n, const char *name, uint32_t size,
+                      const void *val)
 {
     DTBProp *prop;
     assert(n && name && val);
