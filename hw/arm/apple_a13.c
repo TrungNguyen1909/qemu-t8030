@@ -650,18 +650,13 @@ AppleA13State *apple_a13_create(DTBNode *node)
     object_property_set_bool(obj, "start-powered-off", true, NULL);
     #endif
 
-    prop = find_dtb_prop(node, "timebase-frequency");
-    if (prop != NULL) {
-        remove_dtb_prop(node, prop);
-    }
     set_dtb_prop(node, "timebase-frequency", sizeof(uint64_t),
                                              (uint8_t *)&freq);
-
-    prop = find_dtb_prop(node, "fixed-frequency");
-    if (prop != NULL) {
-        remove_dtb_prop(node, prop);
-    }
     set_dtb_prop(node, "fixed-frequency", sizeof(uint64_t), (uint8_t *)&freq);
+    set_dtb_prop(node, "peripheral-frequency", sizeof(uint64_t), (uint8_t *)&freq);
+    set_dtb_prop(node, "memory-frequency", sizeof(uint64_t), (uint8_t *)&freq);
+    set_dtb_prop(node, "bus-frequency", sizeof(uint32_t), (uint8_t *)&freq);
+    set_dtb_prop(node, "clock-frequency", sizeof(uint32_t), (uint8_t *)&freq);
 
     object_property_set_bool(obj, "has_el3", false, NULL);
 

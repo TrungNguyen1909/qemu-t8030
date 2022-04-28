@@ -1443,6 +1443,8 @@ static void t8030_machine_init(MachineState *machine)
     t8030_patch_kernel(hdr);
 
     tms->device_tree = load_dtb_from_file(machine->dtb);
+    data = 24000000;
+    set_dtb_prop(tms->device_tree, "clock-frequency", 4, &data);
     child = find_dtb_node(tms->device_tree, "arm-io");
     assert(child != NULL);
 
