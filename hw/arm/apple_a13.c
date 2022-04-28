@@ -18,30 +18,12 @@
 #define VMSTATE_A13_CLUSTER_CPREG(name) \
         VMSTATE_UINT64(A13_CPREG_VAR_NAME(name), AppleA13Cluster)
 
-#define A13_CPREG_FUNCS(name)                                               \
-    static uint64_t apple_a13_cpreg_read_##name(CPUARMState *env,           \
-                                                const ARMCPRegInfo *ri)     \
-    {                                                                       \
-        AppleA13State *tcpu = APPLE_A13(env_archcpu(env));                  \
-        return tcpu->A13_CPREG_VAR_NAME(name);                              \
-    }                                                                       \
-    static void apple_a13_cpreg_write_##name(CPUARMState *env,              \
-                                         const ARMCPRegInfo *ri,            \
-                                         uint64_t value)                    \
-    {                                                                       \
-        AppleA13State *tcpu = APPLE_A13(env_archcpu(env));                  \
-        tcpu->A13_CPREG_VAR_NAME(name) = value;                             \
-        /* if (value != 0) fprintf(stderr, "%s value = 0x%llx at PC 0x%llx\n",\
-                                           value, env->pc); */                \
-    }
-
-
 #define A13_CPREG_DEF(p_name, p_op0, p_op1, p_crn, p_crm, p_op2, p_access, p_reset) \
     {                                                                               \
         .cp = CP_REG_ARM64_SYSREG_CP,                                               \
         .name = #p_name, .opc0 = p_op0, .crn = p_crn, .crm = p_crm,                 \
         .opc1 = p_op1, .opc2 = p_op2, .access = p_access, .resetvalue = p_reset,    \
-        .state = ARM_CP_STATE_AA64,                                                 \
+        .state = ARM_CP_STATE_AA64, .type = ARM_CP_OVERRIDE,                        \
         .fieldoffset = offsetof(AppleA13State, A13_CPREG_VAR_NAME(p_name))          \
                        - offsetof(ARMCPU, env)                                      \
     }
@@ -478,6 +460,7 @@ static const ARMCPRegInfo apple_a13_cp_reginfo_tcg[] = {
     A13_CPREG_DEF(ARM64_REG_LSU_ERR_STS, 3, 3, 15, 0, 0, PL1_RW, 0),
     A13_CPREG_DEF(PMC0, 3, 2, 15, 0, 0, PL1_RW, 0),
     A13_CPREG_DEF(PMC1, 3, 2, 15, 1, 0, PL1_RW, 0),
+    A13_CPREG_DEF(PMCR0, 3, 1, 15, 0, 0, PL1_RW, 0),
     A13_CPREG_DEF(PMCR1, 3, 1, 15, 1, 0, PL1_RW, 0),
     A13_CPREG_DEF(PMSR, 3, 1, 15, 13, 0, PL1_RW, 0),
     A13_CPREG_DEF(S3_4_c15_c0_5, 3, 4, 15, 0, 5, PL1_RW, 0),
@@ -634,7 +617,9 @@ AppleA13State *apple_a13_create(DTBNode *node)
     tcpu->mpidr = mpidr;
     object_property_set_uint(obj, "mp-affinity", mpidr, &error_fatal);
     cpu->midr = FIELD_DP64(cpu->midr, MIDR_EL1, PARTNUM, 0x12 + tcpu->cluster_id);
+    /* chip-revision = (variant << 4) | (revision) */
     cpu->midr = FIELD_DP64(cpu->midr, MIDR_EL1, VARIANT, 0x1);
+    cpu->midr = FIELD_DP64(cpu->midr, MIDR_EL1, REVISION, 0x1);
 
     /* remove debug regs from device tree */
     prop = find_dtb_prop(node, "reg-private");
@@ -752,6 +737,7 @@ static const VMStateDescription vmstate_apple_a13 = {
         VMSTATE_A13_CPREG(ARM64_REG_LSU_ERR_STS),
         VMSTATE_A13_CPREG(PMC0),
         VMSTATE_A13_CPREG(PMC1),
+        VMSTATE_A13_CPREG(PMCR0),
         VMSTATE_A13_CPREG(PMCR1),
         VMSTATE_A13_CPREG(PMSR),
         VMSTATE_A13_CPREG(S3_4_c15_c0_5),
