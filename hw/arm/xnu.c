@@ -97,7 +97,7 @@ static void allocate_and_copy(MemoryRegion *mem, AddressSpace *as,
                               const char *name, hwaddr pa, hwaddr size,
                               void *buf)
 {
-    address_space_rw(as, pa, MEMTXATTRS_UNSPECIFIED, (uint8_t *)buf, size, 1);
+    address_space_rw(as, pa, MEMTXATTRS_UNSPECIFIED, buf, size, 1);
 }
 
 static void *srawmemchr(void *str, int chr)

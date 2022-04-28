@@ -975,42 +975,42 @@ static void t8030_create_usb(MachineState *machine)
     complex = get_dtb_node(child, "usb-complex");
     assert(complex);
     //TODO: clock-gates, usb_widget
-    set_dtb_prop(complex, "compatible", 39, (uint8_t*)"usb-complex,s8000\0usb-complex,s5l8960x");
-    set_dtb_prop(complex, "ranges", 8*3,  (uint8_t*)&(uint64_t[]){0x0, T8030_USB_OTG_BASE, 0x600000});
-    /* set_dtb_prop(complex, "reg", 16, (uint8_t*)&(uint64_t[]){ T8030_USB_OTG_BASE + 0x900000, 0xa0 }); */
-    set_dtb_prop(complex, "AAPL,phandle", 4, (uint8_t*)&(uint32_t[]){ 0x8d });
-    set_dtb_prop(complex, "#address-cells", 4, (uint8_t*)&(uint32_t[]){ 0x2 });
-    set_dtb_prop(complex, "#size-cells", 4, (uint8_t*)&(uint32_t[]){ 0x2 });
+    set_dtb_prop(complex, "compatible", 39, "usb-complex,s8000\0usb-complex,s5l8960x");
+    set_dtb_prop(complex, "ranges", 8*3,  &(uint64_t[]){0x0, T8030_USB_OTG_BASE, 0x600000});
+    set_dtb_prop(complex, "AAPL,phandle", 4, &(uint32_t[]){ 0x8d });
+    set_dtb_prop(complex, "#address-cells", 4, &(uint32_t[]){ 0x2 });
+    set_dtb_prop(complex, "#size-cells", 4, &(uint32_t[]){ 0x2 });
     set_dtb_prop(complex, "clock-ids", 4, find_dtb_prop(drd, "clock-ids")->value);
-    set_dtb_prop(complex, "device_type", 12, (uint8_t*)"usb-complex");
+    set_dtb_prop(complex, "device_type", 12, "usb-complex");
     value = 1;
     set_dtb_prop(complex, "no-pmu", 4, (uint8_t*)&value);
 
     device = get_dtb_node(complex, "usb-device");
     assert(device);
     set_dtb_prop(device, "disable-charger-detect", sizeof(value), &value);
-    set_dtb_prop(device, "phy-interface", 4, (uint8_t*)&(uint32_t[]){ 0x8 });
-    set_dtb_prop(device, "publish-criteria", 4, (uint8_t*)&(uint32_t[]){ 0x3 });
+    set_dtb_prop(device, "phy-interface", 4, &(uint32_t[]){ 0x8 });
+    set_dtb_prop(device, "publish-criteria", 4, &(uint32_t[]){ 0x3 });
     prop = find_dtb_prop(drd, "configuration-string");
     assert(prop);
     set_dtb_prop(device, "configuration-string", prop->length, prop->value);
     prop = find_dtb_prop(drd, "iommu-parent");
     assert(prop);
     set_dtb_prop(device, "iommu-parent", prop->length, prop->value);
-    set_dtb_prop(device, "AAPL,phandle", 4, (uint8_t*)&(uint32_t[]){ 0x8e });
-    set_dtb_prop(device, "host-mac-address", 6, (uint8_t*)"\0\0\0\0\0\0");
-    set_dtb_prop(device, "device-mac-address", 6, (uint8_t*)"\0\0\0\0\0\0");
-    set_dtb_prop(device, "num-of-eps", 4, (uint8_t*)&(uint32_t[]){ 0x0e });
-    set_dtb_prop(device, "interrupt-parent", 4, (uint8_t*)&(uint32_t[]){ APPLE_AIC(tms->aic)->phandle });
-    set_dtb_prop(device, "compatible", 37, (uint8_t*)"usb-device,t7000\0usb-device,s5l8900x");
+    /* TODO: Don't hardcode phandle */
+    set_dtb_prop(device, "AAPL,phandle", 4, &(uint32_t[]){ 0x8e });
+    set_dtb_prop(device, "num-of-eps", 4, &(uint32_t[]){ 0x0e });
+    set_dtb_prop(device, "interrupt-parent", 4, &(uint32_t[]){ APPLE_AIC(tms->aic)->phandle });
+    set_dtb_prop(device, "compatible", 37, "usb-device,t7000\0usb-device,s5l8900x");
 
-    set_dtb_prop(device, "interrupts", 4, (uint8_t*)&(uint32_t[]){ ((uint32_t*)find_dtb_prop(drd, "interrupts")->value)[0] });
-    set_dtb_prop(device, "ahb-burst", 4, (uint8_t*)&(uint32_t[]){ 0xe });
-    set_dtb_prop(device, "clock-mask", 4, (uint8_t*)&(uint32_t[]){ 0x2 });
-    set_dtb_prop(device, "fifo-depth", 4, (uint8_t*)&(uint32_t[]){ 0x820 });
-    set_dtb_prop(device, "eps-dir-bitmap", 4, (uint8_t*)&(uint32_t[]){ 0x264 });
-    set_dtb_prop(device, "device-type", 11, (uint8_t*)"usb-device");
-    set_dtb_prop(device, "reg", 16, (uint8_t*)&(uint64_t[]){
+    set_dtb_prop(device, "interrupts", 4, &(uint32_t[]){ ((uint32_t*)find_dtb_prop(drd, "interrupts")->value)[0] });
+    set_dtb_prop(device, "ahb-burst", 4, &(uint32_t[]){ 0xe });
+    set_dtb_prop(device, "clock-mask", 4, &(uint32_t[]){ 0x2 });
+    set_dtb_prop(device, "fifo-depth", 4, &(uint32_t[]){ 0x820 });
+    set_dtb_prop(device, "eps-dir-bitmap", 4, &(uint32_t[]){ 0x264 });
+    set_dtb_prop(device, "device-type", 11, "usb-device");
+    set_dtb_prop(device, "device-mac-address", 6, "\xbc\xde\x48\x33\x44\x55");
+    set_dtb_prop(device, "host-mac-address", 6, "\xbc\xde\x48\x00\x11\x22");
+    set_dtb_prop(device, "reg", 16, &(uint64_t[]){
         0x100000,
         0x10000,
     });
@@ -1038,6 +1038,7 @@ static void t8030_create_usb(MachineState *machine)
                     tms->soc_base_pa
                     + ((uint64_t*)find_dtb_prop(complex, "ranges")->value)[1]
                     + ((uint64_t*)find_dtb_prop(device, "reg")->value)[0]);
+
     sysbus_realize_and_unref(SYS_BUS_DEVICE(otg), &error_fatal);
 
     prop = find_dtb_prop(device, "interrupts");
@@ -1079,7 +1080,6 @@ static void t8030_create_wdt(MachineState *machine)
 
     prop = find_dtb_prop(child, "interrupts");
     assert(prop);
-    assert(prop->length == 8);
     ints = (uint32_t*)prop->value;
 
     for(i = 0; i < prop->length / sizeof(uint32_t); i++) {
@@ -1179,7 +1179,7 @@ static void t8030_create_spmi(MachineState *machine, const char *name)
 
     reg = (uint64_t*)prop->value;
 
-    for (int i = 0; i < 3; i++) {
+    for (int i = 0; i < MIN(prop->length / 16, 3); i++) {
         sysbus_mmio_map(SYS_BUS_DEVICE(spmi), i,
                         tms->soc_base_pa + reg[i * 2]);
     }
@@ -1435,7 +1435,9 @@ static void t8030_machine_init(MachineState *machine)
     }
 
     macho_highest_lowest(hdr, &kernel_low, &kernel_high);
-    fprintf(stderr, "kernel_low: 0x" TARGET_FMT_lx "\nkernel_high: 0x" TARGET_FMT_lx "\n", kernel_low, kernel_high);
+    fprintf(stderr, "kernel_low: 0x" TARGET_FMT_lx "\n"
+                    "kernel_high: 0x" TARGET_FMT_lx "\n",
+                    kernel_low, kernel_high);
 
     g_virt_base = kernel_low;
     g_phys_base = (hwaddr)macho_get_buffer(hdr);
@@ -1449,7 +1451,7 @@ static void t8030_machine_init(MachineState *machine)
     assert(child != NULL);
 
     data = 0x11; /* B1 */
-    set_dtb_prop(child, "chip-revision", 4, (uint8_t *)&data);
+    set_dtb_prop(child, "chip-revision", 4, &data);
 
     set_dtb_prop(child, "clock-frequencies", sizeof(clock_freq), clock_freq);
     set_dtb_prop(child, "clock-frequencies-nclk", sizeof(clock_freq_nclk),
