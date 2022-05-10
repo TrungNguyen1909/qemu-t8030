@@ -16,30 +16,14 @@
 #define VMSTATE_A9_CPREG(name) \
         VMSTATE_UINT64(A9_CPREG_VAR_NAME(name), AppleA9State)
 
-#define A9_CPREG_FUNCS(name)                                               \
-    static uint64_t a9_cpreg_read_##name(CPUARMState *env,                 \
-                                            const ARMCPRegInfo *ri)           \
-    {                                                                         \
-        AppleA9State *tcpu = APPLE_A9(env_archcpu(env));                    \
-        return tcpu->A9_CPREG_VAR_NAME(name);                              \
-    }                                                                         \
-    static void a9_cpreg_write_##name(CPUARMState *env,                    \
-                                         const ARMCPRegInfo *ri,              \
-                                         uint64_t value)                      \
-    {                                                                         \
-        AppleA9State *tcpu = APPLE_A9(env_archcpu(env));                    \
-        tcpu->A9_CPREG_VAR_NAME(name) = value;                             \
-        /* if (value != 0) fprintf(stderr, "%s value = 0x%llx at PC 0x%llx\n",\
-                                           value, env->pc); */                \
-    }
-
-#define A9_CPREG_DEF(p_name, p_op0, p_op1, p_crn, p_crm, p_op2, p_access) \
-    {                                                                        \
-        .cp = CP_REG_ARM64_SYSREG_CP,                                        \
-        .name = #p_name, .opc0 = p_op0, .crn = p_crn, .crm = p_crm,          \
-        .opc1 = p_op1, .opc2 = p_op2, .access = p_access, .type = ARM_CP_IO, \
-        .state = ARM_CP_STATE_AA64, .readfn = a9_cpreg_read_##p_name,     \
-        .writefn = a9_cpreg_write_##p_name,                               \
+#define A9_CPREG_DEF(p_name, p_op0, p_op1, p_crn, p_crm, p_op2, p_access, p_reset) \
+    {                                                                              \
+        .cp = CP_REG_ARM64_SYSREG_CP,                                              \
+        .name = #p_name, .opc0 = p_op0, .crn = p_crn, .crm = p_crm,                \
+        .opc1 = p_op1, .opc2 = p_op2, .access = p_access, .resetvalue = p_reset,   \
+        .state = ARM_CP_STATE_AA64, .type = ARM_CP_OVERRIDE,                       \
+        .fieldoffset = offsetof(AppleA9State, A9_CPREG_VAR_NAME(p_name))           \
+                       - offsetof(ARMCPU, env)                                     \
     }
 
 #define MPIDR_AFF0_SHIFT 0
@@ -51,65 +35,6 @@
 #define MPIDR_AFF2_SHIFT 16
 #define MPIDR_AFF2_WIDTH 8
 #define MPIDR_AFF2_MASK  (((1 << MPIDR_AFF2_WIDTH) - 1) << MPIDR_AFF2_SHIFT)
-
-#define MPIDR_CPU_ID(mpidr_el1_val)             (((mpidr_el1_val) & MPIDR_AFF0_MASK) >> MPIDR_AFF0_SHIFT)
-#define MPIDR_CLUSTER_ID(mpidr_el1_val)         (((mpidr_el1_val) & MPIDR_AFF1_MASK) >> MPIDR_AFF1_SHIFT)
-
-#define NSEC_PER_USEC   1000ull         /* nanoseconds per microsecond */
-#define USEC_PER_SEC    1000000ull      /* microseconds per second */
-#define NSEC_PER_SEC    1000000000ull   /* nanoseconds per second */
-#define NSEC_PER_MSEC   1000000ull      /* nanoseconds per millisecond */
-#define RTCLOCK_SEC_DIVISOR     24000000ull
-
-static void
-absolutetime_to_nanoseconds(uint64_t abstime,
-                            uint64_t *result)
-{
-	uint64_t t64;
-
-	*result = (t64 = abstime / RTCLOCK_SEC_DIVISOR) * NSEC_PER_SEC;
-	abstime -= (t64 * RTCLOCK_SEC_DIVISOR);
-	*result += (abstime * NSEC_PER_SEC) / RTCLOCK_SEC_DIVISOR;
-}
-
-static void
-nanoseconds_to_absolutetime(uint64_t nanosecs,
-                            uint64_t *result)
-{
-	uint64_t t64;
-
-	*result = (t64 = nanosecs / NSEC_PER_SEC) * RTCLOCK_SEC_DIVISOR;
-	nanosecs -= (t64 * NSEC_PER_SEC);
-	*result += (nanosecs * RTCLOCK_SEC_DIVISOR) / NSEC_PER_SEC;
-}
-
-
-A9_CPREG_FUNCS(ARM64_REG_EHID4)
-A9_CPREG_FUNCS(ARM64_REG_EHID10)
-A9_CPREG_FUNCS(ARM64_REG_HID0)
-A9_CPREG_FUNCS(ARM64_REG_HID3)
-A9_CPREG_FUNCS(ARM64_REG_HID4)
-A9_CPREG_FUNCS(ARM64_REG_HID5)
-A9_CPREG_FUNCS(ARM64_REG_HID7)
-A9_CPREG_FUNCS(ARM64_REG_HID8)
-A9_CPREG_FUNCS(ARM64_REG_HID9)
-A9_CPREG_FUNCS(ARM64_REG_HID11)
-A9_CPREG_FUNCS(ARM64_REG_HID13)
-A9_CPREG_FUNCS(ARM64_REG_HID14)
-A9_CPREG_FUNCS(ARM64_REG_HID16)
-A9_CPREG_FUNCS(ARM64_REG_LSU_ERR_STS)
-A9_CPREG_FUNCS(PMC0)
-A9_CPREG_FUNCS(PMC1)
-A9_CPREG_FUNCS(PMCR1)
-A9_CPREG_FUNCS(PMSR)
-A9_CPREG_FUNCS(ARM64_REG_APCTL_EL1)
-A9_CPREG_FUNCS(S3_4_c15_c0_5)
-A9_CPREG_FUNCS(ARM64_REG_CYC_OVRD)
-A9_CPREG_FUNCS(ARM64_REG_ACC_CFG)
-A9_CPREG_FUNCS(S3_5_c15_c10_1)
-A9_CPREG_FUNCS(UPMPCM)
-A9_CPREG_FUNCS(UPMCR0)
-A9_CPREG_FUNCS(UPMSR)
 
 inline bool apple_a9_is_sleep(AppleA9State *tcpu)
 {
@@ -131,32 +56,33 @@ void apple_a9_wakeup(AppleA9State *tcpu)
 }
 
 static const ARMCPRegInfo a9_cp_reginfo_tcg[] = {
-    A9_CPREG_DEF(ARM64_REG_EHID4, 3, 0, 15, 4, 1, PL1_RW),
-    A9_CPREG_DEF(ARM64_REG_EHID10, 3, 0, 15, 10, 1, PL1_RW),
-    A9_CPREG_DEF(ARM64_REG_HID0, 3, 0, 15, 0, 0, PL1_RW),
-    A9_CPREG_DEF(ARM64_REG_HID3, 3, 0, 15, 3, 0, PL1_RW),
-    A9_CPREG_DEF(ARM64_REG_HID4, 3, 0, 15, 4, 0, PL1_RW),
-    A9_CPREG_DEF(ARM64_REG_HID5, 3, 0, 15, 5, 0, PL1_RW),
-    A9_CPREG_DEF(ARM64_REG_HID7, 3, 0, 15, 7, 0, PL1_RW),
-    A9_CPREG_DEF(ARM64_REG_HID8, 3, 0, 15, 8, 0, PL1_RW),
-    A9_CPREG_DEF(ARM64_REG_HID9, 3, 0, 15, 9, 0, PL1_RW),
-    A9_CPREG_DEF(ARM64_REG_HID11, 3, 0, 15, 11, 0, PL1_RW),
-    A9_CPREG_DEF(ARM64_REG_HID13, 3, 0, 15, 14, 0, PL1_RW),
-    A9_CPREG_DEF(ARM64_REG_HID14, 3, 0, 15, 15, 0, PL1_RW),
-    A9_CPREG_DEF(ARM64_REG_HID16, 3, 0, 15, 15, 2, PL1_RW),
-    A9_CPREG_DEF(ARM64_REG_LSU_ERR_STS, 3, 3, 15, 0, 0, PL1_RW),
-    A9_CPREG_DEF(PMC0, 3, 2, 15, 0, 0, PL1_RW),
-    A9_CPREG_DEF(PMC1, 3, 2, 15, 1, 0, PL1_RW),
-    A9_CPREG_DEF(PMCR1, 3, 1, 15, 1, 0, PL1_RW),
-    A9_CPREG_DEF(PMSR, 3, 1, 15, 13, 0, PL1_RW),
-    A9_CPREG_DEF(ARM64_REG_APCTL_EL1, 3, 4, 15, 0, 4, PL1_RW),
-    A9_CPREG_DEF(S3_4_c15_c0_5, 3, 4, 15, 0, 5, PL1_RW),
-    A9_CPREG_DEF(ARM64_REG_CYC_OVRD, 3, 5, 15, 5, 0, PL1_RW),
-    A9_CPREG_DEF(ARM64_REG_ACC_CFG, 3, 5, 15, 4, 0, PL1_RW),
-    A9_CPREG_DEF(S3_5_c15_c10_1, 3, 5, 15, 10, 1, PL0_RW),
-    A9_CPREG_DEF(UPMPCM, 3, 7, 15, 5, 4, PL1_RW),
-    A9_CPREG_DEF(UPMCR0, 3, 7, 15, 0, 4, PL1_RW),
-    A9_CPREG_DEF(UPMSR, 3, 7, 15, 6, 4, PL1_RW),
+    A9_CPREG_DEF(HID11, 3, 0, 15, 13, 0, PL1_RW, 0),
+    A9_CPREG_DEF(HID4, 3, 0, 15, 4, 0, PL1_RW, 0),
+    A9_CPREG_DEF(HID5, 3, 0, 15, 5, 0, PL1_RW, 0),
+    A9_CPREG_DEF(HID7, 3, 0, 15, 7, 0, PL1_RW, 0),
+    A9_CPREG_DEF(HID8, 3, 0, 15, 8, 0, PL1_RW, 0),
+    A9_CPREG_DEF(PMCR0, 3, 1, 15, 0, 0, PL1_RW, 0),
+    A9_CPREG_DEF(PMCR1, 3, 1, 15, 1, 0, PL1_RW, 0),
+    A9_CPREG_DEF(PMCR2, 3, 1, 15, 2, 0, PL1_RW, 0),
+    A9_CPREG_DEF(PMCR3, 3, 1, 15, 3, 0, PL1_RW, 0),
+    A9_CPREG_DEF(PMCR4, 3, 1, 15, 4, 0, PL1_RW, 0),
+    A9_CPREG_DEF(PMESR0, 3, 1, 15, 5, 0, PL1_RW, 0),
+    A9_CPREG_DEF(PMESR1, 3, 1, 15, 6, 0, PL1_RW, 0),
+    A9_CPREG_DEF(OPMAT0, 3, 1, 15, 7, 0, PL1_RW, 0),
+    A9_CPREG_DEF(OPMAT1, 3, 1, 15, 8, 0, PL1_RW, 0),
+    A9_CPREG_DEF(OPMSK0, 3, 1, 15, 9, 0, PL1_RW, 0),
+    A9_CPREG_DEF(OPMSK1, 3, 1, 15, 10, 0, PL1_RW, 0),
+    A9_CPREG_DEF(PMSR, 3, 1, 15, 13, 0, PL1_RW, 0),
+    A9_CPREG_DEF(PMTRHLD6, 3, 2, 15, 12, 0, PL1_RW, 0),
+    A9_CPREG_DEF(PMTRHLD4, 3, 2, 15, 13, 0, PL1_RW, 0),
+    A9_CPREG_DEF(PMTRHLD2, 3, 2, 15, 14, 0, PL1_RW, 0),
+    A9_CPREG_DEF(PMMMAP, 3, 2, 15, 15, 0, PL1_RW, 0),
+    A9_CPREG_DEF(LSU_ERR_STS, 3, 3, 15, 8, 0, PL1_RW, 0),
+    A9_CPREG_DEF(LSU_ERR_ADR, 3, 3, 15, 9, 0, PL1_RW, 0),
+    A9_CPREG_DEF(L2C_ERR_INF, 3, 3, 15, 10, 0, PL1_RW, 0),
+    A9_CPREG_DEF(FED_ERR_STS, 3, 4, 15, 0, 0, PL1_RW, 0),
+    A9_CPREG_DEF(CYC_CFG, 3, 5, 15, 4, 0, PL1_RW, 0),
+    A9_CPREG_DEF(MMU_ERR_STS, 3, 6, 15, 0, 0, PL1_RW, 0),
     REGINFO_SENTINEL,
 };
 
@@ -200,18 +126,21 @@ static void apple_a9_reset(DeviceState *dev)
     AppleA9State *tcpu = APPLE_A9(dev);
     AppleA9Class *tclass = APPLE_A9_GET_CLASS(dev);
     tclass->parent_reset(dev);
-
-    tcpu->A9_CPREG_VAR_NAME(ARM64_REG_LSU_ERR_STS) = 0;
-    tcpu->A9_CPREG_VAR_NAME(PMC0) = 0;
-    tcpu->A9_CPREG_VAR_NAME(PMC1) = 0;
-    tcpu->A9_CPREG_VAR_NAME(PMCR1) = 0;
-    tcpu->A9_CPREG_VAR_NAME(PMSR) = 0;
-    tcpu->A9_CPREG_VAR_NAME(ARM64_REG_APCTL_EL1) = 2;
 }
 
 static void apple_a9_instance_init(Object *obj)
 {
+    ARMCPU *cpu = ARM_CPU(obj);
+    uint64_t t;
+
     object_property_set_uint(obj, "cntfrq", 24000000, &error_fatal);
+    cpu->dtb_compatible = "apple,twister";
+    t = FIELD_DP64(0, MIDR_EL1, IMPLEMENTER, 0);
+    t = FIELD_DP64(t, MIDR_EL1, ARCHITECTURE, 0xf);
+    t = FIELD_DP64(t, MIDR_EL1, PARTNUM, 0x4); /* Maui */
+    t = FIELD_DP64(t, MIDR_EL1, VARIANT, 0x1); /* B1 */
+    t = FIELD_DP64(t, MIDR_EL1, REVISION, 1);
+    cpu->midr = t;
 }
 
 AppleA9State *apple_a9_create(DTBNode *node)
@@ -247,8 +176,6 @@ AppleA9State *apple_a9_create(DTBNode *node)
 
     tcpu->mpidr = mpidr;
     object_property_set_uint(obj, "mp-affinity", mpidr, &error_fatal);
-    //cpu->midr = FIELD_DP64(cpu->midr, MIDR_EL1, PARTNUM, 0x12 + tcpu->cluster_id);
-    //cpu->midr = FIELD_DP64(cpu->midr, MIDR_EL1, VARIANT, 0x1);
 
     /* remove debug regs from device tree */
     prop = find_dtb_prop(node, "reg-private");
@@ -331,32 +258,33 @@ static const VMStateDescription vmstate_apple_a9 = {
     .version_id = 1,
     .minimum_version_id = 1,
     .fields = (VMStateField[]) {
-        VMSTATE_A9_CPREG(ARM64_REG_EHID4),
-        VMSTATE_A9_CPREG(ARM64_REG_EHID10),
-        VMSTATE_A9_CPREG(ARM64_REG_HID0),
-        VMSTATE_A9_CPREG(ARM64_REG_HID3),
-        VMSTATE_A9_CPREG(ARM64_REG_HID4),
-        VMSTATE_A9_CPREG(ARM64_REG_HID5),
-        VMSTATE_A9_CPREG(ARM64_REG_HID7),
-        VMSTATE_A9_CPREG(ARM64_REG_HID8),
-        VMSTATE_A9_CPREG(ARM64_REG_HID9),
-        VMSTATE_A9_CPREG(ARM64_REG_HID11),
-        VMSTATE_A9_CPREG(ARM64_REG_HID13),
-        VMSTATE_A9_CPREG(ARM64_REG_HID14),
-        VMSTATE_A9_CPREG(ARM64_REG_HID16),
-        VMSTATE_A9_CPREG(ARM64_REG_LSU_ERR_STS),
-        VMSTATE_A9_CPREG(PMC0),
-        VMSTATE_A9_CPREG(PMC1),
+        VMSTATE_A9_CPREG(HID11),
+        VMSTATE_A9_CPREG(HID4),
+        VMSTATE_A9_CPREG(HID5),
+        VMSTATE_A9_CPREG(HID7),
+        VMSTATE_A9_CPREG(HID8),
+        VMSTATE_A9_CPREG(PMCR0),
         VMSTATE_A9_CPREG(PMCR1),
+        VMSTATE_A9_CPREG(PMCR2),
+        VMSTATE_A9_CPREG(PMCR3),
+        VMSTATE_A9_CPREG(PMCR4),
+        VMSTATE_A9_CPREG(PMESR0),
+        VMSTATE_A9_CPREG(PMESR1),
+        VMSTATE_A9_CPREG(OPMAT0),
+        VMSTATE_A9_CPREG(OPMAT1),
+        VMSTATE_A9_CPREG(OPMSK0),
+        VMSTATE_A9_CPREG(OPMSK1),
         VMSTATE_A9_CPREG(PMSR),
-        VMSTATE_A9_CPREG(ARM64_REG_APCTL_EL1),
-        VMSTATE_A9_CPREG(S3_4_c15_c0_5),
-        VMSTATE_A9_CPREG(ARM64_REG_CYC_OVRD),
-        VMSTATE_A9_CPREG(ARM64_REG_ACC_CFG),
-        VMSTATE_A9_CPREG(S3_5_c15_c10_1),
-        VMSTATE_A9_CPREG(UPMPCM),
-        VMSTATE_A9_CPREG(UPMCR0),
-        VMSTATE_A9_CPREG(UPMSR),
+        VMSTATE_A9_CPREG(PMTRHLD6),
+        VMSTATE_A9_CPREG(PMTRHLD4),
+        VMSTATE_A9_CPREG(PMTRHLD2),
+        VMSTATE_A9_CPREG(PMMMAP),
+        VMSTATE_A9_CPREG(LSU_ERR_STS),
+        VMSTATE_A9_CPREG(LSU_ERR_ADR),
+        VMSTATE_A9_CPREG(L2C_ERR_INF),
+        VMSTATE_A9_CPREG(FED_ERR_STS),
+        VMSTATE_A9_CPREG(CYC_CFG),
+        VMSTATE_A9_CPREG(MMU_ERR_STS),
         VMSTATE_END_OF_LIST()
     }
 };
