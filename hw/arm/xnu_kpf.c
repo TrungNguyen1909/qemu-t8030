@@ -112,10 +112,17 @@ static bool kpf_amfi_callback(struct xnu_pf_patch *patch, uint32_t *opcode_strea
      *  so that AMFI thinks that everything is in trustcache
      * there are two different versions of the trustcache function
      *  lookup_in_trust_cache_module has cdhash in x1
-     *  lookup_in_static_trust_cache has cdhash in x0 
+     *  lookup_in_static_trust_cache has cdhash in x0
      * The former one requires [x2] = 2 and [x3] = 0
      * both of them are patched to return 1
      */
+    if (((opcode_stream[-1] & 0xFF000000) != 0x91000000) &&
+         ((opcode_stream[-2] & 0xFF000000) != 0x91000000)) {
+         /* add x*
+          * ldrb (optional and only on iOS 15.5b4+)
+          */
+         return false;
+    }
     bool found_something = false;
     /* find ldrb w*, [x*, 0xb] */
     uint32_t *ldrb = find_next_insn(opcode_stream, 256, 0x39402c00, 0xfffffc00);
@@ -193,13 +200,11 @@ static void kpf_amfi_patch(xnu_pf_patchset_t *xnu_text_exec_patchset)
      * /x 0000009100028052000000d30000009b:000000FF00FFFFFF000000FF000000FF
      */
     uint64_t matches[] = {
-            0x91000000, // add x*
             0x52800200, // mov w*, 0x16
             0xd3000000, // lsr *
             0x9b000000  // madd *
     };
     uint64_t masks[] = {
-            0xFF000000,
             0xFFFFFF00,
             0xFF000000,
             0xFF000000
