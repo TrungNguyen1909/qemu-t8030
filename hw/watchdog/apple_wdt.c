@@ -181,7 +181,7 @@ static void wdt_reg_write(void *opaque, hwaddr addr,
     }
 
     trace_apple_wdt_write(addr, data, old, val);
-    wdt_update(s);
+    timer_mod_ns(s->timer, qemu_clock_get_ns(QEMU_CLOCK_VIRTUAL));
 }
 
 static uint64_t wdt_reg_read(void *opaque,
