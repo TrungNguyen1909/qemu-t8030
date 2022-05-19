@@ -352,25 +352,21 @@ static void kpf_aks_kext_patches(xnu_pf_patchset_t *patchset)
     /* TODO: SEP
      * AppleKeyStoreUserClient::handleUserClientCommandGated:
      * Example from iPhone 11, iOS 14.0b5 (18A5351d)
-     * 0xfffffff008f6f83c      57588052       mov w23, 0x2c2
-     * 0xfffffff008f6f840      1700bc72       movk w23, 0xe000, lsl 16
-     * 0xfffffff008f6f844      1fae01f1       cmp x16, 0x6b
-     * 0xfffffff008f6f848      10929f9a       csel x16, x16, xzr, ls
-     * 0xfffffff008f6f84c      b1ac0210       adr x17, 0xfffffff008f74de0
+     * 0xfffffff008f6f97c      28a5e8f2       movk x8, 0x4529, lsl 48 ; ')E'
+     * 0xfffffff008f6f980      e10316aa       mov x1, x22
+     * 0xfffffff008f6f984      02008052       mov w2, 0
+     * 0xfffffff008f6f988      030080d2       mov x3, 0
+     * 0xfffffff008f6f98c      28093fd7       blraa x9, x8
+     *
+     * the movk we are matching is the PAC discriminator for IOService::open
+     * Find this patch in com.apple.driver.AppleSEPKeyStore.__TEXT_EXEC.__text
+     *  in radare2: /x 20a5e8f2:e0ffffff
      */
     uint64_t i_matches[] = {
-            0x52805840, /* mov x*, 0x2c2 */
-            0x72bc0000, /* movk w*, 0xe000, lsl 16 */
-            0xf100001f, /* cmp x*, #* */
-            0x9a809000, /* csel x*, x*, x*, LS */
-            0x10000000, /* adr x*, * */
+            0xf2e8a520, /* movk x*, 0x4529, lsl 48 */
     };
     uint64_t i_masks[] = {
             0xffffffe0,
-            0xffffffe0,
-            0xffc0001f,
-            0xffe0fc00,
-            0xff000000,
     };
     xnu_pf_maskmatch(patchset, "AKSUC_handle", i_matches, i_masks,
                      sizeof(i_matches)/sizeof(uint64_t), true, (void *)kpf_aksuc_handle);
