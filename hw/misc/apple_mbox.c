@@ -33,6 +33,8 @@ do { qemu_log_mask(LOG_GUEST_ERROR, "%s: message:" \
 
 #define REG_A7V4_CPU_CTRL                   0x0044
 #define     REG_A7V4_CPU_CTRL_RUN           0x10
+#define REG_A7V4_CPU_STATUS                 0x0048
+#define     REG_A7V4_CPU_STATUS_IDLE        0x1
 #define REG_A7V4_NMI0                       0xc04
 #define REG_A7V4_NMI1                       0xc14
 #define REG_AKF_CONFIG                      0x2043
@@ -108,7 +110,12 @@ do { qemu_log_mask(LOG_GUEST_ERROR, "%s: message:" \
 #define MSG_TYPE_PING                       3
 #define MSG_PING_ACK                        4
 #define MSG_TYPE_EPSTART                    5
-#define MSG_TYPE_WAKE                       6
+#define MSG_TYPE_REQUEST_PSTATE             6
+#define MSG_GET_PSTATE(_x)                  ((_x) & 0xfff)
+#define  PSTATE_WAIT_VR             0x201
+#define  PSTATE_ON                  0x220
+#define  PSTATE_PWRGATE             0x202
+#define  PSTATE_SLPNOMEM            0x0
 #define MSG_TYPE_POWER                      7
 #define MSG_TYPE_ROLLCALL                   8
 #define MSG_TYPE_POWERACK                   11
@@ -399,15 +406,29 @@ static void iop_handle_management_msg(void *opaque, uint32_t ep,
     switch (s->ep0_status) {
         case EP0_IDLE:
             switch (msg->type) {
-            case MSG_TYPE_WAKE: {
+            case MSG_TYPE_REQUEST_PSTATE: {
                 apple_mbox_mgmt_msg_t m = g_new0(struct apple_mbox_mgmt_msg, 1);
 
-                iop_wakeup(s);
-                m->type = MSG_SEND_HELLO;
-                m->hello.major = s->protocol_version;
-                m->hello.minor = s->protocol_version;
-                s->ep0_status = EP0_WAIT_HELLO;
-                apple_mbox_send_control_message(s, 0, m->raw);
+                switch (MSG_GET_PSTATE(msg->raw)) {
+                case PSTATE_WAIT_VR:
+                case PSTATE_ON:
+                    iop_wakeup(s);
+                    m->type = MSG_SEND_HELLO;
+                    m->hello.major = s->protocol_version;
+                    m->hello.minor = s->protocol_version;
+                    s->ep0_status = EP0_WAIT_HELLO;
+                    apple_mbox_send_control_message(s, 0, m->raw);
+                    break;
+                case PSTATE_SLPNOMEM:
+                    m->type = MSG_TYPE_POWER;
+                    m->power.state = 0;
+                    s->regs[REG_A7V4_CPU_STATUS] = REG_A7V4_CPU_STATUS_IDLE;
+                    smp_wmb();
+                    apple_mbox_send_control_message(s, 0, m->raw);
+                    break;
+                default:
+                    break;
+                }
                 break;
             }
             case MSG_TYPE_EPSTART:
