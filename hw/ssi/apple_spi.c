@@ -96,26 +96,33 @@ static int apple_spi_word_size(AppleSPIState *s)
 static void apple_spi_update_xfer_tx(AppleSPIState *s)
 {
     if (fifo8_is_empty(&s->tx_fifo)) {
-        if (REG(s, R_CFG) & R_CFG_IE_TXEMPTY) {
-            REG(s, R_STATUS) |= R_STATUS_TXEMPTY;
-        }
+        REG(s, R_STATUS) |= R_STATUS_TXEMPTY;
     }
 }
 
 static void apple_spi_update_xfer_rx(AppleSPIState *s)
 {
     if (!fifo8_is_empty(&s->rx_fifo)) {
-        if (REG(s, R_CFG) & R_CFG_IE_RXREADY) {
-            REG(s, R_STATUS) |= R_STATUS_RXREADY;
-        }
+        REG(s, R_STATUS) |= R_STATUS_RXREADY;
     }
 }
 
 static void apple_spi_update_irq(AppleSPIState *s)
 {
     uint32_t irq = 0;
+    uint32_t mask = 0;
 
-    if (REG(s, R_STATUS)) {
+    if (REG(s, R_CFG) & R_CFG_IE_RXREADY) {
+        mask |= R_STATUS_RXREADY;
+    }
+    if (REG(s, R_CFG) & R_CFG_IE_TXEMPTY) {
+        mask |= R_STATUS_TXEMPTY;
+    }
+    if (REG(s, R_CFG) & R_CFG_IE_COMPLETE) {
+        mask |= R_STATUS_COMPLETE;
+    }
+
+    if (REG(s, R_STATUS) & mask) {
         irq = 1;
     }
     if (irq != s->last_irq) {
@@ -185,9 +192,7 @@ static void apple_spi_run(AppleSPIState *s)
         }
     }
     if (REG(s, R_RXCNT) == 0 && REG(s, R_TXCNT) == 0) {
-        if (REG(s, R_CFG) & R_CFG_IE_COMPLETE) {
-            REG(s, R_STATUS) |= R_STATUS_COMPLETE;
-        }
+        REG(s, R_STATUS) |= R_STATUS_COMPLETE;
         REG(s, R_CTRL) &= ~R_CTRL_RUN;
     }
 }
