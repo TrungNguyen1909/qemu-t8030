@@ -6931,6 +6931,15 @@ static void pauth_write_hi(CPUARMState *env, const ARMCPRegInfo *ri,
     CPREG_FIELD64(env, ri) = value;
 }
 
+static void apctl_write(CPUARMState *env, const ARMCPRegInfo *ri,
+                        uint64_t value)
+{
+    assert(ri->fieldoffset);
+    value &= ~APCTL_MKEYVld;
+    value |= CPREG_FIELD64(env, ri) & APCTL_MKEYVld;
+    CPREG_FIELD64(env, ri) = value;
+}
+
 static const ARMCPRegInfo pauth_reginfo[] = {
     { .name = "APDAKEYLO_EL1", .state = ARM_CP_STATE_AA64,
       .opc0 = 3, .opc1 = 0, .crn = 2, .crm = 2, .opc2 = 0,
@@ -6993,6 +7002,7 @@ static const ARMCPRegInfo pauth_reginfo[] = {
     { .name = "APCTL_EL1", .state = ARM_CP_STATE_AA64,
       .opc0 = 3, .opc1 = 4, .crn = 15, .crm = 0, .opc2 = 4,
       .access = PL1_RW, .accessfn = access_pauth,
+      .writefn = apctl_write, .raw_writefn = raw_write,
       .resetvalue = APCTL_MKEYVld,
       .fieldoffset = offsetof(CPUARMState, cp15.apctl_el1) },
     { .name = "APCFG_EL1", .state = ARM_CP_STATE_AA64,
