@@ -60,8 +60,8 @@
 #include "hw/spmi/apple_spmi_pmu.h"
 #include "hw/misc/apple_smc.h"
 #include "hw/arm/apple_dart.h"
+#include "hw/char/apple_uart.h"
 
-#include "hw/arm/exynos4210.h"
 #include "hw/arm/xnu_pf.h"
 #include "hw/display/m1_fb.h"
 
@@ -147,7 +147,8 @@ static void t8030_create_s3c_uart(const T8030MachineState *tms, Chardev *chr)
     assert(prop);
 
     vector = *(uint32_t*)prop->value;
-    dev = exynos4210_uart_create(base, 256, 0, chr, qdev_get_gpio_in(DEVICE(tms->aic), vector));
+    dev = apple_uart_create(base, 15, 0, chr, qdev_get_gpio_in(DEVICE(tms->aic), vector));
+    dev->id = g_strdup("uart0");
     assert(dev);
 }
 

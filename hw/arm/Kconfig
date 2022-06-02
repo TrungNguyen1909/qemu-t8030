@@ -587,3 +587,4 @@ config APPLE_SOC
     select APPLE_DART
     select APPLE_SART
     select APPLE_SPI
+    select APPLE_UART

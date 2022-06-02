@@ -71,3 +71,6 @@ config GOLDFISH_TTY
 
 config SHAKTI_UART
     bool
+
+config APPLE_UART
+    bool
