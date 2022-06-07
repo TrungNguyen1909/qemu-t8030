@@ -14,7 +14,8 @@ arm_ss.add(when: 'CONFIG_APPLE_SOC', if_true: files(
     'xnu_kpf.c')
 )
 
-arm_ss.add(when: 'CONFIG_APPLE_DART', if_true: files('apple_dart.c'))
+arm_ss.add(when: 'CONFIG_APPLE_DART', if_true: files('apple_dart.c'),
+                                      if_false: files('apple_dart-stub.c'))
 arm_ss.add(when: 'CONFIG_APPLE_SART', if_true: files('apple_sart.c'))
 arm_ss.add(when: 'TARGET_AARCH64', if_true: tasn1)
 arm_ss.add(when: 'CONFIG_PLATFORM_BUS', if_true: files('sysbus-fdt.c'))

@@ -1,5 +1,6 @@
 #include "qemu/osdep.h"
 #include "qapi/error.h"
+#include "qapi/qmp/qdict.h"
 #include "hw/irq.h"
 #include "migration/vmstate.h"
 #include "qemu/bitops.h"
@@ -9,6 +10,9 @@
 #include "hw/arm/xnu.h"
 #include "hw/arm/xnu_dtb.h"
 #include "hw/arm/apple_dart.h"
+#include "monitor/monitor.h"
+#include "monitor/qdev.h"
+#include "monitor/hmp-target.h"
 
 //#define DEBUG_DART
 
@@ -90,14 +94,12 @@ typedef enum {
     DART_DAPF,
 } dart_instance_t;
 
-#ifdef DEBUG_DART
 static const char *dart_instance_name[] = {
     [DART_UNKNOWN] = "Unknown",
     [DART_DART] = "DART",
     [DART_SMMU] = "SMMU",
     [DART_DAPF] = "DAPF",
 };
-#endif /* DEBUG_DART */
 
 typedef struct AppleDARTTLBEntry {
     hwaddr block_addr;
@@ -164,6 +166,26 @@ struct AppleDARTState {
     uint32_t bypass;
     uint64_t bypass_address;
 };
+
+static int apple_dart_device_list(Object *obj, void *opaque)
+{
+    GSList **list = opaque;
+
+    if (object_dynamic_cast(obj, TYPE_APPLE_DART)) {
+        *list = g_slist_append(*list, DEVICE(obj));
+    }
+
+    object_child_foreach(obj, apple_dart_device_list, opaque);
+    return 0;
+}
+
+static GSList *apple_dart_get_device_list(void)
+{
+    GSList *list = NULL;
+
+    object_child_foreach(qdev_get_machine(), apple_dart_device_list, &list);
+    return list;
+}
 
 static gboolean apple_dart_tlb_remove_by_sid_mask(gpointer key,
                                                   gpointer value,
@@ -605,6 +627,108 @@ AppleDARTState *apple_dart_create(DTBNode *node)
     sysbus_init_irq(sbd, &s->irq);
 
     return s;
+}
+
+static void apple_dart_dump_pt(Monitor *mon, AppleDARTInstance *o, hwaddr iova, 
+                               uint64_t *entries, int level, uint64_t pte)
+{
+    AppleDARTState *s = o->s;
+    if (level == 3) {
+        monitor_printf(mon, "\t\t\t0x%llx ... 0x%llx -> 0x%llx %c%c\n", 
+                       iova << s->page_shift, (iova + 1) << s->page_shift,
+                       pte & s->page_mask & DART_TTE_ADDR_MASK,
+                       pte & DART_TTE_NO_READ ? '-' : 'r',
+                       pte & DART_TTE_NO_WRITE ? '-' : 'w');
+        return;
+    }
+
+    for (uint64_t i = 0; i <= (s->l_mask[level] >> s->l_shift[level]); i++) {
+        uint64_t pte = entries[i];
+
+        if ((pte & DART_TTE_VALID)
+            || ((level == 0) && (pte & DART_TTBR_VALID))) {
+            uint64_t pa = pte & s->page_mask & DART_TTE_ADDR_MASK;
+            if (level == 0) {
+                pa = (pte & DART_TTBR_MASK) << DART_TTBR_SHIFT;
+            }
+            uint64_t next_n_entries = 0;
+            if (level < 2) {
+                next_n_entries = s->l_mask[level + 1] >> s->l_shift[level + 1];
+            }
+            g_autofree uint64_t *next = g_malloc0(8 * next_n_entries);
+            if (dma_memory_read(&address_space_memory, pa, next,
+                                8 * next_n_entries, MEMTXATTRS_UNSPECIFIED) !=
+                                MEMTX_OK) {
+                continue;
+            }
+
+            apple_dart_dump_pt(mon, o, iova | (i << s->l_shift[level]), next,
+                               level + 1, pte);
+        }
+    }
+}
+
+void hmp_info_dart(Monitor *mon, const QDict *qdict)
+{
+    const char *name = qdict_get_try_str(qdict, "name");
+    g_autoptr(GSList) device_list = apple_dart_get_device_list();
+    AppleDARTState *dart = NULL;
+
+    if (!name) {
+        for (GSList *ele = device_list; ele; ele = ele->next) {
+            DeviceState *dev = ele->data;
+            AppleDARTState *dart = ele->data;
+            monitor_printf(mon, "%s\tPage size: %d\t%d Instances\n", dev->id,
+                           dart->page_size, dart->num_instances);
+        }
+        return;
+    } else {
+        for (GSList *ele = device_list; ele; ele = ele->next) {
+            DeviceState *dev = ele->data;
+            if (!strcmp(dev->id, name)) {
+                dart = APPLE_DART(dev);
+                break;
+            }
+        }
+    }
+
+    if (!dart) {
+        monitor_printf(mon, "Cannot find dart %s\n", name);
+        return;
+    }
+
+    for (int i = 0; i < dart->num_instances; i++) {
+        AppleDARTInstance *o = &dart->instances[i];
+        monitor_printf(mon, "\tInstance %d: type: %s\n", i,
+                      dart_instance_name[o->type]);
+        if (o->type != DART_DART) {
+            continue;
+        }
+
+        for (int sid = 0; sid < DART_MAX_STREAMS; sid++) {
+            if (dart->sids & (1 << sid)) {
+                uint32_t remap = o->remap[sid] & 0xf;
+                if (sid != remap) {
+                    monitor_printf(mon, "\t\tSID %d: Remapped to %d\n", sid, remap);
+                    continue;
+                }
+                if ((o->tcr[sid] & DART_TCR_TXEN) == 0) {
+                    monitor_printf(mon, "\t\tSID %d: Translation disabled\n", sid);
+                    continue;
+                }
+
+                if (o->tcr[sid] & DART_TCR_BYPASS_DART) {
+                    monitor_printf(mon, "\t\tSID %d: Translation bypassed\n", sid);
+                    continue;
+                }
+                monitor_printf(mon, "\t\tSID %d:\n", sid);
+                uint64_t l0_entries[4] = { o->ttbr[sid][0], o->ttbr[sid][1],
+                                           o->ttbr[sid][2], o->ttbr[sid][3] };
+                apple_dart_dump_pt(mon, o, 0, l0_entries, 0, 0);
+                
+            }
+        }
+    }
 }
 
 static const VMStateDescription vmstate_apple_dart_instance = {
