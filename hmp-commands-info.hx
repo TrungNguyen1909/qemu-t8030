@@ -894,3 +894,18 @@ SRST
   ``info via``
     Show guest mos6522 VIA devices.
 ERST
+
+#if defined(TARGET_AARCH64)
+    {
+        .name         = "dart",
+        .args_type    = "name:s?",
+        .params       = "[name]",
+        .help         = "show guest Apple DART IOMMUs",
+        .cmd          = hmp_info_dart,
+    },
+#endif
+
+SRST
+  ``info dart``
+    Show guest Apple DART IOMMUs.
+ERST
