@@ -292,6 +292,9 @@ void macho_setup_bootargs(const char *name, AddressSpace *as,
                           hwaddr dtb_size, video_boot_args v_bootargs,
                           char *kern_args);
 
+void macho_allocate_segment_records(DTBNode *memory_map,
+                                    struct mach_header_64 *mh);
+
 hwaddr arm_load_macho(struct mach_header_64 *mh, AddressSpace *as, MemoryRegion *mem,
                       DTBNode *memory_map, hwaddr phys_base, hwaddr virt_slide);
 

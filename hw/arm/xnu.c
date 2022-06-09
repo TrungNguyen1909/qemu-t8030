@@ -963,6 +963,41 @@ static void macho_process_symbols(struct mach_header_64 *mh, uint64_t slide)
     }
 }
 
+void macho_allocate_segment_records(DTBNode *memory_map,
+                                    struct mach_header_64 *mh)
+{
+    uint8_t *data = NULL;
+    unsigned int index;
+    struct load_command *cmd;
+    hwaddr pc = 0;
+    data = macho_get_buffer(mh);
+
+    cmd = (struct load_command *)((char *)mh + sizeof(struct mach_header_64));
+    for (index = 0; index < mh->ncmds; index++) {
+        switch (cmd->cmd) {
+        case LC_SEGMENT_64: {
+            struct segment_command_64 *segCmd =
+                (struct segment_command_64 *)cmd;
+            char region_name[32] = {0};
+
+            snprintf(region_name, sizeof(region_name), "Kernel-%s",
+                     segCmd->segname);
+            struct MemoryMapFileInfo {
+                uint64_t paddr;
+                uint64_t length;
+            } file_info = { 0 };
+            set_dtb_prop(memory_map, region_name, sizeof(file_info),
+                         &file_info);
+            break;
+        }
+        default:
+            break;
+        }
+
+        cmd = (struct load_command *)((char *)cmd + cmd->cmdsize);
+    }
+}
+
 hwaddr arm_load_macho(struct mach_header_64 *mh, AddressSpace *as, MemoryRegion *mem,
                       DTBNode *memory_map, hwaddr phys_base, uint64_t virt_slide)
 {
