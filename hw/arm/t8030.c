@@ -413,6 +413,8 @@ static void t8030_memory_setup(MachineState *machine)
         vram_reg[1] = vram_size;
         set_dtb_prop(vram, "reg", 16, &vram_reg);
     }
+
+    macho_populate_dtb(tms->device_tree, info);
     macho_load_dtb(tms->device_tree, nsas, sysmem, "DeviceTree", info);
 
     phys_ptr += align_16k_high(info->dtb_size);
