@@ -68,6 +68,7 @@ typedef struct
     MemoryRegion *sysmem;
     struct mach_header_64 *kernel;
     DTBNode *device_tree;
+    uint8_t *trustcache;
     struct macho_boot_info bootinfo;
     video_boot_args video;
     char *trustcache_filename;

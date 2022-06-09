@@ -311,8 +311,10 @@ void macho_populate_dtb(DTBNode *root, macho_boot_info_t info);
 void macho_load_dtb(DTBNode *root, AddressSpace *as, MemoryRegion *mem,
                     const char *name, macho_boot_info_t info);
 
-hwaddr macho_load_trustcache(const char *filename, AddressSpace *as,
-                            MemoryRegion *mem, hwaddr text_pa, uint64_t *size);
+uint8_t *load_trustcache_from_file(const char *filename, uint64_t *size);
+void macho_load_trustcache(void *trustcache, uint64_t size,
+                           AddressSpace *as, MemoryRegion *mem, hwaddr pa);
+
 void macho_load_ramdisk(const char *filename, AddressSpace *as, MemoryRegion *mem,
                             hwaddr pa, uint64_t *size);
 #endif

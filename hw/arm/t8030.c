@@ -278,10 +278,12 @@ static void t8030_memory_setup(MachineState *machine)
     info->dram_size = T8030_DRAM_SIZE;
 
     /* TrustCache */
-    info->trustcache_pa = macho_load_trustcache(tms->trustcache_filename, nsas,
-                                                sysmem,
-                                                vtop_static(text_range->va + slide_virt),
-                                                &info->trustcache_size);
+    info->trustcache_pa = vtop_static(text_range->va + slide_virt) - 
+                          info->trustcache_size;
+
+    macho_load_trustcache(tms->trustcache, info->trustcache_size,
+                          nsas, sysmem, info->trustcache_pa);
+    phys_ptr += align_16k_high(info->trustcache_size);
 
     info->entry = arm_load_macho(hdr, nsas, sysmem, memory_map,
                                  g_phys_base + slide_phys, slide_virt);
@@ -1448,6 +1450,8 @@ static void t8030_machine_init(MachineState *machine)
     t8030_patch_kernel(hdr);
 
     tms->device_tree = load_dtb_from_file(machine->dtb);
+    tms->trustcache = load_trustcache_from_file(tms->trustcache_filename,
+                                                &tms->bootinfo.trustcache_size);
     data = 24000000;
     set_dtb_prop(tms->device_tree, "clock-frequency", 4, &data);
     child = find_dtb_node(tms->device_tree, "arm-io");
