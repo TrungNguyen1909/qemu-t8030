@@ -110,6 +110,10 @@ struct build_version_command {
 
 #define MACH_MAGIC_64   0xFEEDFACFu
 
+/* constants for the filetype field of mach_header_64 */
+#define MH_EXECUTE      0x2
+#define MH_FILESET      0xc
+
 struct mach_header_64 {
     uint32_t    magic;      /* mach magic number identifier */
     uint32_t /*cpu_type_t*/  cputype;    /* cpu specifier */
