@@ -335,14 +335,12 @@ DTBNode *load_dtb_from_file(char *filename)
     return root;
 }
 
-void macho_load_dtb(DTBNode *root, AddressSpace *as, MemoryRegion *mem,
-                    const char *name, macho_boot_info_t info)
+void macho_populate_dtb(DTBNode *root, macho_boot_info_t info)
 {
     DTBNode *child = NULL;
     DTBProp *prop = NULL;
     uint32_t data;
     uint64_t memmap[2] = {0};
-    g_autofree uint8_t *buf = NULL;
 
     child = get_dtb_node(root, "chosen");
     assert(child != NULL);
@@ -394,11 +392,67 @@ void macho_load_dtb(DTBNode *root, AddressSpace *as, MemoryRegion *mem,
     // TODO: Workaround: AppleKeyStore SEP(?)
     set_dtb_prop(child, "boot-ios-diagnostics", sizeof(data), &data);
 
+
+
+    macho_dtb_node_process(root, NULL);
+
+    child = get_dtb_node(root, "chosen/memory-map");
+    assert(child != NULL);
+
+    /* Allocate space */
+    set_dtb_prop(child, "RAMDisk", sizeof(memmap), memmap);
+    set_dtb_prop(child, "TrustCache", sizeof(memmap), memmap);
+    set_dtb_prop(child, "SEPFW", sizeof(memmap), memmap);
+
+    set_dtb_prop(child, "BootArgs", sizeof(memmap), &memmap);
+    set_dtb_prop(child, "DeviceTree", sizeof(memmap), &memmap);
+
+    info->dtb_size = align_16k_high(get_dtb_node_buffer_size(root));
+}
+
+void macho_load_dtb(DTBNode *root, AddressSpace *as, MemoryRegion *mem,
+                    const char *name, macho_boot_info_t info)
+{
+    DTBNode *child;
+    DTBProp *prop;
+    g_autofree uint8_t *buf = NULL;
+    uint64_t memmap[2] = {0};
+
+
+    child = get_dtb_node(root, "chosen/memory-map");
+    prop = find_dtb_prop(child, "DeviceTree");
+    assert(prop);
+    ((uint64_t *)prop->value)[0] = info->dtb_pa;
+    ((uint64_t *)prop->value)[1] = info->dtb_size;
+    
+    prop = find_dtb_prop(child, "RAMDisk");
+    assert(prop);
+    if ((info->ramdisk_pa) && (info->ramdisk_size)) {
+        ((uint64_t *)prop->value)[0] = info->ramdisk_pa;
+        ((uint64_t *)prop->value)[1] = info->ramdisk_size;
+    } else {
+        remove_dtb_prop(child, prop);
+    }
+
+    prop = find_dtb_prop(child, "TrustCache");
+    assert(prop);
+    if ((info->trustcache_pa) && (info->trustcache_size)) {
+        ((uint64_t *)prop->value)[0] = info->trustcache_pa;
+        ((uint64_t *)prop->value)[1] = info->trustcache_size;
+    } else {
+        remove_dtb_prop(child, prop);
+    }
+
+    prop = find_dtb_prop(child, "BootArgs");
+    assert(prop);
+    ((uint64_t *)prop->value)[0] = info->bootargs_pa;
+    ((uint64_t *)prop->value)[1] = sizeof(struct xnu_arm64_boot_args);
+
     if (info->ticket_data && info->ticket_length) {
         QCryptoHashAlgorithm alg = QCRYPTO_HASH_ALG_SHA1;
         g_autofree uint8_t *hash = NULL;
         size_t hash_len = 0;
-        DTBNode *child = get_dtb_node(root, "chosen");
+        DTBNode *child = find_dtb_node(root, "chosen");
         DTBProp *prop = NULL;
         g_autofree Error *err = NULL;
         prop = find_dtb_prop(child, "crypto-hash-method");
@@ -409,44 +463,18 @@ void macho_load_dtb(DTBNode *root, AddressSpace *as, MemoryRegion *mem,
             }
         }
 
+        prop = find_dtb_prop(child, "boot-manifest-hash");
+        assert(prop);
+
         if (qcrypto_hash_bytes(alg, info->ticket_data, info->ticket_length, &hash, &hash_len, &err) >= 0) {
-            set_dtb_prop(child, "boot-manifest-hash", hash_len, hash);
+            assert(hash_len == prop->length);
+            memcpy(prop->value, hash, hash_len);
         } else {
             error_report_err(err);
         }
     }
 
-    macho_dtb_node_process(root, NULL);
-
-    child = get_dtb_node(root, "chosen");
-    assert(child != NULL);
-    child = get_dtb_node(child, "memory-map");
-    assert(child != NULL);
-
-    if ((info->ramdisk_pa) && (info->ramdisk_size)) {
-        memmap[0] = info->ramdisk_pa;
-        memmap[1] = info->ramdisk_size;
-        set_dtb_prop(child, "RAMDisk", sizeof(memmap), memmap);
-    }
-
-    if ((info->trustcache_pa) && (info->trustcache_size)) {
-        memmap[0] = info->trustcache_pa;
-        memmap[1] = info->trustcache_size;
-        set_dtb_prop(child, "TrustCache", sizeof(memmap), memmap);
-    }
-
-    memmap[0] = info->bootargs_pa;
-    memmap[1] = sizeof(struct xnu_arm64_boot_args);
-    set_dtb_prop(child, "BootArgs", sizeof(memmap), &memmap);
-    set_dtb_prop(child, "DeviceTree", sizeof(memmap), &memmap);
-
-    info->dtb_size = get_dtb_node_buffer_size(root);
-    child = get_dtb_node(root, "chosen");
-    child = get_dtb_node(child, "memory-map");
-    prop = find_dtb_prop(child, "DeviceTree");
-    ((uint64_t *)prop->value)[0] = info->dtb_pa;
-    ((uint64_t *)prop->value)[1] = info->dtb_size;
-
+    assert(info->dtb_size >= get_dtb_node_buffer_size(root));
     buf = g_malloc0(info->dtb_size);
     save_dtb(buf, root);
     allocate_and_copy(mem, as, name, info->dtb_pa, info->dtb_size, buf);

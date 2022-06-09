@@ -303,6 +303,8 @@ void macho_load_raw_file(const char *filename, AddressSpace *as, MemoryRegion *m
 
 DTBNode *load_dtb_from_file(char *filename);
 
+void macho_populate_dtb(DTBNode *root, macho_boot_info_t info);
+
 void macho_load_dtb(DTBNode *root, AddressSpace *as, MemoryRegion *mem,
                     const char *name, macho_boot_info_t info);
 
