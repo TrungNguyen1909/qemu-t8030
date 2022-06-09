@@ -416,8 +416,6 @@ void macho_load_dtb(DTBNode *root, AddressSpace *as, MemoryRegion *mem,
     DTBNode *child;
     DTBProp *prop;
     g_autofree uint8_t *buf = NULL;
-    uint64_t memmap[2] = {0};
-
 
     child = get_dtb_node(root, "chosen/memory-map");
     prop = find_dtb_prop(child, "DeviceTree");
@@ -632,7 +630,7 @@ void macho_setup_bootargs(const char *name, AddressSpace *as,
                           hwaddr virt_base, hwaddr phys_base, hwaddr mem_size,
                           hwaddr top_of_kernel_data_pa, hwaddr dtb_va,
                           hwaddr dtb_size, video_boot_args v_bootargs,
-                          char *kern_args)
+                          const char *cmdline)
 {
     struct xnu_arm64_boot_args boot_args;
 
@@ -655,8 +653,8 @@ void macho_setup_bootargs(const char *name, AddressSpace *as,
     boot_args.deviceTreeLength = dtb_size;
     boot_args.memSizeActual = 0;
     boot_args.bootFlags = 1;
-    if (kern_args) {
-        g_strlcpy(boot_args.CommandLine, kern_args,
+    if (cmdline) {
+        g_strlcpy(boot_args.CommandLine, cmdline,
                   sizeof(boot_args.CommandLine));
     }
 
@@ -966,11 +964,8 @@ static void macho_process_symbols(struct mach_header_64 *mh, uint64_t slide)
 void macho_allocate_segment_records(DTBNode *memory_map,
                                     struct mach_header_64 *mh)
 {
-    uint8_t *data = NULL;
     unsigned int index;
     struct load_command *cmd;
-    hwaddr pc = 0;
-    data = macho_get_buffer(mh);
 
     cmd = (struct load_command *)((char *)mh + sizeof(struct mach_header_64));
     for (index = 0; index < mh->ncmds; index++) {
