@@ -698,7 +698,9 @@ AppleA13State *apple_a13_cpu_create(DTBNode *node)
 
     /* XXX: QARMA is too slow */
     object_property_set_bool(obj, "pauth-impdef", true, NULL);
+    #if 0
     object_property_set_bool(obj, "start-powered-off", true, NULL);
+    #endif
 
     set_dtb_prop(node, "timebase-frequency", sizeof(uint64_t),
                                              (uint8_t *)&freq);

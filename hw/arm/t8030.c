@@ -1491,14 +1491,19 @@ static void t8030_cpu_reset(void *opaque)
             object_property_set_uint(OBJECT(cpu), "pauth-mhi",
                                     m_hi,
                                     &error_abort);
-            apple_a13_cpu_reset(tcpu);
             if (tcpu->cpu_id == 0) {
                 boot_cpu = tcpu;
+            } else {
+                apple_a13_cpu_reset(tcpu);
             }
         }
     }
-    apple_a13_cpu_start(boot_cpu, tms->bootinfo.entry,
-                        tms->bootinfo.bootargs_pa);
+    if (boot_cpu) {
+        cpu_reset(CPU(boot_cpu));
+        env = &ARM_CPU(boot_cpu)->env;
+        env->xregs[0] = tms->bootinfo.bootargs_pa;
+        env->pc = tms->bootinfo.entry;
+    }
 }
 
 static void t8030_machine_reset(MachineState* machine)
