@@ -1133,6 +1133,39 @@ void macho_free(struct mach_header_64 *hdr)
     g_free(macho_get_buffer(hdr));
 }
 
+struct fileset_entry_command *macho_get_fileset(struct mach_header_64 *header, const char *entry)
+{
+    if (header->filetype != MH_FILESET) {
+        return NULL;
+    }
+    struct fileset_entry_command *fileset;
+    fileset = (struct fileset_entry_command *)
+        ((char *)header + sizeof(struct mach_header_64));
+
+    for (uint32_t i = 0; i < header->ncmds; i++) {
+        if (fileset->cmd == LC_FILESET_ENTRY) {
+            const char *entry_id = (char *)fileset + fileset->entry_id;
+            if (strcmp(entry_id, entry) == 0) {
+                return fileset;
+            }
+        }
+
+        fileset = (struct fileset_entry_command *)((char *)fileset + fileset->cmdsize);
+    }
+    return NULL;
+}
+
+struct mach_header_64 *macho_get_fileset_header(struct mach_header_64 *header, const char *entry)
+{
+    struct fileset_entry_command *fileset = macho_get_fileset(header, entry);
+    struct mach_header_64 *sub_header;
+    if (fileset == NULL) {
+        return NULL;
+    }
+    sub_header = (struct mach_header_64 *)((char *)header + fileset->fileoff);
+    return sub_header;
+}
+
 struct segment_command_64 *macho_get_segment(struct mach_header_64 *header, const char *segname)
 {
     struct segment_command_64 *sgp;
