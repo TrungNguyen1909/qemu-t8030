@@ -10729,7 +10729,7 @@ static inline int
 pte_to_sprr_prot_is_guarded(CPUARMState *env, int ap, int xn, int pxn, bool guarded)
 {
     int sprr_idx = ((ap << 2) | (xn << 1) | pxn) & 0xf;
-    uint64_t sprr_perm = env->sprr.sprr_perm_el[arm_current_el(env)];
+    uint64_t sprr_perm = env->sprr.sprr_el_br_el1[arm_current_el(env)][arm_current_el(env)];
 
     if (arm_is_sprr_enabled(env)) {
         int attr = SPRR_EXTRACT_IDX_ATTR(sprr_perm, sprr_idx);
