@@ -284,6 +284,10 @@ void macho_highest_lowest(struct mach_header_64 *mh, uint64_t *lowaddr,
 
 void macho_text_base(struct mach_header_64 *mh, uint64_t *text_base);
 
+struct fileset_entry_command *macho_get_fileset(struct mach_header_64 *header, const char *entry);
+
+struct mach_header_64 *macho_get_fileset_header(struct mach_header_64 *header, const char *entry);
+
 struct segment_command_64* macho_get_segment(struct mach_header_64* header, const char* segname);
 
 struct section_64 *macho_get_section(struct segment_command_64 *seg, const char *name);
