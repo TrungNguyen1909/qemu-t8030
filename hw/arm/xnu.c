@@ -802,6 +802,9 @@ uint32_t macho_build_version(struct mach_header_64 *mh)
     struct load_command *cmd;
     int index;
 
+    if (mh->filetype == MH_FILESET) {
+        mh = macho_get_fileset_header(mh, "com.apple.kernel"); 
+    }
     cmd = (struct load_command *)((char *)mh + sizeof(struct mach_header_64));
 
     for (index = 0; index < mh->ncmds; index++) {
@@ -826,6 +829,9 @@ uint32_t macho_platform(struct mach_header_64 *mh)
     struct load_command *cmd;
     int index;
 
+    if (mh->filetype == MH_FILESET) {
+        mh = macho_get_fileset_header(mh, "com.apple.kernel"); 
+    }
     cmd = (struct load_command *)((char *)mh + sizeof(struct mach_header_64));
 
     for (index = 0; index < mh->ncmds; index++) {
@@ -1168,19 +1174,23 @@ struct mach_header_64 *macho_get_fileset_header(struct mach_header_64 *header, c
 
 struct segment_command_64 *macho_get_segment(struct mach_header_64 *header, const char *segname)
 {
-    struct segment_command_64 *sgp;
     uint32_t i;
 
-    sgp = (struct segment_command_64 *)
-        ((char *)header + sizeof(struct mach_header_64));
+    if (header->filetype == MH_FILESET) {
+        return macho_get_segment(macho_get_fileset_header(header, "com.apple.kernel"), segname);
+    } else {
+        struct segment_command_64 *sgp;
+        sgp = (struct segment_command_64 *)
+            ((char *)header + sizeof(struct mach_header_64));
 
-    for(i = 0; i < header->ncmds; i++) {
-        if (sgp->cmd == LC_SEGMENT_64) {
-            if (strncmp(sgp->segname, segname, sizeof(sgp->segname)) == 0)
-                return sgp;
+        for (i = 0; i < header->ncmds; i++) {
+            if (sgp->cmd == LC_SEGMENT_64) {
+                if (strncmp(sgp->segname, segname, sizeof(sgp->segname)) == 0)
+                    return sgp;
+            }
+
+            sgp = (struct segment_command_64 *)((char *)sgp + sgp->cmdsize);
         }
-
-        sgp = (struct segment_command_64 *)((char *)sgp + sgp->cmdsize);
     }
 
     // not found
