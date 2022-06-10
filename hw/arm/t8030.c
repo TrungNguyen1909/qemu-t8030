@@ -1565,6 +1565,7 @@ static void t8030_machine_init(MachineState *machine)
                 tms->rtbuddyv2_protocol_version = 11;
                 break;
             case 15:
+            case 16:
                 tms->rtbuddyv2_protocol_version = 12;
                 break;
             default:
