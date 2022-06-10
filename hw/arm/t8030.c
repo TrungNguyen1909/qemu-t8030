@@ -70,10 +70,9 @@
 
 /*
  * This is from /chosen/carveout-memory-map/region-id-24
- * However, PhysBase is required to be L2-aligned (32MiB)
  */
-#define T8030_KERNEL_REGION_BASE (0x802000000)
-#define T8030_KERNEL_REGION_SIZE (0xf0330000)
+#define T8030_KERNEL_REGION_BASE (0x801964000)
+#define T8030_KERNEL_REGION_SIZE (0xf09cc000)
 
 #define T8030_ANS_TEXT_BASE     (0x800024000)
 #define T8030_ANS_TEXT_SIZE     (0x124000)
@@ -252,8 +251,7 @@ static void t8030_load_classic_kc(T8030MachineState *tms, const char *cmdline)
 
     get_kaslr_slides(tms, &slide_phys, &slide_virt);
 
-    phys_ptr = T8030_KERNEL_REGION_BASE;
-    g_phys_base = phys_ptr;
+    g_phys_base = phys_ptr = align_up(T8030_KERNEL_REGION_BASE, 16 * MiB);
     phys_ptr += slide_phys;
     g_virt_base += slide_virt - slide_phys;
 
