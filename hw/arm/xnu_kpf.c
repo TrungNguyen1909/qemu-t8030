@@ -376,10 +376,9 @@ void kpf(void)
 {
     struct mach_header_64 *hdr = xnu_header;
     xnu_pf_patchset_t *xnu_text_exec_patchset = xnu_pf_patchset_create(XNU_PF_ACCESS_32BIT);
-    g_autofree xnu_pf_range_t *text_exec_range = xnu_pf_section(hdr, "__TEXT_EXEC", "__text");
+    g_autofree xnu_pf_range_t *text_exec_range = xnu_pf_get_actual_text_exec(hdr);
     xnu_pf_patchset_t *xnu_ppl_text_patchset = xnu_pf_patchset_create(XNU_PF_ACCESS_32BIT);
     g_autofree xnu_pf_range_t *ppltext_exec_range = xnu_pf_section(hdr, "__PPLTEXT", "__text");
-    struct mach_header_64 *first_kext = xnu_pf_get_first_kext(hdr);
 
     xnu_pf_patchset_t *apfs_patchset;
     struct mach_header_64 *apfs_header;
@@ -393,22 +392,6 @@ void kpf(void)
     xnu_pf_patchset_t *aks_patchset;
     g_autofree xnu_pf_range_t *aks_text_exec_range;
 
-    if (first_kext) {
-        g_autofree xnu_pf_range_t *first_kext_text_exec_range = xnu_pf_section(first_kext, "__TEXT_EXEC", "__text");
-
-        if (first_kext_text_exec_range) {
-            uint64_t text_exec_end_real;
-            uint64_t text_exec_end = text_exec_end_real = ((uint64_t) (text_exec_range->va)) + text_exec_range->size;
-            uint64_t first_kext_p = ((uint64_t) (first_kext_text_exec_range->va));
-
-            if (text_exec_end > first_kext_p
-                && first_kext_text_exec_range->va > text_exec_range->va) {
-                text_exec_end = first_kext_p;
-            }
-
-            text_exec_range->size -= text_exec_end_real - text_exec_end;
-        }
-    }
 
     apfs_patchset = xnu_pf_patchset_create(XNU_PF_ACCESS_32BIT);
     apfs_header = xnu_pf_get_kext_header(hdr, "com.apple.filesystems.apfs");

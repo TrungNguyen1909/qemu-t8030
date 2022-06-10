@@ -45,7 +45,7 @@ xnu_pf_range_t *xnu_pf_section(struct mach_header_64 *header, const char *segmen
     return xnu_pf_range_from_va(xnu_slide_hdr_va(header, sec->addr), sec->size);
 }
 
-struct mach_header_64 *xnu_pf_get_first_kext(struct mach_header_64 *kheader)
+static struct mach_header_64 *xnu_pf_get_first_kext(struct mach_header_64 *kheader)
 {
     uint64_t *start, kextb;
     xnu_pf_range_t *kmod_start_range = xnu_pf_section(kheader, "__PRELINK_INFO", "__kmod_start");
@@ -161,6 +161,33 @@ struct mach_header_64 *xnu_pf_get_kext_header(struct mach_header_64 *kheader, co
     g_free(kmod_start_range);
 
     return NULL;
+}
+
+xnu_pf_range_t *xnu_pf_get_actual_text_exec(struct mach_header_64 *header)
+{
+    xnu_pf_range_t *text_exec_range = xnu_pf_section(header, "__TEXT_EXEC", "__text");
+    if (header->filetype == MH_FILESET) {
+        return text_exec_range;
+    }
+
+    struct mach_header_64 *first_kext = xnu_pf_get_first_kext(header);
+    if (first_kext) {
+        g_autofree xnu_pf_range_t *first_kext_text_exec_range = xnu_pf_section(first_kext, "__TEXT_EXEC", "__text");
+
+        if (first_kext_text_exec_range) {
+            uint64_t text_exec_end_real;
+            uint64_t text_exec_end = text_exec_end_real = ((uint64_t) (text_exec_range->va)) + text_exec_range->size;
+            uint64_t first_kext_p = ((uint64_t) (first_kext_text_exec_range->va));
+
+            if (text_exec_end > first_kext_p
+                && first_kext_text_exec_range->va > text_exec_range->va) {
+                text_exec_end = first_kext_p;
+            }
+
+            text_exec_range->size -= text_exec_end_real - text_exec_end;
+        }
+    }
+    return text_exec_range;
 }
 
 void xnu_pf_apply_each_kext(struct mach_header_64 *kheader, xnu_pf_patchset_t *patchset)
