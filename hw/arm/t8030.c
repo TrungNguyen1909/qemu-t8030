@@ -111,8 +111,8 @@ static void t8030_wake_up_cpus(MachineState* machine, uint64_t cpu_mask)
 
     for(i = 0; i < machine->smp.cpus; i++) {
         if (test_bit(i, (unsigned long*)&cpu_mask)
-            && apple_a13_is_sleep(tms->cpus[i])) {
-            apple_a13_wakeup(tms->cpus[i]);
+            && apple_a13_cpu_is_sleep(tms->cpus[i])) {
+            apple_a13_cpu_wakeup(tms->cpus[i]);
         }
     }
 }
@@ -697,7 +697,7 @@ static void t8030_cpu_setup(MachineState *machine)
             continue;
         }
 
-        tms->cpus[i] = apple_a13_create(node);
+        tms->cpus[i] = apple_a13_cpu_create(node);
         cluster_id = tms->cpus[i]->cluster_id;
 
         object_property_add_child(OBJECT(&tms->clusters[cluster_id]),
@@ -1470,9 +1470,8 @@ static void t8030_cpu_reset(void *opaque)
     MachineState *machine = MACHINE(opaque);
     T8030MachineState *tms = T8030_MACHINE(machine);
     CPUState *cpu;
-    CPUState *cs;
     CPUARMState *env;
-    bool found_first = false;
+    AppleA13State *boot_cpu = NULL;
     uint64_t m_lo = 0;
     uint64_t m_hi = 0;
     qemu_guest_getrandom(&m_lo, sizeof(m_lo), NULL);
@@ -1492,17 +1491,14 @@ static void t8030_cpu_reset(void *opaque)
             object_property_set_uint(OBJECT(cpu), "pauth-mhi",
                                     m_hi,
                                     &error_abort);
-            cpu_reset(cpu);
-            if (!found_first) {
-                found_first = true;
-                cs = CPU(first_cpu);
-                env = &ARM_CPU(cs)->env;
-                env->xregs[0] = tms->bootinfo.bootargs_pa;
-                env->pc = tms->bootinfo.entry;
+            apple_a13_cpu_reset(tcpu);
+            if (tcpu->cpu_id == 0) {
+                boot_cpu = tcpu;
             }
         }
     }
-
+    apple_a13_cpu_start(boot_cpu, tms->bootinfo.entry,
+                        tms->bootinfo.bootargs_pa);
 }
 
 static void t8030_machine_reset(MachineState* machine)

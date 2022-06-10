@@ -11,6 +11,7 @@
 #include "hw/arm/apple_a13_gxf.h"
 #include "arm-powerctl.h"
 #include "sysemu/reset.h"
+#include "qemu/main-loop.h"
 
 #define VMSTATE_A13_CPREG(name) \
         VMSTATE_UINT64(A13_CPREG_VAR_NAME(name), AppleA13State)
@@ -97,12 +98,34 @@ static QTAILQ_HEAD(, AppleA13Cluster) clusters = QTAILQ_HEAD_INITIALIZER(cluster
 static uint64_t ipi_cr = kDeferredIPITimerDefault;
 static QEMUTimer *ipicr_timer = NULL;
 
-inline bool apple_a13_is_sleep(AppleA13State *tcpu)
+inline bool apple_a13_cpu_is_sleep(AppleA13State *tcpu)
 {
     return CPU(tcpu)->halted;
 }
 
-void apple_a13_wakeup(AppleA13State *tcpu)
+void apple_a13_cpu_start(AppleA13State *tcpu, uint64_t entry,
+                         uint64_t boot_args)
+{
+    int ret = QEMU_ARM_POWERCTL_RET_SUCCESS;
+
+    if (ARM_CPU(tcpu)->power_state != PSCI_OFF) {
+        arm_reset_cpu(tcpu->mpidr);
+    }
+
+    assert(qemu_mutex_iothread_locked());
+    qemu_mutex_unlock_iothread();
+    while (qatomic_read(&ARM_CPU(tcpu)->power_state) != PSCI_OFF) {}
+    qemu_mutex_lock_iothread();
+
+    ret = arm_set_cpu_on(tcpu->mpidr, entry, boot_args, 1, 1);
+
+    if (ret != QEMU_ARM_POWERCTL_RET_SUCCESS) {
+        error_report("%s: failed to bring up CPU %d: err %d",
+                __func__, tcpu->cpu_id, ret);
+    }
+}
+
+void apple_a13_cpu_wakeup(AppleA13State *tcpu)
 {
     int ret = QEMU_ARM_POWERCTL_RET_SUCCESS;
 
@@ -112,6 +135,34 @@ void apple_a13_wakeup(AppleA13State *tcpu)
 
     if (ret != QEMU_ARM_POWERCTL_RET_SUCCESS) {
         error_report("%s: failed to bring up CPU %d: err %d",
+                __func__, tcpu->cpu_id, ret);
+    }
+}
+
+void apple_a13_cpu_reset(AppleA13State *tcpu)
+{
+    int ret = QEMU_ARM_POWERCTL_RET_SUCCESS;
+
+    if (ARM_CPU(tcpu)->power_state != PSCI_OFF) {
+        ret = arm_reset_cpu(tcpu->mpidr);
+    }
+
+    if (ret != QEMU_ARM_POWERCTL_RET_SUCCESS) {
+        error_report("%s: failed to reset CPU %d: err %d",
+                __func__, tcpu->cpu_id, ret);
+    }
+}
+
+void apple_a13_cpu_off(AppleA13State *tcpu)
+{
+    int ret = QEMU_ARM_POWERCTL_RET_SUCCESS;
+
+    if (ARM_CPU(tcpu)->power_state != PSCI_OFF) {
+        ret = arm_set_cpu_off(tcpu->mpidr);
+    }
+
+    if (ret != QEMU_ARM_POWERCTL_RET_SUCCESS) {
+        error_report("%s: failed to turn off CPU %d: err %d",
                 __func__, tcpu->cpu_id, ret);
     }
 }
@@ -156,7 +207,7 @@ static void apple_a13_cluster_cpreg_write(CPUARMState *env,
 static void apple_a13_cluster_deliver_ipi(AppleA13Cluster *c, uint64_t cpu_id,
                                       uint64_t src_cpu, uint64_t flag)
 {
-    apple_a13_wakeup(c->cpus[cpu_id]);
+    apple_a13_cpu_wakeup(c->cpus[cpu_id]);
 
     if (c->cpus[cpu_id]->ipi_sr)
         return;
@@ -229,7 +280,7 @@ static void apple_a13_cluster_tick(AppleA13Cluster *c)
     for (i = 0; i < A13_MAX_CPU; i++) { /* source */
         for (j = 0; j < A13_MAX_CPU; j++) { /* target */
             if (c->cpus[j] != NULL && c->noWakeIPI[i][j]
-                && !apple_a13_is_sleep(c->cpus[j])) {
+                && !apple_a13_cpu_is_sleep(c->cpus[j])) {
                 apple_a13_cluster_deliver_ipi(c, j, i, IPI_RR_TYPE_NOWAKE);
                 break;
             }
@@ -300,7 +351,7 @@ static void apple_a13_ipi_rr_local(CPUARMState *env, const ARMCPRegInfo *ri,
 
     switch (value & IPI_RR_TYPE_MASK) {
     case IPI_RR_TYPE_NOWAKE:
-        if (apple_a13_is_sleep(c->cpus[cpu_id])) {
+        if (apple_a13_cpu_is_sleep(c->cpus[cpu_id])) {
             c->noWakeIPI[tcpu->cpu_id][cpu_id] = 1;
         } else {
             apple_a13_cluster_deliver_ipi(c, cpu_id, tcpu->cpu_id,
@@ -359,7 +410,7 @@ static void apple_a13_ipi_rr_global(CPUARMState *env, const ARMCPRegInfo *ri,
 
     switch (value & IPI_RR_TYPE_MASK) {
     case IPI_RR_TYPE_NOWAKE:
-        if (apple_a13_is_sleep(c->cpus[cpu_id])) {
+        if (apple_a13_cpu_is_sleep(c->cpus[cpu_id])) {
             c->noWakeIPI[tcpu->cpu_id][cpu_id] = 1;
         } else {
             apple_a13_cluster_deliver_ipi(c, cpu_id, tcpu->cpu_id,
@@ -573,7 +624,7 @@ static void apple_a13_instance_init(Object *obj)
                                    OBJ_PROP_FLAG_READWRITE);
 }
 
-AppleA13State *apple_a13_create(DTBNode *node)
+AppleA13State *apple_a13_cpu_create(DTBNode *node)
 {
     DeviceState  *dev;
     AppleA13State *tcpu;
@@ -644,11 +695,10 @@ AppleA13State *apple_a13_create(DTBNode *node)
     } else {
         object_property_set_bool(obj, "start-powered-off", true, NULL);
     }
+
     /* XXX: QARMA is too slow */
     object_property_set_bool(obj, "pauth-impdef", true, NULL);
-    #if 0
     object_property_set_bool(obj, "start-powered-off", true, NULL);
-    #endif
 
     set_dtb_prop(node, "timebase-frequency", sizeof(uint64_t),
                                              (uint8_t *)&freq);
