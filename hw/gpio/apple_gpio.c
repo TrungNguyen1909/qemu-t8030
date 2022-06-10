@@ -287,7 +287,6 @@ static uint32_t apple_gpio_int_read(AppleGPIOState *s,
     }
 
     offset = addr - rGPIOINT(group, 0);
-    fprintf(stderr, "%s: group: %u, addr: " TARGET_FMT_plx " offset: %u value: 0x%x\n", __func__, group, addr, offset, s->int_cfg[group][offset >> 2]);
     return s->int_cfg[group][offset >> 2];
 }
 
