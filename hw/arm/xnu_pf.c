@@ -77,6 +77,10 @@ struct mach_header_64 *xnu_pf_get_kext_header(struct mach_header_64 *kheader, co
     uint32_t count;
     uint32_t i;
 
+    if (kheader->filetype == MH_FILESET) {
+        return macho_get_fileset_header(kheader, kext_bundle_id);
+    }
+
     xnu_pf_range_t *kmod_info_range = xnu_pf_section(kheader, "__PRELINK_INFO", "__kmod_info");
     if (!kmod_info_range) {
         char kname[256];
