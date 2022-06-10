@@ -247,6 +247,7 @@ typedef struct QEMU_PACKED xnu_iop_segment_range {
 } xnu_iop_segment_range;
 
 #define XNU_MAX_NVRAM_SIZE  (0xFFFF * 0x10)
+#define XNU_BNCH_SIZE       (32)
 
 typedef struct macho_boot_info {
     hwaddr entry;
@@ -263,6 +264,7 @@ typedef struct macho_boot_info {
     uint64_t nvram_size;
     char *ticket_data;
     uint64_t ticket_length;
+    uint8_t boot_nonce_hash[XNU_BNCH_SIZE];
 } *macho_boot_info_t;
 
 struct mach_header_64 *macho_load_file(const char *filename);
