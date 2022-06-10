@@ -214,9 +214,13 @@ static void get_kaslr_slides(T8030MachineState *tms,
     *virt_slide_out = slide_virt;
 }
 
-static void t8030_memory_setup(MachineState *machine)
+static void t8030_load_classic_kc(T8030MachineState *tms, const char *cmdline)
 {
-    struct mach_header_64 *hdr;
+    MachineState *machine = MACHINE(tms);
+    struct mach_header_64 *hdr = tms->kernel;
+    MemoryRegion *sysmem = tms->sysmem;
+    AddressSpace *nsas = &address_space_memory;
+    hwaddr virt_low;
     hwaddr virt_end;
     hwaddr dtb_va;
     hwaddr top_of_kernel_data_pa;
@@ -226,12 +230,7 @@ static void t8030_memory_setup(MachineState *machine)
     hwaddr amcc_upper;
     hwaddr slide_phys = 0;
     hwaddr slide_virt = 0;
-    T8030MachineState *tms = T8030_MACHINE(machine);
-    MemoryRegion *sysmem = tms->sysmem;
-    AddressSpace *nsas = &address_space_memory;
-    AppleNvramState *nvram = NULL;
     macho_boot_info_t info = &tms->bootinfo;
-    g_autofree char *cmdline = NULL;
     g_autofree xnu_pf_range_t *last_range = NULL;
     g_autofree xnu_pf_range_t *text_range = NULL;
     DTBNode *memory_map = get_dtb_node(tms->device_tree, "/chosen/memory-map");
@@ -246,24 +245,8 @@ static void t8030_memory_setup(MachineState *machine)
      * After that we have the rest of the RAM
      */
 
-    #if 0
-    The end of DRAM:
-    0x8f7fb4000, 0x4300000: VRAM
-    0x8fc2b4000, 0x100000: PRAM
-    0x8fc3b4000, 0x4000: GFX handoff
-    0x8fc3b8000, 0x40000: GFX shared region
-    0x8fc3f8000, 0x4000: GPU region
-    0x8fc400000, 0x3c00000: ANS
-    #endif
-
-    if (t8030_check_panic(machine)) {
-        qemu_system_guest_panicked(NULL);
-        return;
-    }
-    hdr = tms->kernel;
-    assert(hdr);
     g_phys_base = (hwaddr)macho_get_buffer(hdr);
-    macho_highest_lowest(hdr, NULL, &virt_end);
+    macho_highest_lowest(hdr, &virt_low, &virt_end);
     last_range = xnu_pf_segment(hdr, "__LAST");
     text_range = xnu_pf_segment(hdr, "__TEXT");
 
@@ -273,9 +256,6 @@ static void t8030_memory_setup(MachineState *machine)
     g_phys_base = phys_ptr;
     phys_ptr += slide_phys;
     g_virt_base += slide_virt - slide_phys;
-
-    info->dram_base = T8030_DRAM_BASE;
-    info->dram_size = T8030_DRAM_SIZE;
 
     /* TrustCache */
     info->trustcache_pa = vtop_static(text_range->va + slide_virt) - 
@@ -320,6 +300,49 @@ static void t8030_memory_setup(MachineState *machine)
     /* device tree */
     info->dtb_pa = phys_ptr;
     dtb_va = ptov_static(info->dtb_pa);
+    phys_ptr += align_16k_high(info->dtb_size);
+
+    mem_size = T8030_KERNEL_REGION_SIZE -
+               (g_phys_base - T8030_KERNEL_REGION_BASE);
+
+    macho_load_dtb(tms->device_tree, nsas, sysmem, "DeviceTree", info);
+
+    top_of_kernel_data_pa = (align_16k_high(phys_ptr) + 0x3000ull) & ~0x3fffull;
+
+    fprintf(stderr, "cmdline: [%s]\n", cmdline);
+    macho_setup_bootargs("BootArgs", nsas, sysmem, info->bootargs_pa,
+                         g_virt_base, g_phys_base, mem_size,
+                         top_of_kernel_data_pa, dtb_va, info->dtb_size,
+                         tms->video, cmdline);
+    g_virt_base = virt_low;
+}
+
+static void t8030_memory_setup(MachineState *machine)
+{
+    struct mach_header_64 *hdr;
+    T8030MachineState *tms = T8030_MACHINE(machine);
+    AppleNvramState *nvram = NULL;
+    macho_boot_info_t info = &tms->bootinfo;
+    DTBNode *memory_map = get_dtb_node(tms->device_tree, "/chosen/memory-map");
+    g_autofree char *cmdline = NULL;
+
+
+    #if 0
+    The end of DRAM:
+    0x8fa298000, 0x2300000: VRAM
+    0x8fc598000, 0x3900000: ANS
+    0x8ffeb0000, 0x100000: PRAM
+    0x8fffb4000, 0x4000: GFX handoff
+    0x8fffb8000, 0x40000: GFX shared region
+    0x8ffff8000, 0x4000: GPU region
+    #endif
+
+    if (t8030_check_panic(machine)) {
+        qemu_system_guest_panicked(NULL);
+        return;
+    }
+    info->dram_base = T8030_DRAM_BASE;
+    info->dram_size = T8030_DRAM_SIZE;
 
     nvram = APPLE_NVRAM(qdev_find_recursive(sysbus_get_default(), "nvram"));
     if (!nvram) {
@@ -387,8 +410,6 @@ static void t8030_memory_setup(MachineState *machine)
         }
     }
 
-    mem_size = T8030_KERNEL_REGION_SIZE;
-
     DTBNode *pram = find_dtb_node(tms->device_tree, "pram");
     if (pram) {
         uint64_t panic_reg[2] = { 0 };
@@ -416,19 +437,22 @@ static void t8030_memory_setup(MachineState *machine)
         set_dtb_prop(vram, "reg", 16, &vram_reg);
     }
 
+    hdr = tms->kernel;
+    assert(hdr);
+
+    macho_allocate_segment_records(memory_map, hdr);
+
     macho_populate_dtb(tms->device_tree, info);
-    macho_load_dtb(tms->device_tree, nsas, sysmem, "DeviceTree", info);
 
-    phys_ptr += align_16k_high(info->dtb_size);
-
-    top_of_kernel_data_pa = (align_16k_high(phys_ptr) + 0x3000ull) & ~0x3fffull;
-
-    fprintf(stderr, "cmdline: [%s]\n", cmdline);
-    macho_setup_bootargs("BootArgs", nsas, sysmem, info->bootargs_pa,
-                         g_virt_base, g_phys_base, mem_size,
-                         top_of_kernel_data_pa, dtb_va, info->dtb_size,
-                         tms->video, cmdline);
-    g_virt_base -= slide_virt - slide_phys;
+    switch (hdr->filetype) {
+    case MH_EXECUTE:
+        t8030_load_classic_kc(tms, cmdline);
+        break;
+    default:
+        error_setg(&error_abort, "%s: Unsupported kernelcache type: 0x%x\n",
+                   __func__, hdr->filetype);                
+        break;
+    }
 }
 
 static void pmgr_unk_reg_write(void *opaque, hwaddr addr, uint64_t data, unsigned size)
