@@ -578,10 +578,9 @@ typedef struct CPUArchState {
     } gxf;
 
     struct {
-        uint64_t sprr_perm_el[4];
+        uint64_t sprr_el_br_el1[4][2];
         uint64_t sprr_config_el[4];
-        uint64_t sprr_unk_el[4];
-        uint32_t sprr_umask;
+        uint32_t mprr_el_br_el1[4][2];
     } sprr;
 
     struct {
