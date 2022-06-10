@@ -315,6 +315,114 @@ static void t8030_load_classic_kc(T8030MachineState *tms, const char *cmdline)
     g_virt_base = virt_low;
 }
 
+static void t8030_load_fileset_kc(T8030MachineState *tms, const char *cmdline)
+{
+    MachineState *machine = MACHINE(tms);
+    struct mach_header_64 *hdr = tms->kernel;
+    MemoryRegion *sysmem = tms->sysmem;
+    AddressSpace *nsas = &address_space_memory;
+    hwaddr virt_low;
+    hwaddr virt_end;
+    hwaddr dtb_va;
+    hwaddr top_of_kernel_data_pa;
+    hwaddr mem_size;
+    hwaddr phys_ptr;
+    hwaddr amcc_lower;
+    hwaddr amcc_upper;
+    hwaddr slide_phys = 0;
+    hwaddr slide_virt = 0;
+    macho_boot_info_t info = &tms->bootinfo;
+    g_autofree xnu_pf_range_t *last_range = NULL;
+    DTBNode *memory_map = get_dtb_node(tms->device_tree, "/chosen/memory-map");
+
+    /*
+     * Setup the memory layout:
+     * First we have the device tree
+     * The trustcache is right after the device tree
+     * Then we have all the kernel sections.
+     * After that we have ramdisk
+     * After that we have the kernel boot args
+     * After that we have the rest of the RAM
+     */
+
+    g_phys_base = (hwaddr)macho_get_buffer(hdr);
+    macho_highest_lowest(hdr, &virt_low, &virt_end);
+    last_range = xnu_pf_segment(hdr, "__PRELINK_INFO");
+
+    get_kaslr_slides(tms, &slide_phys, &slide_virt);
+    slide_phys &= ~(16 * MiB);
+    slide_virt &= ~(16 * MiB);
+
+    phys_ptr = align_up(T8030_KERNEL_REGION_BASE, 32 * MiB);
+    g_phys_base = phys_ptr;
+    phys_ptr += slide_phys;
+    phys_ptr |= (16 * MiB);
+    phys_ptr -= align_16k_high(info->dtb_size + info->trustcache_size);
+
+    /* device tree */
+    info->dtb_pa = phys_ptr;
+    phys_ptr += info->dtb_size;
+
+    /* TrustCache */
+    info->trustcache_pa = phys_ptr;
+    macho_load_trustcache(tms->trustcache, info->trustcache_size,
+                          nsas, sysmem, info->trustcache_pa);
+    phys_ptr += align_16k_high(info->trustcache_size);
+    phys_ptr = g_phys_base + slide_phys;
+    phys_ptr |= (16 * MiB);
+
+    g_virt_base += slide_virt;
+    g_virt_base -= phys_ptr - g_phys_base;
+    info->entry = arm_load_macho(hdr, nsas, sysmem, memory_map,
+                                 phys_ptr, slide_virt);
+    fprintf(stderr, "g_virt_base: 0x" TARGET_FMT_lx "\n"
+                    "g_phys_base: 0x" TARGET_FMT_lx "\n",
+                    g_virt_base, g_phys_base);
+    fprintf(stderr, "slide_virt: 0x" TARGET_FMT_lx "\n"
+                    "slide_phys: 0x" TARGET_FMT_lx "\n",
+                    slide_virt, slide_phys);
+    fprintf(stderr, "entry: 0x" TARGET_FMT_lx "\n", info->entry);
+
+    virt_end += slide_virt;
+    phys_ptr = vtop_static(align_16k_high(virt_end));
+
+    amcc_lower = info->dtb_pa;
+    amcc_upper = vtop_static(last_range->va + slide_virt) + last_range->size - 1;
+    for (int i = 0; i < 4; i++) {
+        AMCC_REG(tms, AMCC_LOWER(i)) = (amcc_lower - T8030_DRAM_BASE) >> 14;
+        AMCC_REG(tms, AMCC_UPPER(i)) = (amcc_upper - T8030_DRAM_BASE) >> 14;
+    }
+
+    dtb_va = ptov_static(info->dtb_pa);
+
+    /* ramdisk */
+    if (machine->initrd_filename) {
+        info->ramdisk_pa = phys_ptr;
+        macho_load_ramdisk(machine->initrd_filename, nsas, sysmem,
+                           info->ramdisk_pa, &info->ramdisk_size);
+        info->ramdisk_size = align_16k_high(info->ramdisk_size);
+        phys_ptr += info->ramdisk_size;
+    }
+
+    /* Kernel boot args */
+    info->bootargs_pa = phys_ptr;
+    phys_ptr += align_16k_high(0x4000);
+
+    mem_size = T8030_KERNEL_REGION_SIZE -
+               (g_phys_base - T8030_KERNEL_REGION_BASE);
+
+    macho_load_dtb(tms->device_tree, nsas, sysmem, "DeviceTree", info);
+
+    top_of_kernel_data_pa = (align_16k_high(phys_ptr) + 0x3000ull) & ~0x3fffull;
+
+    fprintf(stderr, "cmdline: [%s]\n", cmdline);
+    macho_setup_bootargs("BootArgs", nsas, sysmem, info->bootargs_pa,
+                         g_virt_base, g_phys_base, mem_size,
+                         top_of_kernel_data_pa, dtb_va, info->dtb_size,
+                         tms->video, cmdline);
+    g_virt_base = virt_low;
+}
+
 static void t8030_memory_setup(MachineState *machine)
 {
     struct mach_header_64 *hdr;
@@ -445,6 +553,9 @@ static void t8030_memory_setup(MachineState *machine)
     switch (hdr->filetype) {
     case MH_EXECUTE:
         t8030_load_classic_kc(tms, cmdline);
+        break;
+    case MH_FILESET:
+        t8030_load_fileset_kc(tms, cmdline);
         break;
     default:
         error_setg(&error_abort, "%s: Unsupported kernelcache type: 0x%x\n",
