@@ -97,7 +97,11 @@ typedef struct AppleA13Cluster {
     A13_CPREG_VAR_DEF(CTRR_LOCK_EL1);
 } AppleA13Cluster;
 
-AppleA13State *apple_a13_create(DTBNode *node);
-bool apple_a13_is_sleep(AppleA13State *tcpu);
-void apple_a13_wakeup(AppleA13State *tcpu);
+AppleA13State *apple_a13_cpu_create(DTBNode *node);
+bool apple_a13_cpu_is_sleep(AppleA13State *tcpu);
+void apple_a13_cpu_start(AppleA13State *tcpu, uint64_t entry,
+                         uint64_t boot_args);
+void apple_a13_cpu_wakeup(AppleA13State *tcpu);
+void apple_a13_cpu_reset(AppleA13State *tcpu);
+void apple_a13_cpu_off(AppleA13State *tcpu);
 #endif /* HW_ARM_APPLE_A13_H */
