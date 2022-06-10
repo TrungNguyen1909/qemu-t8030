@@ -41,6 +41,9 @@
 #define LC_SEGMENT_64       0x19
 #define LC_SOURCE_VERSION   0x2A
 #define LC_BUILD_VERSION    0x32
+#define LC_REQ_DYLD         0x80000000
+#define LC_DYLD_CHAINED_FIXUPS (0x34 | LC_REQ_DYLD) /* used with linkedit_data_command */
+#define LC_FILESET_ENTRY      (0x35 | LC_REQ_DYLD) /* used with fileset_entry_command */
 
 struct symtab_command {
 	uint32_t	cmd;		/* LC_SYMTAB */
@@ -83,6 +86,16 @@ struct section_64 { /* for 64-bit architectures */
 #define SECTION_TYPE         0x000000ff /* 256 section types */
 #define S_NON_LAZY_SYMBOL_POINTERS  0x6 /* section with only non-lazy
                                            symbol pointers */
+
+struct fileset_entry_command {
+    uint32_t        cmd;        /* LC_FILESET_ENTRY */
+    uint32_t        cmdsize;    /* includes id string */
+    uint64_t        vmaddr;     /* memory address of the dylib */
+    uint64_t        fileoff;    /* file offset of the dylib */
+    uint32_t        entry_id;   /* contained entry id */
+    uint32_t        reserved;   /* entry_id is 32-bits long, so this is the reserved padding */
+};
+
 struct source_version_command {
     uint32_t  cmd;  /* LC_SOURCE_VERSION */
     uint32_t  cmdsize;  /* 16 */
