@@ -12,7 +12,8 @@ data        OCTET STRING,
 
 -- This appears to be a sequence with two integers,
 -- at least for the DeviceTree file.
-extra       ANY                         OPTIONAL
+extra       ANY                         OPTIONAL,
+payp        ANY                         OPTIONAL
 }
 
 END
