@@ -331,6 +331,8 @@ static void t8030_load_fileset_kc(T8030MachineState *tms, const char *cmdline)
     hwaddr amcc_upper;
     hwaddr slide_phys = 0;
     hwaddr slide_virt = 0;
+    uint64_t l2_remaining = 0;
+    uint64_t extradata_size = 0;
     macho_boot_info_t info = &tms->bootinfo;
     g_autofree xnu_pf_range_t *last_range = NULL;
     DTBNode *memory_map = get_dtb_node(tms->device_tree, "/chosen/memory-map");
@@ -347,17 +349,26 @@ static void t8030_load_fileset_kc(T8030MachineState *tms, const char *cmdline)
 
     g_phys_base = (hwaddr)macho_get_buffer(hdr);
     macho_highest_lowest(hdr, &virt_low, &virt_end);
+    g_virt_base = (virt_low & ~L2_GRANULE_MASK);
     last_range = xnu_pf_segment(hdr, "__PRELINK_INFO");
 
+    extradata_size = align_16k_high(info->dtb_size + info->trustcache_size);
+    assert(extradata_size < L2_GRANULE);
+
     get_kaslr_slides(tms, &slide_phys, &slide_virt);
-    slide_phys &= ~(16 * MiB);
-    slide_virt &= ~(16 * MiB);
+
+    l2_remaining = (virt_low + slide_virt) & L2_GRANULE_MASK;
+
+    if (extradata_size >= l2_remaining) {
+        uint64_t grown_slide = align_16k_high(extradata_size - l2_remaining);
+        slide_phys += grown_slide;
+        slide_virt += grown_slide;
+    }
 
     phys_ptr = align_up(T8030_KERNEL_REGION_BASE, 32 * MiB);
     g_phys_base = phys_ptr;
     phys_ptr += slide_phys;
-    phys_ptr |= (16 * MiB);
-    phys_ptr -= align_16k_high(info->dtb_size + info->trustcache_size);
+    phys_ptr -= extradata_size;
 
     /* device tree */
     info->dtb_pa = phys_ptr;
@@ -369,12 +380,12 @@ static void t8030_load_fileset_kc(T8030MachineState *tms, const char *cmdline)
                           nsas, sysmem, info->trustcache_pa);
     phys_ptr += align_16k_high(info->trustcache_size);
     phys_ptr = g_phys_base + slide_phys;
-    phys_ptr |= (16 * MiB);
 
     g_virt_base += slide_virt;
     g_virt_base -= phys_ptr - g_phys_base;
+    /* XXX: This (0x4000) shouldn't have been masked in the first place */
     info->entry = arm_load_macho(hdr, nsas, sysmem, memory_map,
-                                 phys_ptr, slide_virt);
+                                 phys_ptr - 0x4000, slide_virt);
     fprintf(stderr, "g_virt_base: 0x" TARGET_FMT_lx "\n"
                     "g_phys_base: 0x" TARGET_FMT_lx "\n",
                     g_virt_base, g_phys_base);
