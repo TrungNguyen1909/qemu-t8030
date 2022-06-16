@@ -103,29 +103,7 @@ inline bool apple_a13_cpu_is_sleep(AppleA13State *tcpu)
     return CPU(tcpu)->halted;
 }
 
-void apple_a13_cpu_start(AppleA13State *tcpu, uint64_t entry,
-                         uint64_t boot_args)
-{
-    int ret = QEMU_ARM_POWERCTL_RET_SUCCESS;
-
-    if (ARM_CPU(tcpu)->power_state != PSCI_OFF) {
-        arm_reset_cpu(tcpu->mpidr);
-    }
-
-    assert(qemu_mutex_iothread_locked());
-    qemu_mutex_unlock_iothread();
-    while (qatomic_read(&ARM_CPU(tcpu)->power_state) != PSCI_OFF) {}
-    qemu_mutex_lock_iothread();
-
-    ret = arm_set_cpu_on(tcpu->mpidr, entry, boot_args, 1, 1);
-
-    if (ret != QEMU_ARM_POWERCTL_RET_SUCCESS) {
-        error_report("%s: failed to bring up CPU %d: err %d",
-                __func__, tcpu->cpu_id, ret);
-    }
-}
-
-void apple_a13_cpu_wakeup(AppleA13State *tcpu)
+void apple_a13_cpu_start(AppleA13State *tcpu)
 {
     int ret = QEMU_ARM_POWERCTL_RET_SUCCESS;
 
@@ -207,7 +185,7 @@ static void apple_a13_cluster_cpreg_write(CPUARMState *env,
 static void apple_a13_cluster_deliver_ipi(AppleA13Cluster *c, uint64_t cpu_id,
                                       uint64_t src_cpu, uint64_t flag)
 {
-    apple_a13_cpu_wakeup(c->cpus[cpu_id]);
+    apple_a13_cpu_start(c->cpus[cpu_id]);
 
     if (c->cpus[cpu_id]->ipi_sr)
         return;
