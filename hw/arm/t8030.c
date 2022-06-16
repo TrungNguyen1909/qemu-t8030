@@ -1658,6 +1658,10 @@ static void t8030_machine_init(MachineState *machine)
     set_dtb_prop(child, "display-scale", sizeof(display_scale),
                     &display_scale);
 
+    child = get_dtb_node(tms->device_tree, "product");
+    /* TODO: SEP, iOS 15 data encryption */
+    set_dtb_prop(child, "product-name", 8, "FastSim");
+
     t8030_cpu_setup(machine);
 
     t8030_create_aic(machine);
