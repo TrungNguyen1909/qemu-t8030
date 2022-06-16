@@ -357,7 +357,7 @@ static void t8030_load_fileset_kc(T8030MachineState *tms, const char *cmdline)
 
     get_kaslr_slides(tms, &slide_phys, &slide_virt);
 
-    l2_remaining = (virt_low + slide_virt) & L2_GRANULE_MASK;
+    l2_remaining = (g_virt_base + slide_virt) & L2_GRANULE_MASK;
 
     if (extradata_size >= l2_remaining) {
         uint64_t grown_slide = align_16k_high(extradata_size - l2_remaining);
