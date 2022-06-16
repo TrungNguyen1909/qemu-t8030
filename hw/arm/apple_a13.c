@@ -103,6 +103,11 @@ inline bool apple_a13_cpu_is_sleep(AppleA13State *tcpu)
     return CPU(tcpu)->halted;
 }
 
+inline bool apple_a13_cpu_is_powered_off(AppleA13State *tcpu)
+{
+    return ARM_CPU(tcpu)->power_state == PSCI_OFF;
+}
+
 void apple_a13_cpu_start(AppleA13State *tcpu)
 {
     int ret = QEMU_ARM_POWERCTL_RET_SUCCESS;
