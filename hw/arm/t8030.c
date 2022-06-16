@@ -111,7 +111,7 @@ static void t8030_start_cpus(MachineState* machine, uint64_t cpu_mask)
 
     for(i = 0; i < machine->smp.cpus; i++) {
         if (test_bit(i, (unsigned long*)&cpu_mask)
-            && apple_a13_cpu_is_sleep(tms->cpus[i])) {
+            && apple_a13_cpu_is_powered_off(tms->cpus[i])) {
             apple_a13_cpu_start(tms->cpus[i]);
         }
     }
