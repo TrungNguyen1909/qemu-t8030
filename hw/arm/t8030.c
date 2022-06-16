@@ -104,7 +104,7 @@
 #define AMCC_UPPER(_p)          (0x684 + (_p) * AMCC_PLANE_STRIDE)
 #define AMCC_REG(_tms, _x)      *(uint32_t *)(&_tms->amcc_reg[_x])
 
-static void t8030_wake_up_cpus(MachineState* machine, uint64_t cpu_mask)
+static void t8030_start_cpus(MachineState* machine, uint64_t cpu_mask)
 {
     T8030MachineState* tms = T8030_MACHINE(machine);
     int i;
@@ -112,7 +112,7 @@ static void t8030_wake_up_cpus(MachineState* machine, uint64_t cpu_mask)
     for(i = 0; i < machine->smp.cpus; i++) {
         if (test_bit(i, (unsigned long*)&cpu_mask)
             && apple_a13_cpu_is_sleep(tms->cpus[i])) {
-            apple_a13_cpu_wakeup(tms->cpus[i]);
+            apple_a13_cpu_start(tms->cpus[i]);
         }
     }
 }
@@ -610,7 +610,7 @@ static void pmgr_reg_write(void *opaque, hwaddr addr, uint64_t data, unsigned si
     // fprintf(stderr, "PMGR reg WRITE @ 0x" TARGET_FMT_lx " value: 0x" TARGET_FMT_lx "\n", addr, data);
     switch (addr) {
     case 0xd4004:
-        t8030_wake_up_cpus(machine, data);
+        t8030_start_cpus(machine, data);
         return;
     }
     memcpy(tms->pmgr_reg + addr, &value, size);
