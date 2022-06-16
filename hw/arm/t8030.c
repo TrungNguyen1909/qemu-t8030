@@ -1476,13 +1476,26 @@ static void t8030_create_boot_display(MachineState *machine)
     sysbus_realize_and_unref(fb, &error_fatal);
 }
 
+static void t8030_cpu_reset_work(CPUState *cpu, run_on_cpu_data data)
+{
+    T8030MachineState *tms = data.host_ptr;
+    CPUARMState *env;
+    AppleA13State *tcpu = (AppleA13State *)object_dynamic_cast(OBJECT(cpu),
+                                                           TYPE_APPLE_A13);
+    if (!tcpu) {
+        return;
+    }
+    cpu_reset(cpu);
+    env = &ARM_CPU(cpu)->env;
+    env->xregs[0] = tms->bootinfo.bootargs_pa;
+    cpu_set_pc(cpu, tms->bootinfo.entry);
+}
+
 static void t8030_cpu_reset(void *opaque)
 {
     MachineState *machine = MACHINE(opaque);
     T8030MachineState *tms = T8030_MACHINE(machine);
     CPUState *cpu;
-    CPUARMState *env;
-    AppleA13State *boot_cpu = NULL;
     uint64_t m_lo = 0;
     uint64_t m_hi = 0;
     qemu_guest_getrandom(&m_lo, sizeof(m_lo), NULL);
@@ -1503,17 +1516,11 @@ static void t8030_cpu_reset(void *opaque)
                                     m_hi,
                                     &error_abort);
             if (tcpu->cpu_id == 0) {
-                boot_cpu = tcpu;
+                run_on_cpu(cpu, t8030_cpu_reset_work, RUN_ON_CPU_HOST_PTR(tms));
             } else {
-                apple_a13_cpu_reset(tcpu);
+                run_on_cpu(cpu, (run_on_cpu_func)cpu_reset, RUN_ON_CPU_NULL);
             }
         }
-    }
-    if (boot_cpu) {
-        cpu_reset(CPU(boot_cpu));
-        env = &ARM_CPU(boot_cpu)->env;
-        env->xregs[0] = tms->bootinfo.bootargs_pa;
-        env->pc = tms->bootinfo.entry;
     }
 }
 
