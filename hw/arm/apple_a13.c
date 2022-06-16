@@ -190,8 +190,6 @@ static void apple_a13_cluster_cpreg_write(CPUARMState *env,
 static void apple_a13_cluster_deliver_ipi(AppleA13Cluster *c, uint64_t cpu_id,
                                       uint64_t src_cpu, uint64_t flag)
 {
-    apple_a13_cpu_start(c->cpus[cpu_id]);
-
     if (c->cpus[cpu_id]->ipi_sr)
         return;
 
@@ -253,7 +251,8 @@ static void apple_a13_cluster_tick(AppleA13Cluster *c)
 
     for (i = 0; i < A13_MAX_CPU; i++) { /* source */
         for (j = 0; j < A13_MAX_CPU; j++) { /* target */
-            if (c->cpus[j] != NULL && c->deferredIPI[i][j]) {
+            if (c->cpus[j] != NULL && c->deferredIPI[i][j]
+                && !apple_a13_cpu_is_powered_off(c->cpus[j])) {
                 apple_a13_cluster_deliver_ipi(c, j, i, IPI_RR_TYPE_DEFERRED);
                 break;
             }
@@ -263,7 +262,8 @@ static void apple_a13_cluster_tick(AppleA13Cluster *c)
     for (i = 0; i < A13_MAX_CPU; i++) { /* source */
         for (j = 0; j < A13_MAX_CPU; j++) { /* target */
             if (c->cpus[j] != NULL && c->noWakeIPI[i][j]
-                && !apple_a13_cpu_is_sleep(c->cpus[j])) {
+                && !apple_a13_cpu_is_sleep(c->cpus[j])
+                && !apple_a13_cpu_is_powered_off(c->cpus[j])) {
                 apple_a13_cluster_deliver_ipi(c, j, i, IPI_RR_TYPE_NOWAKE);
                 break;
             }
