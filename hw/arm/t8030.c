@@ -349,7 +349,7 @@ static void t8030_load_fileset_kc(T8030MachineState *tms, const char *cmdline)
 
     g_phys_base = (hwaddr)macho_get_buffer(hdr);
     macho_highest_lowest(hdr, &virt_low, &virt_end);
-    g_virt_base = (virt_low & ~L2_GRANULE_MASK);
+    g_virt_base = virt_low;
     last_range = xnu_pf_segment(hdr, "__PRELINK_INFO");
 
     extradata_size = align_16k_high(info->dtb_size + info->trustcache_size);
@@ -357,7 +357,7 @@ static void t8030_load_fileset_kc(T8030MachineState *tms, const char *cmdline)
 
     get_kaslr_slides(tms, &slide_phys, &slide_virt);
 
-    l2_remaining = (g_virt_base + slide_virt) & L2_GRANULE_MASK;
+    l2_remaining = (virt_low + slide_virt) & L2_GRANULE_MASK;
 
     if (extradata_size >= l2_remaining) {
         uint64_t grown_slide = align_16k_high(extradata_size - l2_remaining);
@@ -365,8 +365,8 @@ static void t8030_load_fileset_kc(T8030MachineState *tms, const char *cmdline)
         slide_virt += grown_slide;
     }
 
-    phys_ptr = align_up(T8030_KERNEL_REGION_BASE, 32 * MiB);
-    g_phys_base = phys_ptr;
+    phys_ptr = align_up(T8030_KERNEL_REGION_BASE, 32 * MiB) | (virt_low & L2_GRANULE_MASK);
+    g_phys_base = phys_ptr & ~L2_GRANULE_MASK;
     phys_ptr += slide_phys;
     phys_ptr -= extradata_size;
 
@@ -379,13 +379,11 @@ static void t8030_load_fileset_kc(T8030MachineState *tms, const char *cmdline)
     macho_load_trustcache(tms->trustcache, info->trustcache_size,
                           nsas, sysmem, info->trustcache_pa);
     phys_ptr += align_16k_high(info->trustcache_size);
-    phys_ptr = g_phys_base + slide_phys;
 
     g_virt_base += slide_virt;
     g_virt_base -= phys_ptr - g_phys_base;
-    /* XXX: This (0x4000) shouldn't have been masked in the first place */
     info->entry = arm_load_macho(hdr, nsas, sysmem, memory_map,
-                                 phys_ptr - 0x4000, slide_virt);
+                                 phys_ptr, slide_virt);
     fprintf(stderr, "g_virt_base: 0x" TARGET_FMT_lx "\n"
                     "g_phys_base: 0x" TARGET_FMT_lx "\n",
                     g_virt_base, g_phys_base);
