@@ -94,6 +94,11 @@ enum smc_notify_type {
     kSMCGGFwUpdateNotify = 't',
 };
 
+enum smc_notify {
+    kSMCNotifySMCPanicDone = 0xA,
+    kSMCNotifySMCPanicProgress = 0x22,
+};
+
 #define kSMCKeyEndpoint     1
 
 struct QEMU_PACKED key_message {
@@ -281,6 +286,22 @@ static uint8_t smc_key_mbse_write(AppleSMCState *s, smc_key *k,
         return kSMCSuccess;
     case SMC_MAKE_IDENTIFIER('s', 'l', 'p', 'w'):
         return kSMCSuccess;
+    case SMC_MAKE_IDENTIFIER('p', 'a', 'n', 'b'): {
+        key_response r = { 0 };
+        r.status = SMC_NOTIFICATION;
+        r.response[2] = kSMCNotifySMCPanicProgress;
+        r.response[3] = kSMCSystemStateNotify;
+        apple_mbox_send_message(s->mbox, kSMCKeyEndpoint, r.raw);
+        return kSMCSuccess;
+    }
+    case SMC_MAKE_IDENTIFIER('p', 'a', 'n', 'e'): {
+        key_response r = { 0 };
+        r.status = SMC_NOTIFICATION;
+        r.response[2] = kSMCNotifySMCPanicDone;
+        r.response[3] = kSMCSystemStateNotify;
+        apple_mbox_send_message(s->mbox, kSMCKeyEndpoint, r.raw);
+        return kSMCSuccess;
+    }
     default:
         return kSMCBadFuncParameter;
     }
