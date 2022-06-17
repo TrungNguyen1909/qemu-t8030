@@ -491,6 +491,7 @@ uint8_t *load_trustcache_from_file(const char *filename, uint64_t *size)
     uint32_t length = 0;
     char payload_type[4];
     uint32_t trustcache_version, trustcache_entry_count, expected_file_size;
+    uint32_t trustcache_entry_size = 0;
 
     extract_im4p_payload(filename, payload_type, &file_data, &length);
 
@@ -515,18 +516,29 @@ uint8_t *load_trustcache_from_file(const char *filename, uint64_t *size)
     // uint32_t entry_count
     //
     // The cache is then followed by entry_count entries, each of which
-    // contains a 20 byte hash and 2 additional bytes (hence is 22 bytes long)
+    // contains a 20 byte hash and 2 additional bytes (hence is 22 bytes long) for v1
+    // and contains a 20 byte hash and 4 additional bytes (hence is 24 bytes long) for v2
     trustcache_version = trustcache_data[2];
     trustcache_entry_count = trustcache_data[7];
-    expected_file_size = 24 /* header size */ + trustcache_entry_count * 22 /* entry size */;
 
-    if (trustcache_version != 1) {
-        error_report("The trust cache '%s' does not have a v1 header", filename);
+    switch (trustcache_version) {
+    case 1:
+        trustcache_entry_size = 22;
+        break;
+    case 2:
+        trustcache_entry_size = 24;
+        break;
+    default:
+        error_report("The trust cache '%s' does not have a v1 or v2 header", filename);
         exit(EXIT_FAILURE);
     }
 
+    expected_file_size = 24 /* header size */ +
+                         trustcache_entry_count * trustcache_entry_size;
+
     if (file_size != expected_file_size) {
-        error_report("The expected size %d of trust cache '%s' does not match the actual size %ld", expected_file_size, filename, file_size);
+        error_report("The expected size %d of trust cache '%s' does not match the actual size %ld",
+                     expected_file_size, filename, file_size);
         exit(EXIT_FAILURE);
     }
 
