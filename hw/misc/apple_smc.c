@@ -364,6 +364,7 @@ static void apple_smc_handle_key_endpoint(void *opaque,
             r.status = kSMCSuccess;
         }
         r.ui8TagAndId = kmsg->ui8TagAndId;
+        r.length = kmsg->length;
         apple_mbox_send_message(s->mbox, ep, r.raw);
         break;
     }
