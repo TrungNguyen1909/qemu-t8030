@@ -67,6 +67,7 @@ static const char *KEEP_COMP[] = {
     "smc-pmu\0$",
     "buttons\0$",
     "dart,t8020\0$", "iommu-mapper\0$",
+    "soc-tuner,t8030\0$",
 };
 
 static const char *REM_NAMES[] = {
@@ -91,6 +92,7 @@ static const char *REM_PROPS[] = {
     "function-vbus_voltage",
     "function-brick_id_voltage", "function-ldcm_bypass_en",
     "content-protect", /* We don't want encrypted data volume */
+    "soc-tuning", "mcc-power-gating",
 };
 
 static void allocate_and_copy(MemoryRegion *mem, AddressSpace *as,
