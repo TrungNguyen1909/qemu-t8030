@@ -150,6 +150,11 @@ static bool kpf_amfi_callback(struct xnu_pf_patch *patch, uint32_t *opcode_strea
     pac = find_prev_insn(start, 5, PACIBSP, 0xffffffff) != NULL;
     switch (cdhash_param) {
     case 0: {
+        /* ADRP x8, * */
+        uint32_t *adrp = find_prev_insn(start, 10, 0x90000008, 0x9f00001f);
+        if (adrp) {
+            start = adrp;
+        }
         fprintf(stderr, "%s: Found lookup_in_static_trust_cache @ 0x%llx\n",
                 __func__, ptov_static((hwaddr)start));
         /* XXX: allows amfid to do its work
