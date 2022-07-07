@@ -240,8 +240,8 @@ static void arm_cpu_reset(DeviceState *dev)
         /* Sample rvbar at reset.  */
         env->cp15.rvbar = cpu->rvbar_prop;
         env->pc = env->cp15.rvbar;
-#ifdef TARGET_AARCH64
 
+#ifdef TARGET_AARCH64
         if (cpu_isar_feature(aa64_pauth, cpu)) {
             env->keys.m.lo = cpu->m_key_lo;
             env->keys.m.hi = cpu->m_key_hi;
