@@ -167,26 +167,15 @@ static int usb_tcp_remote_read(USBTCPRemoteState *s, void *buffer, unsigned int 
 {
     int ret = 0;
     int n = 0;
-    bool locked = qemu_mutex_iothread_locked();
-    if (locked) {
-        qemu_mutex_unlock_iothread();
-    }
-
+   
     while (n < length) {
         ret = read(s->fd, (char *)buffer + n, length - n);
         if (ret <= 0) {
-            if (locked) {
-                qemu_mutex_lock_iothread();
-            }
             usb_tcp_remote_closed(s);
             return -errno;
         }
 
         n += ret;
-    }
-
-    if (locked) {
-        qemu_mutex_lock_iothread();
     }
 
     return n;
@@ -325,11 +314,9 @@ static void *usb_tcp_remote_read_thread(void *opaque)
 {
     USBTCPRemoteState *s = USB_TCP_REMOTE(opaque);
 
-    qemu_mutex_lock_iothread();
     while (usb_tcp_remote_read_one(s) && !s->closed) {
         continue;
     }
-    qemu_mutex_unlock_iothread();
 
     return NULL;
 }
@@ -496,7 +483,6 @@ static void usb_tcp_remote_cancel_packet(USBDevice *dev, USBPacket *p)
     USBTCPInflightPacket inflightPacket = { 0 };
     tcp_usb_header_t hdr = { 0 };
     tcp_usb_cancel_header pkt = { 0 };
-    bool locked = qemu_mutex_iothread_locked();
     int64_t start;
 
     if (p->combined) {
@@ -530,11 +516,7 @@ static void usb_tcp_remote_cancel_packet(USBDevice *dev, USBPacket *p)
     }
     /* TODO: wait for status */
 
-    DPRINTF("%s: waiting for response\n", __func__);
-    if (locked) {
-        qemu_mutex_unlock_iothread();
-    }
-
+    
     start = get_clock_realtime();
     while ((qatomic_mb_read(&inflightPacket.handled) & 1) == 0) {
         if (start + NANOSECONDS_PER_SECOND < get_clock_realtime()) {
@@ -542,9 +524,6 @@ static void usb_tcp_remote_cancel_packet(USBDevice *dev, USBPacket *p)
         }
     }
 
-    if (locked) {
-        qemu_mutex_lock_iothread();
-    }
 
     WITH_QEMU_LOCK_GUARD(&s->queue_mutex) {
         QTAILQ_REMOVE(&s->queue, &inflightPacket, queue);
@@ -558,7 +537,6 @@ static void usb_tcp_remote_handle_packet(USBDevice *dev, USBPacket *p)
     tcp_usb_request_header pkt = { 0 };
     USBTCPInflightPacket inflightPacket = { 0 };
     g_autofree void *buffer = NULL;
-    bool locked = qemu_mutex_iothread_locked();
 
     if (s->closed) {
         p->status = USB_RET_STALL;
@@ -623,15 +601,7 @@ static void usb_tcp_remote_handle_packet(USBDevice *dev, USBPacket *p)
         }
     }
 
-    if (locked) {
-        qemu_mutex_unlock_iothread();
-    }
-
     while ((qatomic_mb_read(&inflightPacket.handled) & 1) == 0) {
-    }
-
-    if (locked) {
-        qemu_mutex_lock_iothread();
     }
 
 out:

@@ -41,26 +41,10 @@ static void usb_tcp_host_closed(USBTCPHostState *s)
 static ssize_t tcp_usb_read(QIOChannel *ioc, void *buf, size_t len)
 {
     struct iovec iov = { .iov_base = buf, .iov_len = len };
-    bool iolock = qemu_mutex_iothread_locked();
-    bool iothread = qemu_in_iothread();
     ssize_t ret = -1;
     Error *err = NULL;
 
-    /*
-     * Dont use in IOThread out of co-routine context as
-     * it will block IOThread.
-     */
-    assert(qemu_in_coroutine() || !iothread);
-
-    if (iolock && !iothread && !qemu_in_coroutine()) {
-        qemu_mutex_unlock_iothread();
-    }
-
     ret = qio_channel_readv_full_all_eof(ioc, &iov, 1, NULL, 0, &err);
-
-    if (iolock && !iothread && !qemu_in_coroutine()) {
-        qemu_mutex_lock_iothread();
-    }
 
     if (err) {
         error_report_err(err);
@@ -71,27 +55,11 @@ static ssize_t tcp_usb_read(QIOChannel *ioc, void *buf, size_t len)
 static bool tcp_usb_write(QIOChannel *ioc, void *buf, ssize_t len)
 {
     struct iovec iov = { .iov_base = buf, .iov_len = len };
-    bool iolock = qemu_mutex_iothread_locked();
-    bool iothread = qemu_in_iothread();
     bool ret = false;
     Error *err = NULL;
 
-    /*
-     * Dont use in IOThread out of co-routine context as
-     * it will block IOThread.
-     */
-    assert(qemu_in_coroutine() || !iothread);
-
-    if (iolock && !iothread && !qemu_in_coroutine()) {
-        qemu_mutex_unlock_iothread();
-    }
-
     if (!qio_channel_writev_full_all(ioc, &iov, 1, NULL, 0, &err)) {
         ret = true;
-    }
-
-    if (iolock && !iothread && !qemu_in_coroutine()) {
-        qemu_mutex_lock_iothread();
     }
 
     if (err) {
