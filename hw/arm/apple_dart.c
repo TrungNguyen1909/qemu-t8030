@@ -653,7 +653,7 @@ static void apple_dart_dump_pt(Monitor *mon, AppleDARTInstance *o, hwaddr iova,
             }
             uint64_t next_n_entries = 0;
             if (level < 2) {
-                next_n_entries = s->l_mask[level + 1] >> s->l_shift[level + 1];
+                next_n_entries = (s->l_mask[level + 1] >> s->l_shift[level + 1]) + 1;
             }
             g_autofree uint64_t *next = g_malloc0(8 * next_n_entries);
             if (dma_memory_read(&address_space_memory, pa, next,
