@@ -1326,10 +1326,8 @@ static void t8030_create_spmi(MachineState *machine, const char *name)
 
     reg = (uint64_t*)prop->value;
 
-    for (int i = 0; i < MIN(prop->length / 16, 3); i++) {
-        sysbus_mmio_map(SYS_BUS_DEVICE(spmi), i,
-                        tms->soc_base_pa + reg[i * 2]);
-    }
+    sysbus_mmio_map(SYS_BUS_DEVICE(spmi), 0,
+                    (tms->soc_base_pa + reg[2]) & ~(APPLE_SPMI_MMIO_SIZE - 1));
 
     prop = find_dtb_prop(child, "interrupts");
     assert(prop);

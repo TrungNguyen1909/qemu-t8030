@@ -11,19 +11,21 @@
 
 #define TYPE_APPLE_SPMI     "apple.spmi"
 OBJECT_DECLARE_SIMPLE_TYPE(AppleSPMIState, APPLE_SPMI)
+#define APPLE_SPMI_MMIO_SIZE    (0x4000)
 
 struct AppleSPMIState {
     SysBusDevice parent_obj;
-    MemoryRegion iomems[3];
+    MemoryRegion container;
+    MemoryRegion iomems[4];
     SPMIBus *bus;
     qemu_irq irq;
     qemu_irq resp_irq;
     Fifo32 resp_fifo;
-    uint32_t base_reg[0x1000 / sizeof(uint32_t)];
-    uint32_t fault_reg[0x1000 / sizeof(uint32_t)];
+    uint32_t control_reg[0x100 / sizeof(uint32_t)];
+    uint32_t queue_reg[0x100 / sizeof(uint32_t)];
+    uint32_t fault_reg[0x100 / sizeof(uint32_t)];
     uint32_t fault_counter_reg[0x64 / sizeof(uint32_t)];
     uint32_t resp_intr_index;
-    uint32_t phandle;
     uint32_t reg_vers;
     uint32_t *data;
     uint32_t data_length;
