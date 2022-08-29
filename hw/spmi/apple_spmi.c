@@ -368,6 +368,7 @@ static void apple_spmi_control_write(void *opaque, hwaddr addr,
             value &= ~SPMI_CONTROL_QUEUE_RESET_RSP;
         }
         value &= ~SPMI_CONTROL_QUEUE_RESET_REQ;
+        qflg = true;
         break;
     default:
         break;
