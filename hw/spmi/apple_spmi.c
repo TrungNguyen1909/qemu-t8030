@@ -393,9 +393,14 @@ static const MemoryRegionOps apple_spmi_control_ops = {
     .endianness = DEVICE_NATIVE_ENDIAN,
 };
 
-static void apple_spmi_reset(DeviceState *dev)
+static void apple_spmi_reset_enter(Object *obj, ResetType type)
 {
-    AppleSPMIState *s = APPLE_SPMI(dev);
+    AppleSPMIState *s = APPLE_SPMI(obj);
+    AppleSPMIClass *c = APPLE_SPMI_GET_CLASS(obj);
+
+    if (c->parent_phases.enter) {
+        c->parent_phases.enter(obj, type);
+    }
     memset(s->control_reg, 0, sizeof(s->control_reg));
     memset(s->queue_reg, 0, sizeof(s->queue_reg));
     memset(s->fault_reg, 0, sizeof(s->fault_reg));
@@ -406,6 +411,18 @@ static void apple_spmi_reset(DeviceState *dev)
     }
     s->data = NULL;
     s->data_length = 0;
+}
+
+static void apple_spmi_reset_exit(Object *obj)
+{
+    AppleSPMIState *s = APPLE_SPMI(obj);
+    AppleSPMIClass *c = APPLE_SPMI_GET_CLASS(obj);
+
+    if (c->parent_phases.exit) {
+        c->parent_phases.exit(obj);
+    }
+    apple_spmi_update_queues_status(s);
+    apple_spmi_update_irq(s);
 }
 
 static void apple_spmi_realize(DeviceState *dev, Error **errp)
@@ -531,13 +548,17 @@ static const VMStateDescription vmstate_apple_spmi = {
 static void apple_spmi_class_init(ObjectClass *klass, void *data)
 {
     DeviceClass *dc = DEVICE_CLASS(klass);
+    AppleSPMIClass *c = APPLE_SPMI_CLASS(klass);
+    ResettableClass *rc = RESETTABLE_CLASS(klass);
 
     dc->realize = apple_spmi_realize;
-    /* dc->unrealize = apple_spmi_unrealize; */
-    dc->reset = apple_spmi_reset;
     dc->desc = "Apple SPMI Controller";
     dc->vmsd = &vmstate_apple_spmi;
     set_bit(DEVICE_CATEGORY_BRIDGE, dc->categories);
+    resettable_class_set_parent_phases(rc, apple_spmi_reset_enter,
+                                       NULL,
+                                       apple_spmi_reset_exit,
+                                       &c->parent_phases);
 }
 
 static const TypeInfo apple_spmi_info = {
@@ -545,6 +566,7 @@ static const TypeInfo apple_spmi_info = {
         .parent = TYPE_SYS_BUS_DEVICE,
         .instance_size = sizeof(AppleSPMIState),
         .instance_init = apple_spmi_init,
+        .class_size = sizeof(AppleSPMIClass),
         .class_init = apple_spmi_class_init,
 };
 

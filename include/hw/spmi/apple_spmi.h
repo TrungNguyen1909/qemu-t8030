@@ -10,8 +10,16 @@
 #include "hw/arm/xnu_dtb.h"
 
 #define TYPE_APPLE_SPMI     "apple.spmi"
-OBJECT_DECLARE_SIMPLE_TYPE(AppleSPMIState, APPLE_SPMI)
+OBJECT_DECLARE_TYPE(AppleSPMIState, AppleSPMIClass, APPLE_SPMI)
 #define APPLE_SPMI_MMIO_SIZE    (0x4000)
+
+typedef struct AppleSPMIClass {
+    /*< private >*/
+    SysBusDeviceClass parent_class;
+    ResettablePhases parent_phases;
+
+    /*< public >*/
+} AppleSPMIClass;
 
 struct AppleSPMIState {
     SysBusDevice parent_obj;
