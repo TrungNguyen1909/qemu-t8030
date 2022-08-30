@@ -120,6 +120,9 @@ do { qemu_log_mask(LOG_GUEST_ERROR, "%s: message:" \
 #define MSG_TYPE_ROLLCALL                   8
 #define MSG_TYPE_POWERACK                   11
 
+#define EP_MANAGEMENT               (0)
+#define EP_CRASHLOG                 (1)
+
 enum apple_mbox_ep0_state {
     EP0_IDLE,
     EP0_WAIT_HELLO,
@@ -165,7 +168,7 @@ typedef struct QEMU_PACKED apple_mbox_mgmt_msg {
     };
 } *apple_mbox_mgmt_msg_t;
 
-struct apple_mbox_msg {
+typedef struct apple_mbox_msg {
     union QEMU_PACKED {
         uint64_t data[2];
         struct QEMU_PACKED {
@@ -178,9 +181,7 @@ struct apple_mbox_msg {
         };
     };
     QTAILQ_ENTRY(apple_mbox_msg) entry;
-};
-
-typedef struct apple_mbox_msg *apple_mbox_msg_t;
+} *apple_mbox_msg_t;
 
 typedef struct apple_mbox_ep_handler_data {
     AppleMboxEPHandler *handler;
@@ -203,6 +204,7 @@ struct AppleMboxState {
     qemu_irq iop_irq;
     QTAILQ_HEAD(, apple_mbox_msg) inbox;
     QTAILQ_HEAD(, apple_mbox_msg) outbox;
+    QTAILQ_HEAD(, apple_mbox_msg) rollcall;
     uint32_t inboxCount;
     uint32_t outboxCount;
 
@@ -357,23 +359,47 @@ static gboolean iop_rollcall(gpointer key, gpointer value, gpointer data)
 {
     struct iop_rollcall_data *d = (struct iop_rollcall_data *)data;
     AppleMboxState *s = d->s;
-    uint32_t ep = (uint64_t)key - 31;
-    if ((uint64_t)key < 31) {
+
+    uint32_t ep = (uint64_t)key;
+    if ((uint64_t)key < 1) {
         return false;
     }
 
-    if ((ep - 1) / 32 != d->last_block) {
-        apple_mbox_mgmt_msg_t m = g_new0(struct apple_mbox_mgmt_msg, 1);
-        m->type = MSG_TYPE_ROLLCALL;
-        m->rollcall.epMask = d->mask;
-        m->rollcall.epBlock = (d->last_block + 1);
-        m->rollcall.epEnded = false;
-        apple_mbox_send_control_message(s, 0, m->raw);
+    if (ep / 32 != d->last_block && d->mask) {
+        apple_mbox_msg_t m = g_new0(struct apple_mbox_msg, 1);
+        m->mgmt_msg.type = MSG_TYPE_ROLLCALL;
+        m->mgmt_msg.rollcall.epMask = d->mask;
+        m->mgmt_msg.rollcall.epBlock = (d->last_block);
+        m->mgmt_msg.rollcall.epEnded = false;
+        QTAILQ_INSERT_TAIL(&s->rollcall, m, entry);
         d->mask = 0;
     }
-    d->last_block = (ep - 1) / 32;
-    d->mask |= (1 << ((ep - 1) & 31));
+    d->last_block = ep / 32;
+    d->mask |= (1 << (ep & 31));
     return false;
+}
+
+static void iop_start_rollcall(AppleMboxState *s)
+{
+    apple_mbox_msg_t m = g_new0(struct apple_mbox_msg, 1);
+    struct iop_rollcall_data d = { 0 };
+    d.s = s;
+    while (!QTAILQ_EMPTY(&s->rollcall)) {
+        apple_mbox_msg_t m = QTAILQ_FIRST(&s->rollcall);
+        QTAILQ_REMOVE(&s->rollcall, m, entry);
+        g_free(m);
+    }
+    g_tree_foreach(s->endpoints, iop_rollcall, &d);
+    m->mgmt_msg.type = MSG_TYPE_ROLLCALL;
+    m->mgmt_msg.rollcall.epMask = d.mask;
+    m->mgmt_msg.rollcall.epBlock = (d.last_block);
+    m->mgmt_msg.rollcall.epEnded = true;
+    s->ep0_status = EP0_WAIT_ROLLCALL;
+    QTAILQ_INSERT_TAIL(&s->rollcall, m, entry);
+
+    m = QTAILQ_FIRST(&s->rollcall);
+    QTAILQ_REMOVE(&s->rollcall, m, entry);
+    apple_mbox_push(s, m);
 }
 
 static void iop_start(AppleMboxState *s)
@@ -395,50 +421,55 @@ static void iop_handle_management_msg(void *opaque, uint32_t ep,
 {
     AppleMboxState *s = APPLE_MBOX(opaque);
     apple_mbox_mgmt_msg_t msg = (apple_mbox_mgmt_msg_t)&message;
-    if (msg->type == MSG_TYPE_PING) {
-        apple_mbox_mgmt_msg_t m = g_new0(struct apple_mbox_mgmt_msg, 1);
-        m->type = MSG_PING_ACK;
-        m->ping.seg = msg->ping.seg;
-        m->ping.timestamp = msg->ping.timestamp;
-        apple_mbox_send_control_message(s, 0, m->raw);
+    switch (msg->type) {
+    case MSG_TYPE_PING: {
+        struct apple_mbox_mgmt_msg m = { 0 };
+        m.type = MSG_PING_ACK;
+        m.ping.seg = msg->ping.seg;
+        m.ping.timestamp = msg->ping.timestamp;
+        apple_mbox_send_control_message(s, 0, m.raw);
         goto end;
+        break;
+    }
+    case MSG_TYPE_POWERACK: {
+        struct apple_mbox_mgmt_msg m = { 0 };
+
+        m.type = MSG_TYPE_POWERACK;
+        m.power.state = msg->power.state;
+        apple_mbox_send_control_message(s, 0, m.raw);
+        goto end;
+        break;
+    default:
+        break;
+    }
     }
     switch (s->ep0_status) {
         case EP0_IDLE:
             switch (msg->type) {
             case MSG_TYPE_REQUEST_PSTATE: {
-                apple_mbox_mgmt_msg_t m = g_new0(struct apple_mbox_mgmt_msg, 1);
+                struct apple_mbox_mgmt_msg m = { 0 };
 
                 switch (MSG_GET_PSTATE(msg->raw)) {
                 case PSTATE_WAIT_VR:
                 case PSTATE_ON:
                     iop_wakeup(s);
-                    m->type = MSG_SEND_HELLO;
-                    m->hello.major = s->protocol_version;
-                    m->hello.minor = s->protocol_version;
+                    m.type = MSG_SEND_HELLO;
+                    m.hello.major = s->protocol_version;
+                    m.hello.minor = s->protocol_version;
                     s->ep0_status = EP0_WAIT_HELLO;
-                    apple_mbox_send_control_message(s, 0, m->raw);
+                    s->regs[REG_A7V4_CPU_STATUS] &= ~REG_A7V4_CPU_STATUS_IDLE;
+                    apple_mbox_send_control_message(s, 0, m.raw);
                     break;
                 case PSTATE_SLPNOMEM:
-                    m->type = MSG_TYPE_POWER;
-                    m->power.state = 0;
+                    m.type = MSG_TYPE_POWER;
+                    m.power.state = 0;
                     s->regs[REG_A7V4_CPU_STATUS] = REG_A7V4_CPU_STATUS_IDLE;
                     smp_wmb();
-                    apple_mbox_send_control_message(s, 0, m->raw);
+                    apple_mbox_send_control_message(s, 0, m.raw);
                     break;
                 default:
                     break;
                 }
-                break;
-            }
-            case MSG_TYPE_EPSTART:
-                break;
-            case MSG_TYPE_POWERACK: {
-                apple_mbox_mgmt_msg_t m = g_new0(struct apple_mbox_mgmt_msg, 1);
-
-                m->type = MSG_TYPE_POWERACK;
-                m->power.state = msg->power.state;
-                apple_mbox_send_control_message(s, 0, m->raw);
                 break;
             }
             default:
@@ -448,30 +479,32 @@ static void iop_handle_management_msg(void *opaque, uint32_t ep,
             break;
         case EP0_WAIT_HELLO:
             if (msg->type == MSG_RECV_HELLO) {
-                apple_mbox_mgmt_msg_t m = g_new0(struct apple_mbox_mgmt_msg, 1);
-                struct iop_rollcall_data d = { 0 };
-                d.s = s;
-                g_tree_foreach(s->endpoints, iop_rollcall, &d);
-                m->type = MSG_TYPE_ROLLCALL;
-                m->rollcall.epMask = d.mask;
-                m->rollcall.epBlock = (d.last_block + 1);
-                m->rollcall.epEnded = true;
-                s->ep0_status = EP0_WAIT_ROLLCALL;
-                apple_mbox_send_control_message(s, 0, m->raw);
+                iop_start_rollcall(s);
             } else {
                 IOP_LOG_MGMT_MSG(s, msg);
             }
             break;
         case EP0_WAIT_ROLLCALL:
-            if (msg->type == MSG_TYPE_ROLLCALL) {
-                if (msg->rollcall.epEnded) {
-                    apple_mbox_mgmt_msg_t m = g_new0(struct apple_mbox_mgmt_msg, 1);
-                    m->type = MSG_TYPE_POWER;
-                    m->power.state = 32;
+            switch (msg->type) {
+            case MSG_TYPE_ROLLCALL: {
+                struct apple_mbox_mgmt_msg m = { 0 };
+                if (QTAILQ_EMPTY(&s->rollcall)) {
+                    m.type = MSG_TYPE_POWER;
+                    m.power.state = 32;
                     s->ep0_status = EP0_IDLE;
-                    apple_mbox_send_control_message(s, 0, m->raw);
+                    apple_mbox_send_control_message(s, 0, m.raw);
+                } else {
+                    apple_mbox_msg_t m = QTAILQ_FIRST(&s->rollcall);
+                    QTAILQ_REMOVE(&s->rollcall, m, entry);
+                    apple_mbox_push(s, m);
                 }
-            } else {
+                break;
+            }
+            case MSG_TYPE_EPSTART: {
+                IOP_LOG_MGMT_MSG(s, msg);
+                break;
+            }
+            default:
                 IOP_LOG_MGMT_MSG(s, msg);
             }
             break;
@@ -522,16 +555,16 @@ static void apple_mbox_reg_write(void *opaque, hwaddr addr,
         switch (addr) {
             case REG_A7V4_CPU_CTRL:
                 if (data & REG_A7V4_CPU_CTRL_RUN) {
-                    apple_mbox_mgmt_msg_t msg;
+                    struct apple_mbox_mgmt_msg m = { 0 };
+                    s->regs[REG_A7V4_CPU_STATUS] &= ~REG_A7V4_CPU_STATUS_IDLE;
                     iop_start(s);
 
-                    msg = g_new0(struct apple_mbox_mgmt_msg, 1);
-                    msg->type = MSG_SEND_HELLO;
-                    msg->hello.major = s->protocol_version;
-                    msg->hello.minor = s->protocol_version;
+                    m.type = MSG_SEND_HELLO;
+                    m.hello.major = s->protocol_version;
+                    m.hello.minor = s->protocol_version;
                     s->ep0_status = EP0_WAIT_HELLO;
 
-                    apple_mbox_send_control_message(s, 0, msg->raw);
+                    apple_mbox_send_control_message(s, 0, m.raw);
                 }
                 break;
 
@@ -619,6 +652,8 @@ static uint64_t apple_mbox_reg_read(void *opaque, hwaddr addr,
                        & REG_A7V4_CTRL_COUNT_MASK;
             }
             break;
+        case REG_A7V4_CPU_STATUS:
+            break;
         default:
             qemu_log_mask(LOG_UNIMP, "%s: AppleA7IOP AKF unknown reg READ @ 0x"
                                      TARGET_FMT_plx "\n", s->role, addr);
@@ -651,16 +686,15 @@ static void apple_mbox_v2_reg_write(void *opaque, hwaddr addr,
         switch (addr) {
             case REG_A7V4_CPU_CTRL:
                 if (data & REG_A7V4_CPU_CTRL_RUN) {
-                    apple_mbox_mgmt_msg_t msg;
+                    struct apple_mbox_mgmt_msg m = { 0 };
                     iop_start(s);
 
-                    msg = g_new0(struct apple_mbox_mgmt_msg, 1);
-                    msg->type = MSG_SEND_HELLO;
-                    msg->hello.major = s->protocol_version;
-                    msg->hello.minor = s->protocol_version;
+                    m.type = MSG_SEND_HELLO;
+                    m.hello.major = s->protocol_version;
+                    m.hello.minor = s->protocol_version;
                     s->ep0_status = EP0_WAIT_HELLO;
 
-                    apple_mbox_send_control_message(s, 0, msg->raw);
+                    apple_mbox_send_control_message(s, 0, m.raw);
                 }
                 break;
 
@@ -954,6 +988,10 @@ AppleMboxState *apple_mbox_create(const char *role,
     s->ops = ops;
 
     snprintf(name, sizeof(name), TYPE_APPLE_MBOX ".%s.akf-reg", s->role);
+
+    if (mmio_size > REG_SIZE) {
+        mmio_size = REG_SIZE;
+    }
     /*
      * 0: AppleA7IOP akfRegMap
      */
@@ -962,7 +1000,7 @@ AppleMboxState *apple_mbox_create(const char *role,
     sysbus_init_mmio(sbd, &s->mmio);
 
     memory_region_init_io(&s->iop_mmio, OBJECT(dev), &apple_mbox_iop_reg_ops,
-                          s, name, REG_SIZE);
+                          s, name, mmio_size);
     sysbus_init_mmio(sbd, &s->iop_mmio);
 
     memory_region_init_io(&s->mmio_v2, OBJECT(dev), &apple_mbox_v2_reg_ops, s,
@@ -976,8 +1014,10 @@ AppleMboxState *apple_mbox_create(const char *role,
     qdev_init_gpio_out_named(DEVICE(dev), &s->iop_irq, APPLE_MBOX_IOP_IRQ, 1);
     QTAILQ_INIT(&s->inbox);
     QTAILQ_INIT(&s->outbox);
-    apple_mbox_register_control_endpoint_internal(s, 0,
-                                                   &iop_handle_management_msg);
+    QTAILQ_INIT(&s->rollcall);
+    apple_mbox_register_control_endpoint_internal(s, EP_MANAGEMENT,
+                                                  &iop_handle_management_msg);
+    apple_mbox_register_control_endpoint_internal(s, EP_CRASHLOG, NULL);
 
     return s;
 }
