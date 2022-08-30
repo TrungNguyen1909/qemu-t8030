@@ -506,7 +506,6 @@ static void apple_mbox_bh(void *opaque)
                 IOP_LOG_MSG(s, msg);
             }
             g_free(msg);
-            break;
         }
     }
 }
