@@ -53,6 +53,7 @@
 #include "hw/gpio/apple_gpio.h"
 #include "hw/i2c/apple_hw_i2c.h"
 #include "hw/usb/apple_otg.h"
+#include "hw/usb/apple_typec.h"
 #include "hw/watchdog/apple_wdt.h"
 #include "hw/misc/apple_aes.h"
 #include "hw/nvram/apple_nvram.h"
@@ -74,6 +75,8 @@
 #define T8030_KERNEL_REGION_BASE (0x801964000)
 #define T8030_KERNEL_REGION_SIZE (0xf09cc000)
 
+#define T8030_DWC2_IRQ          (495)
+
 #define T8030_ANS_TEXT_BASE     (0x800024000)
 #define T8030_ANS_TEXT_SIZE     (0x124000)
 #define T8030_ANS_DATA_BASE     (0x8fc400000)
@@ -89,7 +92,7 @@
 #define T8030_DISPLAY_SIZE      (67 * 1024 * 1024)
 #define T8030_PANIC_BASE        (0x8fc2b4000)
 #define T8030_PANIC_SIZE        (0x100000)
-#define T8030_USB_OTG_BASE      (0x39000000)
+
 #define NOP_INST 0xd503201f
 #define MOV_W0_01_INST 0x52800020
 #define MOV_X13_0_INST 0xd280000d
@@ -1084,115 +1087,61 @@ static void t8030_create_usb(MachineState *machine)
     DTBNode *child = find_dtb_node(tms->device_tree, "arm-io");
     DTBNode *drd = find_dtb_node(child, "usb-drd");
     DTBNode *dart_usb = find_dtb_node(child, "dart-usb");
-    DTBNode *dart_usb_mapper = find_dtb_node(dart_usb, "mapper-usb-drd");
-    DTBNode *phy, *complex, *device;
+    DTBNode *dart_mapper = find_dtb_node(dart_usb, "mapper-usb-drd");
+    DTBNode *dart_dwc2_mapper = find_dtb_node(dart_usb, "mapper-usb-device");
+    DTBNode *phy = find_dtb_node(child, "atc-phy");
     DTBProp *prop;
-    DeviceState *otg;
+    DeviceState *atc;
     AppleDARTState *dart;
-
     IOMMUMemoryRegion *iommu = NULL;
+    uint32_t *ints;
     uint32_t value;
 
-    phy = get_dtb_node(child, "otgphyctrl");
-    assert(phy);
-    value = 0x2;
-    set_dtb_prop(phy, "errata", sizeof(value), (uint8_t*)&value);
-    set_dtb_prop(phy, "compatible", 37, (uint8_t*)"otgphyctrl,s8000\0otgphyctrl,s5l8960x\0");
-    value = 1;
-    set_dtb_prop(phy, "clock-mask", sizeof(value), (uint8_t*)&value);
-    value = 0x37477bb3;
-    set_dtb_prop(phy, "cfg0-device", sizeof(value), (uint8_t*)&value);
-    set_dtb_prop(phy, "cfg0-host", 5, (uint8_t*)"##G7");
-    value = 0x00020e0c;
-    set_dtb_prop(phy, "cfg1-host", sizeof(value), (uint8_t*)&value);
-    set_dtb_prop(phy, "cfg1-device", sizeof(value), (uint8_t*)&value);
-    set_dtb_prop(phy, "device_type", 11, (uint8_t*)"otgphyctrl");
-    value = 0x8c;
-    set_dtb_prop(phy, "AAPL,phandle", sizeof(value), (uint8_t*)&value);
-    {
-        uint64_t reg[4] = {
-            T8030_USB_OTG_BASE + 0x30,
-            0x20,
-            T8030_USB_OTG_BASE + 0x600000,
-            0x1000
-        };
-        set_dtb_prop(phy, "reg", sizeof(reg), (uint8_t*)&reg);
-    }
+    set_dtb_prop(drd, "device-mac-address", 6, "\xbc\xde\x48\x33\x44\x55");
+    set_dtb_prop(drd, "host-mac-address", 6, "\xbc\xde\x48\x00\x11\x22");
 
-    complex = get_dtb_node(child, "usb-complex");
-    assert(complex);
-    //TODO: clock-gates, usb_widget
-    set_dtb_prop(complex, "compatible", 39, "usb-complex,s8000\0usb-complex,s5l8960x");
-    set_dtb_prop(complex, "ranges", 8*3,  &(uint64_t[]){0x0, T8030_USB_OTG_BASE, 0x600000});
-    set_dtb_prop(complex, "AAPL,phandle", 4, &(uint32_t[]){ 0x8d });
-    set_dtb_prop(complex, "#address-cells", 4, &(uint32_t[]){ 0x2 });
-    set_dtb_prop(complex, "#size-cells", 4, &(uint32_t[]){ 0x2 });
-    set_dtb_prop(complex, "clock-ids", 4, find_dtb_prop(drd, "clock-ids")->value);
-    set_dtb_prop(complex, "device_type", 12, "usb-complex");
-    value = 1;
-    set_dtb_prop(complex, "no-pmu", 4, (uint8_t*)&value);
-
-    device = get_dtb_node(complex, "usb-device");
-    assert(device);
-    set_dtb_prop(device, "disable-charger-detect", sizeof(value), &value);
-    set_dtb_prop(device, "phy-interface", 4, &(uint32_t[]){ 0x8 });
-    set_dtb_prop(device, "publish-criteria", 4, &(uint32_t[]){ 0x3 });
-    prop = find_dtb_prop(drd, "configuration-string");
-    assert(prop);
-    set_dtb_prop(device, "configuration-string", prop->length, prop->value);
-    prop = find_dtb_prop(drd, "iommu-parent");
-    assert(prop);
-    set_dtb_prop(device, "iommu-parent", prop->length, prop->value);
-    /* TODO: Don't hardcode phandle */
-    set_dtb_prop(device, "AAPL,phandle", 4, &(uint32_t[]){ 0x8e });
-    set_dtb_prop(device, "num-of-eps", 4, &(uint32_t[]){ 0x0e });
-    set_dtb_prop(device, "interrupt-parent", 4, &(uint32_t[]){ APPLE_AIC(tms->aic)->phandle });
-    set_dtb_prop(device, "compatible", 37, "usb-device,t7000\0usb-device,s5l8900x");
-
-    set_dtb_prop(device, "interrupts", 4, &(uint32_t[]){ ((uint32_t*)find_dtb_prop(drd, "interrupts")->value)[0] });
-    set_dtb_prop(device, "ahb-burst", 4, &(uint32_t[]){ 0xe });
-    set_dtb_prop(device, "clock-mask", 4, &(uint32_t[]){ 0x2 });
-    set_dtb_prop(device, "fifo-depth", 4, &(uint32_t[]){ 0x820 });
-    set_dtb_prop(device, "eps-dir-bitmap", 4, &(uint32_t[]){ 0x264 });
-    set_dtb_prop(device, "device-type", 11, "usb-device");
-    set_dtb_prop(device, "device-mac-address", 6, "\xbc\xde\x48\x33\x44\x55");
-    set_dtb_prop(device, "host-mac-address", 6, "\xbc\xde\x48\x00\x11\x22");
-    set_dtb_prop(device, "reg", 16, &(uint64_t[]){
-        0x100000,
-        0x10000,
-    });
-
-
-    prop = find_dtb_prop(dart_usb_mapper, "reg");
-    assert(prop);
-    assert(prop->length == 4);
     dart = APPLE_DART(object_property_get_link(OBJECT(machine),
                       "dart-usb", &error_fatal));
-    iommu = apple_dart_iommu_mr(dart, *(uint32_t *)prop->value);
+
+    atc = qdev_new(TYPE_APPLE_TYPEC);
+    object_property_add_child(OBJECT(machine), "atc", OBJECT(atc));
+
+    prop = find_dtb_prop(dart_mapper, "reg");
+    assert(prop);
+    assert(prop->length == 4);
+    iommu = apple_dart_instance_iommu_mr(dart, 1, *(uint32_t *)prop->value);
     assert(iommu);
 
-    otg = apple_otg_create(complex);
-    object_property_add_child(OBJECT(machine), "otg", OBJECT(otg));
-    assert(object_property_add_const_link(OBJECT(otg), "dma-mr",
+    assert(object_property_add_const_link(OBJECT(atc), "dma-xhci",
                                           OBJECT(iommu)));
+    assert(object_property_add_const_link(OBJECT(atc), "dma-drd",
+                                          OBJECT(iommu)));
+
+    prop = find_dtb_prop(dart_dwc2_mapper, "reg");
+    assert(prop);
+    assert(prop->length == 4);
+    iommu = apple_dart_instance_iommu_mr(dart, 1, *(uint32_t *)prop->value);
+    assert(iommu);
+
+    assert(object_property_add_const_link(OBJECT(atc), "dma-otg",
+                                          OBJECT(iommu)));
+
     prop = find_dtb_prop(phy, "reg");
     assert(prop);
-    sysbus_mmio_map(SYS_BUS_DEVICE(otg), 0,
+    sysbus_mmio_map(SYS_BUS_DEVICE(atc), 0,
                     tms->soc_base_pa + ((uint64_t*)prop->value)[0]);
-    sysbus_mmio_map(SYS_BUS_DEVICE(otg), 1,
-                    tms->soc_base_pa + ((uint64_t*)prop->value)[2]);
-    sysbus_mmio_map(SYS_BUS_DEVICE(otg), 2,
-                    tms->soc_base_pa
-                    + ((uint64_t*)find_dtb_prop(complex, "ranges")->value)[1]
-                    + ((uint64_t*)find_dtb_prop(device, "reg")->value)[0]);
 
-    sysbus_realize_and_unref(SYS_BUS_DEVICE(otg), &error_fatal);
+    sysbus_realize_and_unref(SYS_BUS_DEVICE(atc), &error_fatal);
 
-    prop = find_dtb_prop(device, "interrupts");
+    prop = find_dtb_prop(drd, "interrupts");
     assert(prop);
-    sysbus_connect_irq(SYS_BUS_DEVICE(otg), 0,
-                       qdev_get_gpio_in(DEVICE(tms->aic),
-                       ((uint32_t *)prop->value)[0]));
+    ints = (uint32_t *)prop->value;
+    for(int i = 0; i < 4; i++) {
+        sysbus_connect_irq(SYS_BUS_DEVICE(atc), i,
+                           qdev_get_gpio_in(DEVICE(tms->aic), ints[i]));
+    }
+    sysbus_connect_irq(SYS_BUS_DEVICE(atc), 4,
+                       qdev_get_gpio_in(DEVICE(tms->aic), T8030_DWC2_IRQ));
 }
 
 static void t8030_create_wdt(MachineState *machine)

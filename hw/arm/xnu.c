@@ -56,7 +56,6 @@ static const char *KEEP_COMP[] = {
     "i2c,t8030\0i2c,s5l8940x\0iic,soft\0$",
     "i2c,s8000\0i2c,s5l8940x\0iic,soft\0$",
     "iic,soft\0$",
-    "dock,9pin\0$",
     "otgphyctrl,s8000\0otgphyctrl,s5l8960x\0$",
     "usb-complex,s8000\0usb-complex,s5l8960x\0$",
     "usb-device,s5l8900x\0$",
@@ -68,6 +67,8 @@ static const char *KEEP_COMP[] = {
     "buttons\0$",
     "dart,t8020\0$", "iommu-mapper\0$",
     "soc-tuner,t8030\0$",
+    "atc-phy,t8030\0atc-phy,t8027\0$",
+    "usb-drd,t8030\0usb-drd,t8027\0$",
 };
 
 static const char *REM_NAMES[] = {
@@ -75,7 +76,6 @@ static const char *REM_NAMES[] = {
     "dockchannel-uart\0$",
     "sep\0$", "pmp\0$",
     "aop-gpio\0$",
-    "atc-phy\0$", "usb-drd\0$",
     "dotara\0$", "baseband-spmi\0$", "stockholm-spmi\0$",
     "dart-aop\0$", "dart-pmp\0$", "dart-sep\0$", "dart-rsm\0$",
     "dart-scaler\0$", "dart-jpeg0\0$", "dart-jpeg1\0$",
@@ -93,6 +93,7 @@ static const char *REM_PROPS[] = {
     "function-brick_id_voltage", "function-ldcm_bypass_en",
     "content-protect", /* We don't want encrypted data volume */
     "soc-tuning", "mcc-power-gating",
+    "function-dock_parent",
 };
 
 static void allocate_and_copy(MemoryRegion *mem, AddressSpace *as,

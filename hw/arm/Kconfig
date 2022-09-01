@@ -581,6 +581,7 @@ config APPLE_SOC
     select APPLE_ANS
     select APPLE_I2C
     select APPLE_OTG
+    select APPLE_TYPEC
     select APPLE_NVRAM
     select APPLE_SPMI
     select APPLE_SPMI_PMU
