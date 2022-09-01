@@ -12,6 +12,7 @@ softmmu_ss.add(when: 'CONFIG_USB', if_true: files(
 ))
 
 softmmu_ss.add(when: 'CONFIG_APPLE_OTG', if_true: files('apple_otg.c'))
+softmmu_ss.add(when: 'CONFIG_APPLE_TYPEC', if_true: files('apple_typec.c'))
 softmmu_ss.add(when: 'CONFIG_USB_TCP', if_true: files('dev-tcp-remote.c', 'hcd-tcp.c'))
 
 # usb host adapters

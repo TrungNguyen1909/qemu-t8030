@@ -144,3 +144,9 @@ config APPLE_OTG
     select USB_TCP
     select USB_DWC2
     depends on APPLE_SOC
+
+config APPLE_TYPEC
+    bool
+    select USB_TCP
+    select USB_DWC3
+    depends on APPLE_SOC
