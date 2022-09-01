@@ -510,6 +510,22 @@ IOMMUMemoryRegion *apple_dart_iommu_mr(AppleDARTState *s, uint32_t sid)
     return NULL;
 }
 
+IOMMUMemoryRegion *apple_dart_instance_iommu_mr(AppleDARTState *s,
+                                                uint32_t instance,
+                                                uint32_t sid)
+{
+    if (sid >= DART_MAX_STREAMS) {
+        return NULL;
+    }
+    if (instance >= s->num_instances) {
+        return NULL;
+    }
+    if (s->instances[instance].type == DART_DART) {
+        return IOMMU_MEMORY_REGION(s->instances[instance].iommus[sid]);
+    }
+    return NULL;
+}
+
 AppleDARTState *apple_dart_create(DTBNode *node)
 {
     DeviceState  *dev;
