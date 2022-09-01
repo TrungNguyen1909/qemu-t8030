@@ -29,27 +29,25 @@
 #include "hw/usb/hcd-xhci.h"
 #include "hw/usb/hcd-xhci-sysbus.h"
 
-#define TYPE_USB_DWC3 "usb_dwc3"
+#define TYPE_DWC3_USB "dwc3-usb"
 
-#define USB_DWC3(obj) \
-     OBJECT_CHECK(USBDWC3, (obj), TYPE_USB_DWC3)
-
-#define USB_DWC3_R_MAX ((0x530 / 4) + 1)
+#define DWC3_USB_R_MAX ((0x530 / 4) + 1)
 #define DWC3_SIZE 0x10000
 
-typedef struct USBDWC3 {
+typedef struct DWC3State {
     SysBusDevice parent_obj;
     MemoryRegion iomem;
     XHCISysbusState sysbus_xhci;
 
-    uint32_t regs[USB_DWC3_R_MAX];
-    RegisterInfo regs_info[USB_DWC3_R_MAX];
+    uint32_t regs[DWC3_USB_R_MAX];
+    RegisterInfo regs_info[DWC3_USB_R_MAX];
 
     struct {
         uint8_t     mode;
         uint32_t    dwc_usb3_user;
     } cfg;
 
-} USBDWC3;
+} DWC3State;
+OBJECT_DECLARE_SIMPLE_TYPE(DWC3State, DWC3_USB)
 
 #endif

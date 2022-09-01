@@ -39,7 +39,7 @@ typedef struct VersalUsb2 {
     MemoryRegion usb2Ctrl_mr;
 
     VersalUsb2CtrlRegs usb2Ctrl;
-    USBDWC3 dwc3;
+    DWC3State dwc3;
 } VersalUsb2;
 
 #endif

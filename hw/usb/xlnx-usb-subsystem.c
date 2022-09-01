@@ -57,7 +57,7 @@ static void versal_usb2_init(Object *obj)
     VersalUsb2 *s = VERSAL_USB2(obj);
 
     object_initialize_child(obj, "versal.dwc3", &s->dwc3,
-                            TYPE_USB_DWC3);
+                            TYPE_DWC3_USB);
     object_initialize_child(obj, "versal.usb2-ctrl", &s->usb2Ctrl,
                             TYPE_XILINX_VERSAL_USB2_CTRL_REGS);
     memory_region_init_alias(&s->dwc3_mr, obj, "versal.dwc3_alias",

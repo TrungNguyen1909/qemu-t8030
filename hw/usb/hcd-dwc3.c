@@ -37,8 +37,8 @@
 #include "hw/usb/hcd-dwc3.h"
 #include "qapi/error.h"
 
-#ifndef USB_DWC3_ERR_DEBUG
-#define USB_DWC3_ERR_DEBUG 0
+#ifndef DWC3_USB_ERR_DEBUG
+#define DWC3_USB_ERR_DEBUG 0
 #endif
 
 #define HOST_MODE           1
@@ -345,7 +345,7 @@ REG32(GFLADJ, 0x530)
     FIELD(GFLADJ, GFLADJ_30MHZ, 0, 6)
 
 #define DWC3_GLOBAL_OFFSET 0xC100
-static void reset_csr(USBDWC3 * s)
+static void reset_csr(DWC3State * s)
 {
     int i = 0;
     /*
@@ -353,7 +353,7 @@ static void reset_csr(USBDWC3 * s)
      * GUSB2PHYCFGn registers and GUSB3PIPECTLn registers. We will skip PHY
      * register as we don't implement them.
      */
-    for (i = 0; i < USB_DWC3_R_MAX; i++) {
+    for (i = 0; i < DWC3_USB_R_MAX; i++) {
         switch (i) {
         case R_GCTL:
             break;
@@ -382,7 +382,7 @@ static void reset_csr(USBDWC3 * s)
 
 static void usb_dwc3_gctl_postw(RegisterInfo *reg, uint64_t val64)
 {
-    USBDWC3 *s = USB_DWC3(reg->opaque);
+    DWC3State *s = DWC3_USB(reg->opaque);
 
     if (ARRAY_FIELD_EX32(s->regs, GCTL, CORESOFTRESET)) {
         reset_csr(s);
@@ -391,7 +391,7 @@ static void usb_dwc3_gctl_postw(RegisterInfo *reg, uint64_t val64)
 
 static void usb_dwc3_guid_postw(RegisterInfo *reg, uint64_t val64)
 {
-    USBDWC3 *s = USB_DWC3(reg->opaque);
+    DWC3State *s = DWC3_USB(reg->opaque);
 
     s->regs[R_GUID] = s->cfg.dwc_usb3_user;
 }
@@ -565,7 +565,7 @@ static const RegisterAccessInfo usb_dwc3_regs_info[] = {
 
 static void usb_dwc3_reset(DeviceState *dev)
 {
-    USBDWC3 *s = USB_DWC3(dev);
+    DWC3State *s = DWC3_USB(dev);
     unsigned int i;
 
     for (i = 0; i < ARRAY_SIZE(s->regs_info); ++i) {
@@ -594,7 +594,7 @@ static const MemoryRegionOps usb_dwc3_ops = {
 
 static void usb_dwc3_realize(DeviceState *dev, Error **errp)
 {
-    USBDWC3 *s = USB_DWC3(dev);
+    DWC3State *s = DWC3_USB(dev);
     SysBusDevice *sbd = SYS_BUS_DEVICE(dev);
     Error *err = NULL;
 
@@ -624,17 +624,17 @@ static void usb_dwc3_realize(DeviceState *dev, Error **errp)
 
 static void usb_dwc3_init(Object *obj)
 {
-    USBDWC3 *s = USB_DWC3(obj);
+    DWC3State *s = DWC3_USB(obj);
     RegisterInfoArray *reg_array;
 
-    memory_region_init(&s->iomem, obj, TYPE_USB_DWC3, DWC3_SIZE);
+    memory_region_init(&s->iomem, obj, TYPE_DWC3_USB, DWC3_SIZE);
     reg_array =
         register_init_block32(DEVICE(obj), usb_dwc3_regs_info,
                               ARRAY_SIZE(usb_dwc3_regs_info),
                               s->regs_info, s->regs,
                               &usb_dwc3_ops,
-                              USB_DWC3_ERR_DEBUG,
-                              USB_DWC3_R_MAX * 4);
+                              DWC3_USB_ERR_DEBUG,
+                              DWC3_USB_R_MAX * 4);
     memory_region_add_subregion(&s->iomem,
                                 DWC3_GLOBAL_OFFSET,
                                 &reg_array->mem);
@@ -649,15 +649,15 @@ static const VMStateDescription vmstate_usb_dwc3 = {
     .name = "usb-dwc3",
     .version_id = 1,
     .fields = (VMStateField[]) {
-        VMSTATE_UINT32_ARRAY(regs, USBDWC3, USB_DWC3_R_MAX),
-        VMSTATE_UINT8(cfg.mode, USBDWC3),
-        VMSTATE_UINT32(cfg.dwc_usb3_user, USBDWC3),
+        VMSTATE_UINT32_ARRAY(regs, DWC3State, DWC3_USB_R_MAX),
+        VMSTATE_UINT8(cfg.mode, DWC3State),
+        VMSTATE_UINT32(cfg.dwc_usb3_user, DWC3State),
         VMSTATE_END_OF_LIST()
     }
 };
 
 static Property usb_dwc3_properties[] = {
-    DEFINE_PROP_UINT32("DWC_USB3_USERID", USBDWC3, cfg.dwc_usb3_user,
+    DEFINE_PROP_UINT32("DWC_USB3_USERID", DWC3State, cfg.dwc_usb3_user,
                        0x12345678),
     DEFINE_PROP_END_OF_LIST(),
 };
@@ -673,9 +673,9 @@ static void usb_dwc3_class_init(ObjectClass *klass, void *data)
 }
 
 static const TypeInfo usb_dwc3_info = {
-    .name          = TYPE_USB_DWC3,
+    .name          = TYPE_DWC3_USB,
     .parent        = TYPE_SYS_BUS_DEVICE,
-    .instance_size = sizeof(USBDWC3),
+    .instance_size = sizeof(DWC3State),
     .class_init    = usb_dwc3_class_init,
     .instance_init = usb_dwc3_init,
 };
