@@ -1,12 +1,7 @@
 /*
- * QEMU model of the USB DWC3 host controller emulation.
+ * QEMU model of the USB DWC3 dual-role controller emulation.
  *
- * This model defines global register space of DWC3 controller. Global
- * registers control the AXI/AHB interfaces properties, external FIFO support
- * and event count support. All of which are unimplemented at present. We are
- * only supporting core reset and read of ID register.
- *
- * Copyright (c) 2020 Xilinx Inc. Vikram Garhwal<fnu.vikram@xilinx.com>
+ * Copyright (c) 2022 Nguyen Hoang Trung (TrungNguyen1909)
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -28,563 +23,1343 @@
  */
 
 #include "qemu/osdep.h"
+#include "hw/irq.h"
 #include "hw/sysbus.h"
-#include "hw/register.h"
 #include "qemu/bitops.h"
 #include "qom/object.h"
 #include "migration/vmstate.h"
 #include "hw/qdev-properties.h"
+#include "hw/usb/dwc3-regs.h"
 #include "hw/usb/hcd-dwc3.h"
 #include "qapi/error.h"
+#include "qemu/log.h"
+#include "qemu-common.h"
+#include "trace.h"
 
-#ifndef DWC3_USB_ERR_DEBUG
-#define DWC3_USB_ERR_DEBUG 0
+//#define DEBUG_DWC3
+
+#ifdef DEBUG_DWC3
+#define DPRINTF(fmt, ...) \
+do { qemu_log_mask(LOG_GUEST_ERROR, fmt, ## __VA_ARGS__); } while (0)
+#else
+#define DPRINTF(fmt, ...) do {} while(0)
 #endif
 
-#define HOST_MODE           1
-#define FIFO_LEN         0x1000
+#ifdef DEBUG_DWC3
+static const char *TRBControlType_names[] = {
+    [TRBCTL_RESERVED]               = "TRBCTL_RESERVED",
+    [TRBCTL_NORMAL]                 = "TRBCTL_NORMAL",
+    [TRBCTL_CONTROL_SETUP]          = "TRBCTL_CONTROL_SETUP",
+    [TRBCTL_CONTROL_STATUS2]        = "TRBCTL_CONTROL_STATUS2",
+    [TRBCTL_CONTROL_STATUS3]        = "TRBCTL_CONTROL_STATUS3",
+    [TRBCTL_CONTROL_DATA]           = "TRBCTL_CONTROL_DATA",
+    [TRBCTL_ISOCHRONOUS_FIRST]      = "TRBCTL_ISOCHRONOUS_FIRST",
+    [TRBCTL_ISOCHRONOUS]            = "TRBCTL_ISOCHRONOUS",
+    [TRBCTL_LINK_TRB]               = "TRBCTL_LINK_TRB",
+};
+#endif
 
-REG32(GSBUSCFG0, 0x00)
-    FIELD(GSBUSCFG0, DATRDREQINFO, 28, 4)
-    FIELD(GSBUSCFG0, DESRDREQINFO, 24, 4)
-    FIELD(GSBUSCFG0, DATWRREQINFO, 20, 4)
-    FIELD(GSBUSCFG0, DESWRREQINFO, 16, 4)
-    FIELD(GSBUSCFG0, RESERVED_15_12, 12, 4)
-    FIELD(GSBUSCFG0, DATBIGEND, 11, 1)
-    FIELD(GSBUSCFG0, DESBIGEND, 10, 1)
-    FIELD(GSBUSCFG0, RESERVED_9_8, 8, 2)
-    FIELD(GSBUSCFG0, INCR256BRSTENA, 7, 1)
-    FIELD(GSBUSCFG0, INCR128BRSTENA, 6, 1)
-    FIELD(GSBUSCFG0, INCR64BRSTENA, 5, 1)
-    FIELD(GSBUSCFG0, INCR32BRSTENA, 4, 1)
-    FIELD(GSBUSCFG0, INCR16BRSTENA, 3, 1)
-    FIELD(GSBUSCFG0, INCR8BRSTENA, 2, 1)
-    FIELD(GSBUSCFG0, INCR4BRSTENA, 1, 1)
-    FIELD(GSBUSCFG0, INCRBRSTENA, 0, 1)
-REG32(GSBUSCFG1, 0x04)
-    FIELD(GSBUSCFG1, RESERVED_31_13, 13, 19)
-    FIELD(GSBUSCFG1, EN1KPAGE, 12, 1)
-    FIELD(GSBUSCFG1, PIPETRANSLIMIT, 8, 4)
-    FIELD(GSBUSCFG1, RESERVED_7_0, 0, 8)
-REG32(GTXTHRCFG, 0x08)
-    FIELD(GTXTHRCFG, RESERVED_31, 31, 1)
-    FIELD(GTXTHRCFG, RESERVED_30, 30, 1)
-    FIELD(GTXTHRCFG, USBTXPKTCNTSEL, 29, 1)
-    FIELD(GTXTHRCFG, RESERVED_28, 28, 1)
-    FIELD(GTXTHRCFG, USBTXPKTCNT, 24, 4)
-    FIELD(GTXTHRCFG, USBMAXTXBURSTSIZE, 16, 8)
-    FIELD(GTXTHRCFG, RESERVED_15, 15, 1)
-    FIELD(GTXTHRCFG, RESERVED_14, 14, 1)
-    FIELD(GTXTHRCFG, RESERVED_13_11, 11, 3)
-    FIELD(GTXTHRCFG, RESERVED_10_0, 0, 11)
-REG32(GRXTHRCFG, 0x0c)
-    FIELD(GRXTHRCFG, RESERVED_31_30, 30, 2)
-    FIELD(GRXTHRCFG, USBRXPKTCNTSEL, 29, 1)
-    FIELD(GRXTHRCFG, RESERVED_28, 28, 1)
-    FIELD(GRXTHRCFG, USBRXPKTCNT, 24, 4)
-    FIELD(GRXTHRCFG, USBMAXRXBURSTSIZE, 19, 5)
-    FIELD(GRXTHRCFG, RESERVED_18_16, 16, 3)
-    FIELD(GRXTHRCFG, RESERVED_15, 15, 1)
-    FIELD(GRXTHRCFG, RESERVED_14_13, 13, 2)
-    FIELD(GRXTHRCFG, RESVISOCOUTSPC, 0, 13)
-REG32(GCTL, 0x10)
-    FIELD(GCTL, PWRDNSCALE, 19, 13)
-    FIELD(GCTL, MASTERFILTBYPASS, 18, 1)
-    FIELD(GCTL, BYPSSETADDR, 17, 1)
-    FIELD(GCTL, U2RSTECN, 16, 1)
-    FIELD(GCTL, FRMSCLDWN, 14, 2)
-    FIELD(GCTL, PRTCAPDIR, 12, 2)
-    FIELD(GCTL, CORESOFTRESET, 11, 1)
-    FIELD(GCTL, U1U2TIMERSCALE, 9, 1)
-    FIELD(GCTL, DEBUGATTACH, 8, 1)
-    FIELD(GCTL, RAMCLKSEL, 6, 2)
-    FIELD(GCTL, SCALEDOWN, 4, 2)
-    FIELD(GCTL, DISSCRAMBLE, 3, 1)
-    FIELD(GCTL, U2EXIT_LFPS, 2, 1)
-    FIELD(GCTL, GBLHIBERNATIONEN, 1, 1)
-    FIELD(GCTL, DSBLCLKGTNG, 0, 1)
-REG32(GPMSTS, 0x14)
-REG32(GSTS, 0x18)
-    FIELD(GSTS, CBELT, 20, 12)
-    FIELD(GSTS, RESERVED_19_12, 12, 8)
-    FIELD(GSTS, SSIC_IP, 11, 1)
-    FIELD(GSTS, OTG_IP, 10, 1)
-    FIELD(GSTS, BC_IP, 9, 1)
-    FIELD(GSTS, ADP_IP, 8, 1)
-    FIELD(GSTS, HOST_IP, 7, 1)
-    FIELD(GSTS, DEVICE_IP, 6, 1)
-    FIELD(GSTS, CSRTIMEOUT, 5, 1)
-    FIELD(GSTS, BUSERRADDRVLD, 4, 1)
-    FIELD(GSTS, RESERVED_3_2, 2, 2)
-    FIELD(GSTS, CURMOD, 0, 2)
-REG32(GUCTL1, 0x1c)
-    FIELD(GUCTL1, RESUME_OPMODE_HS_HOST, 10, 1)
-REG32(GSNPSID, 0x20)
-REG32(GGPIO, 0x24)
-    FIELD(GGPIO, GPO, 16, 16)
-    FIELD(GGPIO, GPI, 0, 16)
-REG32(GUID, 0x28)
-REG32(GUCTL, 0x2c)
-    FIELD(GUCTL, REFCLKPER, 22, 10)
-    FIELD(GUCTL, NOEXTRDL, 21, 1)
-    FIELD(GUCTL, RESERVED_20_18, 18, 3)
-    FIELD(GUCTL, SPRSCTRLTRANSEN, 17, 1)
-    FIELD(GUCTL, RESBWHSEPS, 16, 1)
-    FIELD(GUCTL, RESERVED_15, 15, 1)
-    FIELD(GUCTL, USBHSTINAUTORETRYEN, 14, 1)
-    FIELD(GUCTL, ENOVERLAPCHK, 13, 1)
-    FIELD(GUCTL, EXTCAPSUPPTEN, 12, 1)
-    FIELD(GUCTL, INSRTEXTRFSBODI, 11, 1)
-    FIELD(GUCTL, DTCT, 9, 2)
-    FIELD(GUCTL, DTFT, 0, 9)
-REG32(GBUSERRADDRLO, 0x30)
-REG32(GBUSERRADDRHI, 0x34)
-REG32(GHWPARAMS0, 0x40)
-    FIELD(GHWPARAMS0, GHWPARAMS0_31_24, 24, 8)
-    FIELD(GHWPARAMS0, GHWPARAMS0_23_16, 16, 8)
-    FIELD(GHWPARAMS0, GHWPARAMS0_15_8, 8, 8)
-    FIELD(GHWPARAMS0, GHWPARAMS0_7_6, 6, 2)
-    FIELD(GHWPARAMS0, GHWPARAMS0_5_3, 3, 3)
-    FIELD(GHWPARAMS0, GHWPARAMS0_2_0, 0, 3)
-REG32(GHWPARAMS1, 0x44)
-    FIELD(GHWPARAMS1, GHWPARAMS1_31, 31, 1)
-    FIELD(GHWPARAMS1, GHWPARAMS1_30, 30, 1)
-    FIELD(GHWPARAMS1, GHWPARAMS1_29, 29, 1)
-    FIELD(GHWPARAMS1, GHWPARAMS1_28, 28, 1)
-    FIELD(GHWPARAMS1, GHWPARAMS1_27, 27, 1)
-    FIELD(GHWPARAMS1, GHWPARAMS1_26, 26, 1)
-    FIELD(GHWPARAMS1, GHWPARAMS1_25_24, 24, 2)
-    FIELD(GHWPARAMS1, GHWPARAMS1_23, 23, 1)
-    FIELD(GHWPARAMS1, GHWPARAMS1_22_21, 21, 2)
-    FIELD(GHWPARAMS1, GHWPARAMS1_20_15, 15, 6)
-    FIELD(GHWPARAMS1, GHWPARAMS1_14_12, 12, 3)
-    FIELD(GHWPARAMS1, GHWPARAMS1_11_9, 9, 3)
-    FIELD(GHWPARAMS1, GHWPARAMS1_8_6, 6, 3)
-    FIELD(GHWPARAMS1, GHWPARAMS1_5_3, 3, 3)
-    FIELD(GHWPARAMS1, GHWPARAMS1_2_0, 0, 3)
-REG32(GHWPARAMS2, 0x48)
-REG32(GHWPARAMS3, 0x4c)
-    FIELD(GHWPARAMS3, GHWPARAMS3_31, 31, 1)
-    FIELD(GHWPARAMS3, GHWPARAMS3_30_23, 23, 8)
-    FIELD(GHWPARAMS3, GHWPARAMS3_22_18, 18, 5)
-    FIELD(GHWPARAMS3, GHWPARAMS3_17_12, 12, 6)
-    FIELD(GHWPARAMS3, GHWPARAMS3_11, 11, 1)
-    FIELD(GHWPARAMS3, GHWPARAMS3_10, 10, 1)
-    FIELD(GHWPARAMS3, GHWPARAMS3_9_8, 8, 2)
-    FIELD(GHWPARAMS3, GHWPARAMS3_7_6, 6, 2)
-    FIELD(GHWPARAMS3, GHWPARAMS3_5_4, 4, 2)
-    FIELD(GHWPARAMS3, GHWPARAMS3_3_2, 2, 2)
-    FIELD(GHWPARAMS3, GHWPARAMS3_1_0, 0, 2)
-REG32(GHWPARAMS4, 0x50)
-    FIELD(GHWPARAMS4, GHWPARAMS4_31_28, 28, 4)
-    FIELD(GHWPARAMS4, GHWPARAMS4_27_24, 24, 4)
-    FIELD(GHWPARAMS4, GHWPARAMS4_23, 23, 1)
-    FIELD(GHWPARAMS4, GHWPARAMS4_22, 22, 1)
-    FIELD(GHWPARAMS4, GHWPARAMS4_21, 21, 1)
-    FIELD(GHWPARAMS4, GHWPARAMS4_20_17, 17, 4)
-    FIELD(GHWPARAMS4, GHWPARAMS4_16_13, 13, 4)
-    FIELD(GHWPARAMS4, GHWPARAMS4_12, 12, 1)
-    FIELD(GHWPARAMS4, GHWPARAMS4_11, 11, 1)
-    FIELD(GHWPARAMS4, GHWPARAMS4_10_9, 9, 2)
-    FIELD(GHWPARAMS4, GHWPARAMS4_8_7, 7, 2)
-    FIELD(GHWPARAMS4, GHWPARAMS4_6, 6, 1)
-    FIELD(GHWPARAMS4, GHWPARAMS4_5_0, 0, 6)
-REG32(GHWPARAMS5, 0x54)
-    FIELD(GHWPARAMS5, GHWPARAMS5_31_28, 28, 4)
-    FIELD(GHWPARAMS5, GHWPARAMS5_27_22, 22, 6)
-    FIELD(GHWPARAMS5, GHWPARAMS5_21_16, 16, 6)
-    FIELD(GHWPARAMS5, GHWPARAMS5_15_10, 10, 6)
-    FIELD(GHWPARAMS5, GHWPARAMS5_9_4, 4, 6)
-    FIELD(GHWPARAMS5, GHWPARAMS5_3_0, 0, 4)
-REG32(GHWPARAMS6, 0x58)
-    FIELD(GHWPARAMS6, GHWPARAMS6_31_16, 16, 16)
-    FIELD(GHWPARAMS6, BUSFLTRSSUPPORT, 15, 1)
-    FIELD(GHWPARAMS6, BCSUPPORT, 14, 1)
-    FIELD(GHWPARAMS6, OTG_SS_SUPPORT, 13, 1)
-    FIELD(GHWPARAMS6, ADPSUPPORT, 12, 1)
-    FIELD(GHWPARAMS6, HNPSUPPORT, 11, 1)
-    FIELD(GHWPARAMS6, SRPSUPPORT, 10, 1)
-    FIELD(GHWPARAMS6, GHWPARAMS6_9_8, 8, 2)
-    FIELD(GHWPARAMS6, GHWPARAMS6_7, 7, 1)
-    FIELD(GHWPARAMS6, GHWPARAMS6_6, 6, 1)
-    FIELD(GHWPARAMS6, GHWPARAMS6_5_0, 0, 6)
-REG32(GHWPARAMS7, 0x5c)
-    FIELD(GHWPARAMS7, GHWPARAMS7_31_16, 16, 16)
-    FIELD(GHWPARAMS7, GHWPARAMS7_15_0, 0, 16)
-REG32(GDBGFIFOSPACE, 0x60)
-    FIELD(GDBGFIFOSPACE, SPACE_AVAILABLE, 16, 16)
-    FIELD(GDBGFIFOSPACE, RESERVED_15_9, 9, 7)
-    FIELD(GDBGFIFOSPACE, FIFO_QUEUE_SELECT, 0, 9)
-REG32(GUCTL2, 0x9c)
-    FIELD(GUCTL2, RESERVED_31_26, 26, 6)
-    FIELD(GUCTL2, EN_HP_PM_TIMER, 19, 7)
-    FIELD(GUCTL2, NOLOWPWRDUR, 15, 4)
-    FIELD(GUCTL2, RST_ACTBITLATER, 14, 1)
-    FIELD(GUCTL2, RESERVED_13, 13, 1)
-    FIELD(GUCTL2, DISABLECFC, 11, 1)
-REG32(GUSB2PHYCFG, 0x100)
-    FIELD(GUSB2PHYCFG, U2_FREECLK_EXISTS, 30, 1)
-    FIELD(GUSB2PHYCFG, ULPI_LPM_WITH_OPMODE_CHK, 29, 1)
-    FIELD(GUSB2PHYCFG, RESERVED_25, 25, 1)
-    FIELD(GUSB2PHYCFG, LSTRD, 22, 3)
-    FIELD(GUSB2PHYCFG, LSIPD, 19, 3)
-    FIELD(GUSB2PHYCFG, ULPIEXTVBUSINDIACTOR, 18, 1)
-    FIELD(GUSB2PHYCFG, ULPIEXTVBUSDRV, 17, 1)
-    FIELD(GUSB2PHYCFG, RESERVED_16, 16, 1)
-    FIELD(GUSB2PHYCFG, ULPIAUTORES, 15, 1)
-    FIELD(GUSB2PHYCFG, RESERVED_14, 14, 1)
-    FIELD(GUSB2PHYCFG, USBTRDTIM, 10, 4)
-    FIELD(GUSB2PHYCFG, XCVRDLY, 9, 1)
-    FIELD(GUSB2PHYCFG, ENBLSLPM, 8, 1)
-    FIELD(GUSB2PHYCFG, PHYSEL, 7, 1)
-    FIELD(GUSB2PHYCFG, SUSPENDUSB20, 6, 1)
-    FIELD(GUSB2PHYCFG, FSINTF, 5, 1)
-    FIELD(GUSB2PHYCFG, ULPI_UTMI_SEL, 4, 1)
-    FIELD(GUSB2PHYCFG, PHYIF, 3, 1)
-    FIELD(GUSB2PHYCFG, TOUTCAL, 0, 3)
-REG32(GUSB2I2CCTL, 0x140)
-REG32(GUSB2PHYACC_ULPI, 0x180)
-    FIELD(GUSB2PHYACC_ULPI, RESERVED_31_27, 27, 5)
-    FIELD(GUSB2PHYACC_ULPI, DISUIPIDRVR, 26, 1)
-    FIELD(GUSB2PHYACC_ULPI, NEWREGREQ, 25, 1)
-    FIELD(GUSB2PHYACC_ULPI, VSTSDONE, 24, 1)
-    FIELD(GUSB2PHYACC_ULPI, VSTSBSY, 23, 1)
-    FIELD(GUSB2PHYACC_ULPI, REGWR, 22, 1)
-    FIELD(GUSB2PHYACC_ULPI, REGADDR, 16, 6)
-    FIELD(GUSB2PHYACC_ULPI, EXTREGADDR, 8, 8)
-    FIELD(GUSB2PHYACC_ULPI, REGDATA, 0, 8)
-REG32(GTXFIFOSIZ0, 0x200)
-    FIELD(GTXFIFOSIZ0, TXFSTADDR_N, 16, 16)
-    FIELD(GTXFIFOSIZ0, TXFDEP_N, 0, 16)
-REG32(GTXFIFOSIZ1, 0x204)
-    FIELD(GTXFIFOSIZ1, TXFSTADDR_N, 16, 16)
-    FIELD(GTXFIFOSIZ1, TXFDEP_N, 0, 16)
-REG32(GTXFIFOSIZ2, 0x208)
-    FIELD(GTXFIFOSIZ2, TXFSTADDR_N, 16, 16)
-    FIELD(GTXFIFOSIZ2, TXFDEP_N, 0, 16)
-REG32(GTXFIFOSIZ3, 0x20c)
-    FIELD(GTXFIFOSIZ3, TXFSTADDR_N, 16, 16)
-    FIELD(GTXFIFOSIZ3, TXFDEP_N, 0, 16)
-REG32(GTXFIFOSIZ4, 0x210)
-    FIELD(GTXFIFOSIZ4, TXFSTADDR_N, 16, 16)
-    FIELD(GTXFIFOSIZ4, TXFDEP_N, 0, 16)
-REG32(GTXFIFOSIZ5, 0x214)
-    FIELD(GTXFIFOSIZ5, TXFSTADDR_N, 16, 16)
-    FIELD(GTXFIFOSIZ5, TXFDEP_N, 0, 16)
-REG32(GRXFIFOSIZ0, 0x280)
-    FIELD(GRXFIFOSIZ0, RXFSTADDR_N, 16, 16)
-    FIELD(GRXFIFOSIZ0, RXFDEP_N, 0, 16)
-REG32(GRXFIFOSIZ1, 0x284)
-    FIELD(GRXFIFOSIZ1, RXFSTADDR_N, 16, 16)
-    FIELD(GRXFIFOSIZ1, RXFDEP_N, 0, 16)
-REG32(GRXFIFOSIZ2, 0x288)
-    FIELD(GRXFIFOSIZ2, RXFSTADDR_N, 16, 16)
-    FIELD(GRXFIFOSIZ2, RXFDEP_N, 0, 16)
-REG32(GEVNTADRLO_0, 0x300)
-REG32(GEVNTADRHI_0, 0x304)
-REG32(GEVNTSIZ_0, 0x308)
-    FIELD(GEVNTSIZ_0, EVNTINTRPTMASK, 31, 1)
-    FIELD(GEVNTSIZ_0, RESERVED_30_16, 16, 15)
-    FIELD(GEVNTSIZ_0, EVENTSIZ, 0, 16)
-REG32(GEVNTCOUNT_0, 0x30c)
-    FIELD(GEVNTCOUNT_0, EVNT_HANDLER_BUSY, 31, 1)
-    FIELD(GEVNTCOUNT_0, RESERVED_30_16, 16, 15)
-    FIELD(GEVNTCOUNT_0, EVNTCOUNT, 0, 16)
-REG32(GEVNTADRLO_1, 0x310)
-REG32(GEVNTADRHI_1, 0x314)
-REG32(GEVNTSIZ_1, 0x318)
-    FIELD(GEVNTSIZ_1, EVNTINTRPTMASK, 31, 1)
-    FIELD(GEVNTSIZ_1, RESERVED_30_16, 16, 15)
-    FIELD(GEVNTSIZ_1, EVENTSIZ, 0, 16)
-REG32(GEVNTCOUNT_1, 0x31c)
-    FIELD(GEVNTCOUNT_1, EVNT_HANDLER_BUSY, 31, 1)
-    FIELD(GEVNTCOUNT_1, RESERVED_30_16, 16, 15)
-    FIELD(GEVNTCOUNT_1, EVNTCOUNT, 0, 16)
-REG32(GEVNTADRLO_2, 0x320)
-REG32(GEVNTADRHI_2, 0x324)
-REG32(GEVNTSIZ_2, 0x328)
-    FIELD(GEVNTSIZ_2, EVNTINTRPTMASK, 31, 1)
-    FIELD(GEVNTSIZ_2, RESERVED_30_16, 16, 15)
-    FIELD(GEVNTSIZ_2, EVENTSIZ, 0, 16)
-REG32(GEVNTCOUNT_2, 0x32c)
-    FIELD(GEVNTCOUNT_2, EVNT_HANDLER_BUSY, 31, 1)
-    FIELD(GEVNTCOUNT_2, RESERVED_30_16, 16, 15)
-    FIELD(GEVNTCOUNT_2, EVNTCOUNT, 0, 16)
-REG32(GEVNTADRLO_3, 0x330)
-REG32(GEVNTADRHI_3, 0x334)
-REG32(GEVNTSIZ_3, 0x338)
-    FIELD(GEVNTSIZ_3, EVNTINTRPTMASK, 31, 1)
-    FIELD(GEVNTSIZ_3, RESERVED_30_16, 16, 15)
-    FIELD(GEVNTSIZ_3, EVENTSIZ, 0, 16)
-REG32(GEVNTCOUNT_3, 0x33c)
-    FIELD(GEVNTCOUNT_3, EVNT_HANDLER_BUSY, 31, 1)
-    FIELD(GEVNTCOUNT_3, RESERVED_30_16, 16, 15)
-    FIELD(GEVNTCOUNT_3, EVNTCOUNT, 0, 16)
-REG32(GHWPARAMS8, 0x500)
-REG32(GTXFIFOPRIDEV, 0x510)
-    FIELD(GTXFIFOPRIDEV, RESERVED_31_N, 6, 26)
-    FIELD(GTXFIFOPRIDEV, GTXFIFOPRIDEV, 0, 6)
-REG32(GTXFIFOPRIHST, 0x518)
-    FIELD(GTXFIFOPRIHST, RESERVED_31_16, 3, 29)
-    FIELD(GTXFIFOPRIHST, GTXFIFOPRIHST, 0, 3)
-REG32(GRXFIFOPRIHST, 0x51c)
-    FIELD(GRXFIFOPRIHST, RESERVED_31_16, 3, 29)
-    FIELD(GRXFIFOPRIHST, GRXFIFOPRIHST, 0, 3)
-REG32(GDMAHLRATIO, 0x524)
-    FIELD(GDMAHLRATIO, RESERVED_31_13, 13, 19)
-    FIELD(GDMAHLRATIO, HSTRXFIFO, 8, 5)
-    FIELD(GDMAHLRATIO, RESERVED_7_5, 5, 3)
-    FIELD(GDMAHLRATIO, HSTTXFIFO, 0, 5)
-REG32(GFLADJ, 0x530)
-    FIELD(GFLADJ, GFLADJ_REFCLK_240MHZDECR_PLS1, 31, 1)
-    FIELD(GFLADJ, GFLADJ_REFCLK_240MHZ_DECR, 24, 7)
-    FIELD(GFLADJ, GFLADJ_REFCLK_LPM_SEL, 23, 1)
-    FIELD(GFLADJ, RESERVED_22, 22, 1)
-    FIELD(GFLADJ, GFLADJ_REFCLK_FLADJ, 8, 14)
-    FIELD(GFLADJ, GFLADJ_30MHZ_SDBND_SEL, 7, 1)
-    FIELD(GFLADJ, GFLADJ_30MHZ, 0, 6)
+static void dwc3_device_event(DWC3State *s, struct dwc3_event_devt devt);
+static void dwc3_ep_event(DWC3State *s, int epid,
+                          struct dwc3_event_depevt depevt);
+static void dwc3_event(DWC3State *s, union dwc3_event event, int v);
+static void dwc3_ep_run(DWC3State *s, DWC3Endpoint *ep);
 
-#define DWC3_GLOBAL_OFFSET 0xC100
-static void reset_csr(DWC3State * s)
+static inline dma_addr_t dwc3_addr64(uint32_t low, uint32_t high)
 {
-    int i = 0;
-    /*
-     * We reset all CSR regs except GCTL, GUCTL, GSTS, GSNPSID, GGPIO, GUID,
-     * GUSB2PHYCFGn registers and GUSB3PIPECTLn registers. We will skip PHY
-     * register as we don't implement them.
-     */
-    for (i = 0; i < DWC3_USB_R_MAX; i++) {
-        switch (i) {
-        case R_GCTL:
+    if (sizeof(dma_addr_t) == 4) {
+        return low;
+    } else {
+        return low | (((dma_addr_t)high << 16) << 16);
+    }
+}
+
+static int dwc3_packet_find_epid(DWC3State *s, USBPacket *p)
+{
+    if (p->ep->nr == 0) {
+        switch (p->pid) {
+        case USB_TOKEN_SETUP:
+        case USB_TOKEN_OUT:
+            return 0;
             break;
-        case R_GSTS:
-            break;
-        case R_GSNPSID:
-            break;
-        case R_GGPIO:
-            break;
-        case R_GUID:
-            break;
-        case R_GUCTL:
-            break;
-        case R_GHWPARAMS0...R_GHWPARAMS7:
-            break;
-        case R_GHWPARAMS8:
+        case USB_TOKEN_IN:
+            return 1;
             break;
         default:
-            register_reset(&s->regs_info[i]);
+            g_assert_not_reached();
             break;
         }
     }
 
-    xhci_sysbus_reset(DEVICE(&s->sysbus_xhci));
+    for (int i = 0; i < DWC3_NUM_EPS; i++) {
+        if (s->eps[i].uep == p->ep) {
+            return i;
+        }
+    }
+    return -1;
 }
 
-static void usb_dwc3_gctl_postw(RegisterInfo *reg, uint64_t val64)
+static void dwc3_update_irq(DWC3State *s)
 {
-    DWC3State *s = DWC3_USB(reg->opaque);
-
-    if (ARRAY_FIELD_EX32(s->regs, GCTL, CORESOFTRESET)) {
-        reset_csr(s);
+    int ip = 0;
+    for (int i = 0; i < s->numintrs; i++) {
+        int level = 1;
+        level &= !(s->gevntsiz(i) & GEVNTSIZ_EVNTINTRPTMASK);
+        level &= (s->intrs[i].count > 0);
+        qemu_set_irq(s->sysbus_xhci.irq[i], level);
+        ip |= level;
+    }
+    if (ip) {
+        s->gsts |= GSTS_DEVICE_IP;
+    } else {
+        s->gsts &= ~GSTS_DEVICE_IP;
     }
 }
 
-static void usb_dwc3_guid_postw(RegisterInfo *reg, uint64_t val64)
+static bool dwc3_host_intr_raise(XHCIState *xhci, int n, bool level)
 {
-    DWC3State *s = DWC3_USB(reg->opaque);
+    XHCISysbusState *xhci_sysbus = container_of(xhci, XHCISysbusState, xhci);
+    DWC3State *s = container_of(xhci_sysbus, DWC3State, sysbus_xhci);
+    bool host_ip = false;
 
-    s->regs[R_GUID] = s->cfg.dwc_usb3_user;
+    s->host_intr_state[n] = level;
+    for (int i = 0; i < DWC3_NUM_INTRS; i++) {
+        if (s->host_intr_state[i]) {
+            host_ip = true;
+            break;
+        }
+    }
+    if (host_ip) {
+        s->gsts |= GSTS_HOST_IP;
+    } else {
+        s->gsts &= ~GSTS_HOST_IP;
+    }
+    qemu_set_irq(xhci_sysbus->irq[n], level);
+
+    return false;
 }
 
-static const RegisterAccessInfo usb_dwc3_regs_info[] = {
-    {   .name = "GSBUSCFG0",  .addr = A_GSBUSCFG0,
-        .ro = 0xf300,
-        .unimp = 0xffffffff,
-    },{ .name = "GSBUSCFG1",  .addr = A_GSBUSCFG1,
-        .reset = 0x300,
-        .ro = 0xffffe0ff,
-        .unimp = 0xffffffff,
-    },{ .name = "GTXTHRCFG",  .addr = A_GTXTHRCFG,
-        .ro = 0xd000ffff,
-        .unimp = 0xffffffff,
-    },{ .name = "GRXTHRCFG",  .addr = A_GRXTHRCFG,
-        .ro = 0xd007e000,
-        .unimp = 0xffffffff,
-    },{ .name = "GCTL",  .addr = A_GCTL,
-        .reset = 0x30c13004, .post_write = usb_dwc3_gctl_postw,
-    },{ .name = "GPMSTS",  .addr = A_GPMSTS,
-        .ro = 0xfffffff,
-        .unimp = 0xffffffff,
-    },{ .name = "GSTS",  .addr = A_GSTS,
-        .reset = 0x7e800000,
-        .ro = 0xffffffcf,
-        .w1c = 0x30,
-        .unimp = 0xffffffff,
-    },{ .name = "GUCTL1",  .addr = A_GUCTL1,
-        .reset = 0x198a,
-        .ro = 0x7800,
-        .unimp = 0xffffffff,
-    },{ .name = "GSNPSID",  .addr = A_GSNPSID,
-        .reset = 0x5533330a,
-        .ro = 0xffffffff,
-    },{ .name = "GGPIO",  .addr = A_GGPIO,
-        .ro = 0xffff,
-        .unimp = 0xffffffff,
-    },{ .name = "GUID",  .addr = A_GUID,
-        .reset = 0x12345678, .post_write = usb_dwc3_guid_postw,
-    },{ .name = "GUCTL",  .addr = A_GUCTL,
-        .reset = 0x0c808010,
-        .ro = 0x1c8000,
-        .unimp = 0xffffffff,
-    },{ .name = "GBUSERRADDRLO",  .addr = A_GBUSERRADDRLO,
-        .ro = 0xffffffff,
-    },{ .name = "GBUSERRADDRHI",  .addr = A_GBUSERRADDRHI,
-        .ro = 0xffffffff,
-    },{ .name = "GHWPARAMS0",  .addr = A_GHWPARAMS0,
-        .ro = 0xffffffff,
-    },{ .name = "GHWPARAMS1",  .addr = A_GHWPARAMS1,
-        .ro = 0xffffffff,
-    },{ .name = "GHWPARAMS2",  .addr = A_GHWPARAMS2,
-        .ro = 0xffffffff,
-    },{ .name = "GHWPARAMS3",  .addr = A_GHWPARAMS3,
-        .ro = 0xffffffff,
-    },{ .name = "GHWPARAMS4",  .addr = A_GHWPARAMS4,
-        .ro = 0xffffffff,
-    },{ .name = "GHWPARAMS5",  .addr = A_GHWPARAMS5,
-        .ro = 0xffffffff,
-    },{ .name = "GHWPARAMS6",  .addr = A_GHWPARAMS6,
-        .ro = 0xffffffff,
-    },{ .name = "GHWPARAMS7",  .addr = A_GHWPARAMS7,
-        .ro = 0xffffffff,
-    },{ .name = "GDBGFIFOSPACE",  .addr = A_GDBGFIFOSPACE,
-        .reset = 0xa0000,
-        .ro = 0xfffffe00,
-        .unimp = 0xffffffff,
-    },{ .name = "GUCTL2",  .addr = A_GUCTL2,
-        .reset = 0x40d,
-        .ro = 0x2000,
-        .unimp = 0xffffffff,
-    },{ .name = "GUSB2PHYCFG",  .addr = A_GUSB2PHYCFG,
-        .reset = 0x40102410,
-        .ro = 0x1e014030,
-        .unimp = 0xffffffff,
-    },{ .name = "GUSB2I2CCTL",  .addr = A_GUSB2I2CCTL,
-        .ro = 0xffffffff,
-        .unimp = 0xffffffff,
-    },{ .name = "GUSB2PHYACC_ULPI",  .addr = A_GUSB2PHYACC_ULPI,
-        .ro = 0xfd000000,
-        .unimp = 0xffffffff,
-    },{ .name = "GTXFIFOSIZ0",  .addr = A_GTXFIFOSIZ0,
-        .reset = 0x2c7000a,
-        .unimp = 0xffffffff,
-    },{ .name = "GTXFIFOSIZ1",  .addr = A_GTXFIFOSIZ1,
-        .reset = 0x2d10103,
-        .unimp = 0xffffffff,
-    },{ .name = "GTXFIFOSIZ2",  .addr = A_GTXFIFOSIZ2,
-        .reset = 0x3d40103,
-        .unimp = 0xffffffff,
-    },{ .name = "GTXFIFOSIZ3",  .addr = A_GTXFIFOSIZ3,
-        .reset = 0x4d70083,
-        .unimp = 0xffffffff,
-    },{ .name = "GTXFIFOSIZ4",  .addr = A_GTXFIFOSIZ4,
-        .reset = 0x55a0083,
-        .unimp = 0xffffffff,
-    },{ .name = "GTXFIFOSIZ5",  .addr = A_GTXFIFOSIZ5,
-        .reset = 0x5dd0083,
-        .unimp = 0xffffffff,
-    },{ .name = "GRXFIFOSIZ0",  .addr = A_GRXFIFOSIZ0,
-        .reset = 0x1c20105,
-        .unimp = 0xffffffff,
-    },{ .name = "GRXFIFOSIZ1",  .addr = A_GRXFIFOSIZ1,
-        .reset = 0x2c70000,
-        .unimp = 0xffffffff,
-    },{ .name = "GRXFIFOSIZ2",  .addr = A_GRXFIFOSIZ2,
-        .reset = 0x2c70000,
-        .unimp = 0xffffffff,
-    },{ .name = "GEVNTADRLO_0",  .addr = A_GEVNTADRLO_0,
-        .unimp = 0xffffffff,
-    },{ .name = "GEVNTADRHI_0",  .addr = A_GEVNTADRHI_0,
-        .unimp = 0xffffffff,
-    },{ .name = "GEVNTSIZ_0",  .addr = A_GEVNTSIZ_0,
-        .ro = 0x7fff0000,
-        .unimp = 0xffffffff,
-    },{ .name = "GEVNTCOUNT_0",  .addr = A_GEVNTCOUNT_0,
-        .ro = 0x7fff0000,
-        .unimp = 0xffffffff,
-    },{ .name = "GEVNTADRLO_1",  .addr = A_GEVNTADRLO_1,
-        .unimp = 0xffffffff,
-    },{ .name = "GEVNTADRHI_1",  .addr = A_GEVNTADRHI_1,
-        .unimp = 0xffffffff,
-    },{ .name = "GEVNTSIZ_1",  .addr = A_GEVNTSIZ_1,
-        .ro = 0x7fff0000,
-        .unimp = 0xffffffff,
-    },{ .name = "GEVNTCOUNT_1",  .addr = A_GEVNTCOUNT_1,
-        .ro = 0x7fff0000,
-        .unimp = 0xffffffff,
-    },{ .name = "GEVNTADRLO_2",  .addr = A_GEVNTADRLO_2,
-        .unimp = 0xffffffff,
-    },{ .name = "GEVNTADRHI_2",  .addr = A_GEVNTADRHI_2,
-        .unimp = 0xffffffff,
-    },{ .name = "GEVNTSIZ_2",  .addr = A_GEVNTSIZ_2,
-        .ro = 0x7fff0000,
-        .unimp = 0xffffffff,
-    },{ .name = "GEVNTCOUNT_2",  .addr = A_GEVNTCOUNT_2,
-        .ro = 0x7fff0000,
-        .unimp = 0xffffffff,
-    },{ .name = "GEVNTADRLO_3",  .addr = A_GEVNTADRLO_3,
-        .unimp = 0xffffffff,
-    },{ .name = "GEVNTADRHI_3",  .addr = A_GEVNTADRHI_3,
-        .unimp = 0xffffffff,
-    },{ .name = "GEVNTSIZ_3",  .addr = A_GEVNTSIZ_3,
-        .ro = 0x7fff0000,
-        .unimp = 0xffffffff,
-    },{ .name = "GEVNTCOUNT_3",  .addr = A_GEVNTCOUNT_3,
-        .ro = 0x7fff0000,
-        .unimp = 0xffffffff,
-    },{ .name = "GHWPARAMS8",  .addr = A_GHWPARAMS8,
-        .ro = 0xffffffff,
-    },{ .name = "GTXFIFOPRIDEV",  .addr = A_GTXFIFOPRIDEV,
-        .ro = 0xffffffc0,
-        .unimp = 0xffffffff,
-    },{ .name = "GTXFIFOPRIHST",  .addr = A_GTXFIFOPRIHST,
-        .ro = 0xfffffff8,
-        .unimp = 0xffffffff,
-    },{ .name = "GRXFIFOPRIHST",  .addr = A_GRXFIFOPRIHST,
-        .ro = 0xfffffff8,
-        .unimp = 0xffffffff,
-    },{ .name = "GDMAHLRATIO",  .addr = A_GDMAHLRATIO,
-        .ro = 0xffffe0e0,
-        .unimp = 0xffffffff,
-    },{ .name = "GFLADJ",  .addr = A_GFLADJ,
-        .reset = 0xc83f020,
-        .rsvd = 0x40,
-        .ro = 0x400040,
-        .unimp = 0xffffffff,
+#ifdef DEBUG_DWC3
+static void dwc3_td_dump(DWC3Transfer *xfer)
+{
+    DWC3BufferDesc *desc;
+    int k = 0;
+
+    DPRINTF("Dumping td 0x%x (0x%llx):\n", xfer->rsc_idx, xfer->tdaddr);
+    if (QTAILQ_EMPTY(&xfer->buffers)) {
+        DPRINTF("<empty>\n");
+        return;
     }
+
+    (void)TRBControlType_names;
+    QTAILQ_FOREACH(desc, &xfer->buffers, queue) {
+        DPRINTF("Buffer Desc %d:\n", ++k);
+        for (int i = 0; i < desc->count; i++) {
+            DPRINTF("\tTRB %d @ 0x%llx:\n", i, desc->trbs[i].addr);
+            DPRINTF("\t\tbp: 0x%llx\n", desc->trbs[i].bp);
+            DPRINTF("\t\tsize: 0x%x\n", desc->trbs[i].size);
+            DPRINTF("\t\tcontrol: 0x%x (%s %s %s %s %s %s %s sid: %d)\n",
+                    desc->trbs[i].ctrl,
+                    (desc->trbs[i].ctrl & TRB_CTRL_HWO) ? "HWO": "",
+                    (desc->trbs[i].ctrl & TRB_CTRL_LST) ? "LST": "",
+                    (desc->trbs[i].ctrl & TRB_CTRL_CHN) ? "CHN": "",
+                    (desc->trbs[i].ctrl & TRB_CTRL_CSP) ? "CSP": "",
+                    TRBControlType_names[TRB_CTRL_TRBCTL(desc->trbs[i].ctrl)],
+                    (desc->trbs[i].ctrl & TRB_CTRL_ISP_IMI) ? "ISP_IMI": "",
+                    (desc->trbs[i].ctrl & TRB_CTRL_IOC) ? "IOC": "",
+                    TRB_CTRL_SID_SOFN(desc->trbs[i].ctrl));
+        }
+    }
+}
+#endif
+
+static int dwc3_bd_length(DWC3State *s, dma_addr_t tdaddr)
+{
+    struct dwc3_trb trb = { 0 };
+    int length = 0;
+
+    while (1) {
+        if (dma_memory_read(&s->dma_as, tdaddr, &trb, sizeof(trb),
+                        MEMTXATTRS_UNSPECIFIED) != MEMTX_OK) {
+            qemu_log_mask(LOG_GUEST_ERROR, "%s: failed to read trb\n", __func__);
+            return 0;
+        }
+        if (!(trb.ctrl & TRB_CTRL_HWO)) {
+            return -length;
+        }
+
+        if (TRB_CTRL_TRBCTL(trb.ctrl) == TRBCTL_LINK_TRB) {
+            return length;
+        }
+        length++;
+        tdaddr += sizeof(trb);
+        if (trb.ctrl & TRB_CTRL_LST) {
+            return -length;
+        }
+    }
+}
+
+static void dwc3_bd_map(DWC3State *s, DWC3BufferDesc *desc, USBPacket *p)
+{
+    DMADirection dir = (p->pid == USB_TOKEN_IN ? DMA_DIRECTION_TO_DEVICE :
+                                                 DMA_DIRECTION_FROM_DEVICE);
+    void *mem;
+    int i;
+    bool faulted = false;
+
+    if (desc->mapped) {
+        return;
+    }
+    desc->dir = dir;
+    for (i = 0; i < desc->sgl.nsg && !faulted; i++) {
+        dma_addr_t base = desc->sgl.sg[i].base;
+        dma_addr_t len = desc->sgl.sg[i].len;
+
+        while (len) {
+            dma_addr_t xlen = len;
+            mem = dma_memory_map(desc->sgl.as, base, &xlen, dir,
+                                 MEMTXATTRS_UNSPECIFIED);
+            if (!mem) {
+                 faulted = true;
+                 s->gbuserraddrlo = base;
+                 s->gbuserraddrhi = base >> 32;
+                 break;
+            }
+            if (xlen > len) {
+                xlen = len;
+            }
+            qemu_iovec_add(&desc->iov, mem, xlen);
+            len -= xlen;
+            base += xlen;
+        }
+    }
+    desc->mapped = true;
+    desc->actual_length = 0;
+}
+
+static void dwc3_bd_unmap(DWC3State *s, DWC3BufferDesc *desc)
+{
+    desc->mapped = false;
+    for (int i = 0; i < desc->iov.niov; i++) {
+        if (desc->iov.iov[i].iov_base) {
+            dma_memory_unmap(&s->dma_as, desc->iov.iov[i].iov_base,
+                             desc->iov.iov[i].iov_len, desc->dir,
+                             0);
+            desc->iov.iov[i].iov_base = 0;
+        }
+    }
+}
+
+static bool dwc3_bd_writeback(DWC3State *s, DWC3BufferDesc *desc,
+                              USBPacket *p, bool buserr)
+{
+    int i = 0;
+    int j = 0;
+    int length = desc->actual_length;
+    int unmap_length = desc->actual_length;
+    struct dwc3_event_depevt event = { .endpoint_number = desc->epid };
+    USBPacket *next_p = QTAILQ_NEXT(p, queue);
+    bool setupPending = (next_p && next_p->pid == USB_TOKEN_SETUP);
+    bool short_packet = p->pid != USB_TOKEN_IN &&
+                        (usb_packet_size(p) % p->ep->max_packet_size != 0 ||
+                         usb_packet_size(p) == 0);
+
+    while (j < desc->iov.niov && unmap_length > 0) {
+        int access_len = desc->iov.iov[j].iov_len;
+        if (access_len > unmap_length) {
+            access_len = unmap_length;
+        }
+
+        if (desc->iov.iov[j].iov_base) {
+            dma_memory_unmap(&s->dma_as, desc->iov.iov[j].iov_base,
+                             desc->iov.iov[j].iov_len, desc->dir,
+                             access_len);
+            desc->iov.iov[j].iov_base = 0;
+        }
+        unmap_length -= access_len;
+        j++;
+    }
+
+    while (i < desc->count && event.endpoint_event != DEPEVT_XFERCOMPLETE) {
+        DWC3TRB *trb = &desc->trbs[i];
+        if (trb->ctrl & TRB_CTRL_HWO) {
+            if (length > trb->size) {
+                trb->size = 0;
+                length -= trb->size;
+            } else {
+                trb->size -= length;
+                length = 0;
+            }
+
+            if (setupPending) {
+                trb->trbsts = TRBSTS_SETUP_PENDING;
+            } else {
+                trb->trbsts = TRBSTS_OK;
+            }
+
+            trb->ctrl &= ~TRB_CTRL_HWO;
+
+            dma_memory_write(&s->dma_as, trb->addr + 0x8, &trb->status,
+                             sizeof(trb->status), MEMTXATTRS_UNSPECIFIED);
+            dma_memory_write(&s->dma_as, trb->addr + 0xc, &trb->ctrl,
+                             sizeof(trb->ctrl), MEMTXATTRS_UNSPECIFIED);
+            if (length <= 0 && buserr) {
+                event.status |= DEPEVT_STATUS_BUSERR;
+            }
+            if (p->pid == USB_TOKEN_IN) {
+                /* IN token */
+                trb_complete:
+                if (trb->size == 0) {
+                    if (trb->ctrl & TRB_CTRL_LST) {
+                        event.endpoint_event = DEPEVT_XFERCOMPLETE;
+                        event.status |= DEPEVT_STATUS_LST;
+                        if (trb->ctrl & TRB_CTRL_IOC) {
+                            event.status |= DEPEVT_STATUS_IOC;
+                        }
+                    } else if (trb->ctrl & TRB_CTRL_IOC) {
+                        event.endpoint_event = DEPEVT_XFERINPROGRESS;
+                        event.status |= DEPEVT_STATUS_IOC;
+                    }
+                    dwc3_ep_event(s, desc->epid, event);
+                }
+            } else {
+                /* OUT token */
+                if (length <= 0 && short_packet) {
+                    event.status |= DEPEVT_STATUS_SHORT;
+                    if (trb->ctrl & TRB_CTRL_CSP) {
+                        bool ioc = trb->ctrl & TRB_CTRL_IOC;
+                        bool isp = trb->ctrl & TRB_CTRL_ISP_IMI;
+                        switch (trb->ctrl & (TRB_CTRL_CHN | TRB_CTRL_LST)) {
+                        case TRB_CTRL_LST:
+                            goto short_complete;
+                            break;
+                        case TRB_CTRL_CHN: {
+                            for (int j = 0; j < desc->count; j++) {
+                                ioc |= (desc->trbs[j].ctrl & TRB_CTRL_IOC) != 0;
+                                isp |= (desc->trbs[j].ctrl & TRB_CTRL_ISP_IMI) != 0;
+                            }
+                            QEMU_FALLTHROUGH;
+                        }
+                        case 0:
+                            if (!ioc && !isp) {
+                                break;
+                            }
+                            event.endpoint_event = DEPEVT_XFERINPROGRESS;
+                            if (ioc) {
+                                event.status |= DEPEVT_STATUS_IOC;
+                            }
+                            dwc3_ep_event(s, desc->epid, event);
+                            break;
+                        default:
+                            g_assert_not_reached();
+                            break;
+                        }
+                        } else {
+                            /* no CSP */
+                            short_complete:
+                            event.endpoint_event = DEPEVT_XFERCOMPLETE;
+                            if (trb->ctrl & TRB_CTRL_LST) {
+                                event.status |= DEPEVT_STATUS_LST;
+                            }
+                            if (trb->ctrl & TRB_CTRL_IOC) {
+                                event.status |= DEPEVT_STATUS_IOC;
+                            }
+                            dwc3_ep_event(s, desc->epid, event);
+                        }
+                    } else if (!short_packet) {
+                        goto trb_complete;
+                    }
+            }
+        }
+        if (length <= 0) {
+            break;
+        }
+        i++;
+    }
+    return p->actual_length == usb_packet_size(p) ||
+           desc->actual_length % p->ep->max_packet_size != 0;
+           //desc->trbs[i - 1].size < p->ep->max_packet_size;
+}
+
+static int dwc3_bd_copy(DWC3State *s, DWC3BufferDesc *desc, USBPacket *p)
+{
+    g_autofree void *buffer = NULL;
+    int packet_left = usb_packet_size(p) - p->actual_length;
+    int desc_left = desc->length - desc->actual_length;
+    int actual_xfer = 0;
+    int xfer_size;
+
+    //assert(p->actual_length == 0);
+
+    dwc3_bd_map(s, desc, p);
+
+    xfer_size = packet_left;
+    if (xfer_size > desc_left) {
+        xfer_size = desc_left;
+    }
+
+    buffer = g_malloc0(xfer_size);
+    if (p->pid == USB_TOKEN_IN) {
+        #if 1
+        DPRINTF("%s IN Transfer 0x%x on EP %d to 0x%llx\n", __func__,
+                xfer_size, desc->epid, desc->trbs[0].bp);
+        DPRINTF("%s: p: 0x%x/0x%lx\n", __func__, p->actual_length,
+                usb_packet_size(p));
+        #endif
+        actual_xfer = qemu_iovec_to_buf(&desc->iov, desc->actual_length,
+                                        buffer, xfer_size);
+        usb_packet_copy(p, buffer, xfer_size);
+
+        #if 0
+        #ifdef DEBUG_DWC3
+        qemu_hexdump(stderr, __func__, buffer, xfer_size);
+        #endif
+        #endif
+    } else {
+        #if 1
+        DPRINTF("%s OUT Transfer 0x%x on EP %d to 0x%llx\n", __func__,
+                xfer_size, desc->epid, desc->trbs[0].bp);
+        DPRINTF("%s: p: 0x%x/0x%lx\n", __func__, p->actual_length,
+                usb_packet_size(p));
+        #endif
+        usb_packet_copy(p, buffer, xfer_size);
+        actual_xfer = qemu_iovec_from_buf(&desc->iov, desc->actual_length,
+                                          buffer, xfer_size);
+
+        #if 0
+        #ifdef DEBUG_DWC3
+        qemu_hexdump(stderr, __func__, buffer, xfer_size);
+        #endif
+        #endif
+    }
+
+    desc->actual_length += actual_xfer;
+    if (desc->length - desc->actual_length > 0 &&
+        packet_left > 0 &&
+        packet_left % p->ep->max_packet_size == 0) {
+        p->status = USB_RET_SUCCESS;
+        return xfer_size;
+    }
+
+    desc->ended = true;
+    if (dwc3_bd_writeback(s, desc, p, actual_xfer < xfer_size)) {
+        p->status = USB_RET_SUCCESS;
+    } else {
+        struct dwc3_event_depevt event = { .endpoint_number = desc->epid,
+                                           .endpoint_event = DEPEVT_XFERNOTREADY};
+        event.status |= DEPEVT_STATUS_TRANSFER_ACTIVE;
+        p->status = USB_RET_ASYNC;
+        dwc3_ep_event(s, desc->epid, event);
+    }
+    dwc3_bd_unmap(s, desc);
+    return xfer_size;
+}
+
+static void dwc3_bd_free(DWC3State *s, DWC3BufferDesc *desc)
+{
+    dwc3_bd_unmap(s, desc);
+    g_free(desc->trbs);
+    qemu_iovec_destroy(&desc->iov);
+    qemu_sglist_destroy(&desc->sgl);
+    desc->trbs = NULL;
+    g_free(desc);
+}
+
+static void dwc3_td_free_buffers(DWC3State *s, DWC3Transfer *xfer) {
+    while (!QTAILQ_EMPTY(&xfer->buffers)) {
+        DWC3BufferDesc *desc = QTAILQ_FIRST(&xfer->buffers);
+        QTAILQ_REMOVE(&xfer->buffers, desc, queue);
+        xfer->count--;
+        dwc3_bd_free(s, desc);
+    }
+}
+
+static void dwc3_td_free(DWC3State *s, DWC3Transfer *xfer) {
+    dwc3_td_free_buffers(s, xfer);
+    g_free(xfer);
+}
+
+static void dwc3_td_fetch(DWC3State *s, DWC3Transfer *xfer, dma_addr_t tdaddr)
+{
+    struct dwc3_trb trb = { 0 };
+    int count;
+    bool ended = false;
+
+    do {
+        DWC3BufferDesc *desc;
+
+        count = dwc3_bd_length(s, tdaddr);
+        if (count < 0) {
+            ended = true;
+            count = -count;
+        }
+        if (count == 0) {
+            ended = true;
+            break;
+        }
+
+        desc = g_new0(DWC3BufferDesc, 1);
+        desc->epid = xfer->epid;
+        desc->count = 0;
+        desc->trbs = g_new0(DWC3TRB, count);
+        desc->length = 0;
+        qemu_iovec_init(&desc->iov, 1);
+        qemu_sglist_init(&desc->sgl, DEVICE(s), 1, &s->dma_as);
+        QTAILQ_INSERT_TAIL(&xfer->buffers, desc, queue);
+        xfer->count++;
+
+        do {
+            dma_memory_read(&s->dma_as, tdaddr, &trb, sizeof(trb),
+                            MEMTXATTRS_UNSPECIFIED);
+
+            if (!(trb.ctrl & TRB_CTRL_HWO)) {
+                ended = true;
+                break;
+            }
+
+            if (TRB_CTRL_TRBCTL(trb.ctrl) == TRBCTL_LINK_TRB) {
+                DWC3BufferDesc *d;
+
+                tdaddr = dwc3_addr64(trb.bpl, trb.bph);
+
+                if (desc->trbs[0].addr <= tdaddr &&
+                    tdaddr <= desc->trbs[0].addr + sizeof(trb) * (count + 1)) {
+                    /* self loop */
+                    ended = true;
+                    break;
+                }
+
+                /* Multi Buffer Loops */
+                QTAILQ_FOREACH(d, &xfer->buffers, queue) {
+                    g_assert(d->count > 0 && d->trbs);
+                    if (d->trbs[0].addr <= tdaddr &&
+                        d->trbs[d->count - 1].addr <= tdaddr) {
+                        ended = true;
+                        break;
+                    }
+                }
+                break;
+            }
+            if (desc->count >= count) {
+                /* We don't include the link TRB in the desc count */
+                ended = true;
+                break;
+            }
+            desc->trbs[desc->count].bp = dwc3_addr64(trb.bpl, trb.bph);
+            desc->trbs[desc->count].addr = tdaddr;
+            desc->trbs[desc->count].status = trb.status;
+            desc->trbs[desc->count].ctrl = trb.ctrl;
+            qemu_sglist_add(&desc->sgl, desc->trbs[desc->count].bp,
+                            desc->trbs[desc->count].size);
+            desc->length += desc->trbs[desc->count].size;
+            desc->count++;
+
+            tdaddr += sizeof(trb);
+
+            if (trb.ctrl & TRB_CTRL_LST) {
+                tdaddr = -1;
+                trb.ctrl &= ~TRB_CTRL_CHN;
+                ended = true;
+                break;
+            }
+        } while (!ended);
+    } while (!ended && xfer->count < 256);
+    xfer->tdaddr = tdaddr;
+    #ifdef DEBUG_DWC3
+    #if 0
+    dwc3_td_dump(xfer);
+    #endif
+    #endif
+}
+
+static DWC3Transfer *dwc3_xfer_alloc(DWC3State *s, int epid, dma_addr_t tdaddr)
+{
+    DWC3Transfer *xfer = g_new0(DWC3Transfer, 1);
+
+    xfer->epid = epid;
+    xfer->tdaddr = tdaddr;
+    QTAILQ_INIT(&xfer->buffers);
+    xfer->count = 0;
+    xfer->rsc_idx = tdaddr & 0x7f;
+
+    dwc3_td_fetch(s, xfer, tdaddr);
+    return xfer;
+}
+
+static void dwc3_write_event(DWC3State *s, union dwc3_event event, int v)
+{
+    DWC3EventRing *intr = &s->intrs[v];
+    dma_addr_t ring_base;
+    dma_addr_t ev_addr;
+
+    ring_base = dwc3_addr64(s->gevntadr_lo(v), s->gevntadr_hi(v));
+    intr = &s->intrs[v];
+
+    ev_addr = ring_base + qatomic_fetch_add(&intr->head, EVENT_SIZE) % intr->size;
+    dma_memory_write(&s->dma_as, ev_addr, &event.raw, EVENT_SIZE,
+                     MEMTXATTRS_UNSPECIFIED);
+    smp_wmb();
+    qatomic_add(&intr->count, EVENT_SIZE);
+    smp_wmb();
+}
+
+static void dwc3_event(DWC3State *s, union dwc3_event event, int v)
+{
+    DWC3EventRing *intr;
+
+    if (v >= s->numintrs) {
+        qemu_log_mask(LOG_GUEST_ERROR, "%s: ring nr out of range (%d >= %d)\n",
+                      __func__, v, s->numintrs);
+        return;
+    }
+    intr = &s->intrs[v];
+
+    if (intr->count + 1 >= intr->size) {
+        qemu_log_mask(LOG_GUEST_ERROR, "%s: ring nr %d is full. "
+                      "Dropping event.\n", __func__, v);
+        return;
+    } else if (intr->count + 2 == intr->size) {
+        union dwc3_event overflow = { .devt = {1, 0, DEVT_EVNTOVERFLOW}};
+        if (event.raw != overflow.raw) {
+            dwc3_device_event(s, overflow.devt);
+            qemu_log_mask(LOG_GUEST_ERROR, "%s: ring nr %d is full."
+                          "Sending event overflow.\n", __func__, v);
+        }
+    } else {
+        dwc3_write_event(s, event, v);
+    }
+    dwc3_update_irq(s);
+}
+
+static void dwc3_device_event(DWC3State *s, struct dwc3_event_devt devt)
+{
+    union dwc3_event event = {.devt = devt};
+    int v = DCFG_INTRNUM_GET(s->dcfg);
+    if (s->devten & (1 << (devt.type))) {
+        dwc3_event(s, event, v);
+    }
+}
+
+static void dwc3_ep_event(DWC3State *s, int epid, struct dwc3_event_depevt depevt)
+{
+    union dwc3_event event = {.depevt = depevt};
+    DWC3Endpoint *ep = &s->eps[epid];
+    int v = ep->intrnum;
+    DPRINTF("%s: epid: %d ev: %d raw: 0x%x\n",
+            __func__, epid, depevt.endpoint_event, event.raw);
+    if (depevt.endpoint_event == DEPEVT_XFERNOTREADY) {
+        if (ep->not_ready) {
+            return;
+        }
+        ep->not_ready = true;
+    }
+    if (ep->event_en & (1 << (depevt.endpoint_event))) {
+        dwc3_event(s, event, v);
+    }
+}
+
+static void dwc3_dcore_reset(DWC3State *s)
+{
+    USBDevice *udev = USB_DEVICE(&s->device);
+
+    /* Clear Interrupts */
+    for (int i = 0; i < s->numintrs; i++) {
+        s->intrs[i].size = 0;
+        s->intrs[i].head = 0;
+        s->intrs[i].count = 0;
+    }
+
+    /* Clearing MMR */
+    s->gsbuscfg0 = (1 << 3) | (1 << 2) | (1 << 1);
+    s->gsbuscfg1 = (0xf << 8);
+    s->gtxthrcfg = 0;
+    s->grxthrcfg = 0;
+    s->gctl = GCTL_PWRDNSCALE(0x4b0) |
+              GCTL_PRTCAPDIR(GCTL_PRTCAP_OTG);
+    s->guctl = (1 << 15) | (0x10 << 0);
+    s->gbuserraddrlo = 0;
+    s->gbuserraddrhi = 0;
+    s->gsts &= ~GSTS_BUS_ERR_ADDR_VLD;
+    s->gprtbimaplo = 0;
+    s->gprtbimaphi = 0;
+    s->gprtbimap_hs_lo = 0;
+    s->gprtbimap_hs_hi = 0;
+    s->gprtbimap_fs_lo = 0;
+    s->gprtbimap_fs_hi = 0;
+    s->ghwparams0 = 0x40204048 | (GHWPARAMS0_MODE_DRD);
+    s->ghwparams1 = 0x222493b;
+    s->ghwparams2 = 0x12345678;
+    s->ghwparams3 = (0x20 << 23) | GHWPARAMS3_NUM_IN_EPS(DWC3_NUM_EPS >> 1)
+                    | GHWPARAMS3_NUM_EPS(DWC3_NUM_EPS) | (0x2 << 6) | (0x3 << 2)
+                    | (0x1 << 0);
+    s->ghwparams4 = 0x47822004;
+    s->ghwparams5 = 0x4202088;
+    s->ghwparams6 = 0x7850c20;
+    s->ghwparams7 = 0x0;
+    s->ghwparams8 = 0x478;
+    memset(s->gtxfifosiz, 0, sizeof(s->gtxfifosiz));
+    memset(s->grxfifosiz, 0, sizeof(s->grxfifosiz));
+    memset(s->gevntregs, 0, sizeof(s->gevntregs));
+    s->dgcmdpar = 0;
+    s->dgcmd = 0;
+    s->dalepena = 0;
+    memset(s->depcmdreg, 0, sizeof(s->depcmdreg));
+
+    /* Terminate all USB transaction */
+    for (int i = 0; i < DWC3_NUM_EPS; i++) {
+        DWC3Endpoint *ep = &s->eps[i];
+        USBPacket *p;
+
+        if (ep->xfer) {
+            dwc3_td_free(s, ep->xfer);
+            ep->xfer = NULL;
+        }
+
+        if (ep->uep) {
+            p = QTAILQ_FIRST(&ep->uep->queue);
+            if (p) {
+                p->status = USB_RET_IOERROR;
+                usb_packet_complete(udev, p);
+            }
+        }
+        memset(ep, 0, sizeof(*ep));
+        ep->epid = i;
+    }
+    usb_ep_reset(udev);
+}
+
+static void dwc3_reset_enter(Object *obj, ResetType type)
+{
+    DWC3Class *c = DWC3_USB_GET_CLASS(obj);
+    DWC3State *s = DWC3_USB(obj);
+
+    if (c->parent_phases.enter) {
+        c->parent_phases.enter(obj, type);
+    }
+
+    dwc3_dcore_reset(s);
+    s->gsts = GSTS_CURMOD_DRD;
+    s->gsnpsid = GSNPSID_REVISION_180A;
+    s->ggpio = 0;
+    s->guid = 0;
+    s->gusb2phycfg = GUSB2PHYCFG_SUSPHY;
+    s->gusb2phyacc = 0;
+    s->gusb3pipectl = (1 << 24) | (1 << 19) | (1 << 18);
+    s->dcfg = (1 << 23) | (2 << 10) | DCFG_SUPERSPEED;
+    s->dsts = DSTS_COREIDLE | DSTS_USBLNKST(LINK_STATE_SS_DIS)
+              | DSTS_RXFIFOEMPTY | DSTS_HIGHSPEED;
+}
+
+static void dwc3_reset_hold(Object *obj)
+{
+    DWC3Class *c = DWC3_USB_GET_CLASS(obj);
+    DWC3State *s = DWC3_USB(obj);
+
+    if (c->parent_phases.hold) {
+        c->parent_phases.hold(obj);
+    }
+
+    dwc3_update_irq(s);
+}
+
+static void dwc3_reset_exit(Object *obj)
+{
+    DWC3Class *c = DWC3_USB_GET_CLASS(obj);
+    DWC3State *s = DWC3_USB(obj);
+
+    if (c->parent_phases.exit) {
+        c->parent_phases.exit(obj);
+    }
+
+    USB_DEVICE(&s->device)->addr = 0;
+}
+
+static uint64_t usb_dwc3_gevntreg_read(void *ptr, hwaddr addr, int index)
+{
+    DWC3State *s = DWC3_USB(ptr);
+    uint32_t val;
+    uint32_t *mmio;
+    uint32_t v = index >> 2;
+    DWC3EventRing *intr = &s->intrs[v];
+
+    if (addr >= GHWPARAMS8) {
+        qemu_log_mask(LOG_GUEST_ERROR, "%s: Bad offset 0x%"HWADDR_PRIx"\n",
+                      __func__, addr);
+        return 0;
+    }
+
+    mmio = &s->gevntregs[index];
+    val = *mmio;
+
+    switch (GEVNTADRLO(0) + (addr & 0xc)) {
+    case GEVNTCOUNT(0):
+        val = qatomic_read(&intr->count) & 0xffff;
+        break;
+    default:
+        break;
+    }
+
+    return val;
+}
+
+static void usb_dwc3_gevntreg_write(void *ptr, hwaddr addr, int index,
+                                    uint64_t val)
+{
+    DWC3State *s = DWC3_USB(ptr);
+    uint32_t *mmio;
+    uint32_t old;
+    uint32_t v = index >> 2;
+    DWC3EventRing *intr = &s->intrs[v];
+    int iflg = 0;
+
+    if (addr >= GHWPARAMS8) {
+        qemu_log_mask(LOG_GUEST_ERROR, "%s: Bad offset 0x%"HWADDR_PRIx"\n",
+                      __func__, addr);
+        return;
+    }
+
+    mmio = &s->gevntregs[index];
+    old = *mmio;
+
+    switch (GEVNTADRLO(0) + (addr & 0xc)) {
+    case GEVNTSIZ(0):
+        val &= (GEVNTCOUNT_EVENTSIZ_MASK | GEVNTSIZ_EVNTINTRPTMASK);
+        if ((old & GEVNTCOUNT_EVENTSIZ_MASK) != 0) {
+            val &= ~GEVNTCOUNT_EVENTSIZ_MASK;
+            val |= (old & GEVNTCOUNT_EVENTSIZ_MASK);
+        } else {
+            intr->size = val & GEVNTCOUNT_EVENTSIZ_MASK;
+        }
+        iflg = true;
+        break;
+    case GEVNTCOUNT(0): {
+        uint32_t dec = (val & 0xffff);
+        if (dec > intr->count) {
+            qatomic_set(&intr->count, 0);
+        } else {
+            qatomic_sub(&intr->count, dec);
+        }
+        iflg = true;
+        break;
+    }
+    default:
+        break;
+    }
+
+    *mmio = val;
+
+    if (iflg) {
+        dwc3_update_irq(s);
+    }
+}
+
+static uint64_t usb_dwc3_glbreg_read(void *ptr, hwaddr addr, int index)
+{
+    DWC3State *s = DWC3_USB(ptr);
+    uint32_t val;
+
+    if (addr > GHWPARAMS8) {
+        qemu_log_mask(LOG_GUEST_ERROR, "%s: Bad offset 0x%"HWADDR_PRIx"\n",
+                      __func__, addr);
+        return 0;
+    }
+
+    val = s->glbreg[index];
+
+    switch (addr) {
+    case GEVNTADRLO(0) ... GEVNTCOUNT(15):
+        val = usb_dwc3_gevntreg_read(s, addr, (addr - GEVNTADRLO(0)) >> 2);
+        break;
+    default:
+        break;
+    }
+    return val;
+}
+
+static void usb_dwc3_glbreg_write(void *ptr, hwaddr addr, int index,
+                                  uint64_t val)
+{
+    DWC3State *s = DWC3_USB(ptr);
+    uint32_t *mmio;
+    uint32_t old;
+    int iflg = 0;
+
+    if (addr > GHWPARAMS8) {
+        qemu_log_mask(LOG_GUEST_ERROR, "%s: Bad offset 0x%"HWADDR_PRIx"\n",
+                      __func__, addr);
+        return;
+    }
+
+    mmio = &s->glbreg[index];
+    old = *mmio;
+
+    switch (addr) {
+    case GCTL:
+        if (!(old & GCTL_CORESOFTRESET) &&
+            (val & GCTL_CORESOFTRESET)) {
+            qdev_reset_all_fn(s);
+        }
+        break;
+    case GSTS:
+        val &= (GSTS_CSR_TIMEOUT | GSTS_BUS_ERR_ADDR_VLD);
+        /* clearing Write to Clear bits */
+        val = old & ~val;
+        break;
+    case GSNPSID:
+    case GGPIO:
+    case GBUSERRADDR0:
+    case GBUSERRADDR1:
+    case GPRTBIMAP1:
+    case GHWPARAMS0:
+    case GHWPARAMS1:
+    case GHWPARAMS2:
+    case GHWPARAMS3:
+    case GHWPARAMS4:
+    case GHWPARAMS5:
+    case GHWPARAMS6:
+    case GHWPARAMS7:
+    case GHWPARAMS8:
+    case GPRTBIMAP_HS1:
+    case GPRTBIMAP_FS1:
+        val = old;
+        break;
+    case GPRTBIMAP0:
+    case GPRTBIMAP_HS0:
+    case GPRTBIMAP_FS0:
+        val &= (0xf << 0);
+        break;
+    case GUSB2PHYCFG(0):
+        val &= ~((1 << 7) | (1 << 5) | (1 << 3));
+        if (!(old & GUSB2PHYCFG_PHYSOFTRST) &&
+            (val & GUSB2PHYCFG_PHYSOFTRST)) {
+                /* TODO: Implement Phy Soft Reset */
+                qemu_log_mask(LOG_UNIMP, "%s: Phy Soft Reset not implemented\n",
+                              __func__);
+                break;
+            }
+        if ((old & GUSB2PHYCFG_SUSPHY) !=
+            (val & GUSB2PHYCFG_SUSPHY)) {
+                /* TODO: Implement Phy Suspend */
+                #if 0
+                qemu_log_mask(LOG_UNIMP, "%s: Phy (un)Suspend not implemented\n",
+                              __func__);
+                #endif
+                break;
+            }
+        break;
+    case GUSB2PHYACC(0):
+        val &= ~((1 << 26) | (1 << 24) | (1 << 23));
+        break;
+    case GUSB3PIPECTL(0):
+        val &= ~((3 << 15));
+        if (!(old & GUSB3PIPECTL_PHYSOFTRST) &&
+            (val & GUSB3PIPECTL_PHYSOFTRST)) {
+                /* TODO: Implement Phy Soft Reset */
+                qemu_log_mask(LOG_UNIMP, "%s: Phy Soft Reset not implemented\n",
+                              __func__);
+                break;
+            }
+        if ((old & GUSB3PIPECTL_SUSPHY) !=
+            (val & GUSB3PIPECTL_SUSPHY)) {
+                /* TODO: Implement Phy Suspend */
+                qemu_log_mask(LOG_UNIMP, "%s: Phy (un)Suspend not implemented\n",
+                              __func__);
+                break;
+            }
+        break;
+    case GEVNTADRLO(0) ... GEVNTCOUNT(15):
+        usb_dwc3_gevntreg_write(s, addr, (addr - GEVNTADRLO(0)) >> 2, val);
+        break;
+    default:
+        break;
+    }
+
+    *mmio = val;
+
+    if (iflg) {
+        dwc3_update_irq(s);
+    }
+}
+
+static uint64_t usb_dwc3_dreg_read(void *ptr, hwaddr addr, int index)
+{
+    DWC3State *s = DWC3_USB(ptr);
+    uint32_t val;
+    uint32_t *mmio;
+
+    if (addr > DALEPENA) {
+        qemu_log_mask(LOG_GUEST_ERROR, "%s: Bad offset 0x%"HWADDR_PRIx"\n",
+                      __func__, addr);
+        return 0;
+    }
+
+    mmio = &s->dreg[index];
+    val = *mmio;
+
+    switch (addr) {
+    case DCTL:
+        /* Self-clearing bits */
+        val &= ~(DCTL_CSFTRST);
+        *mmio = val;
+        break;
+    case DGCMD:
+        /* Self-clearing bits */
+        val &= ~(DGCMD_CMDACT);
+        *mmio = val;
+        break;
+    default:
+        break;
+    }
+
+    return val;
+}
+
+static void usb_dwc3_dreg_write(void *ptr, hwaddr addr, int index,
+                                uint64_t val)
+{
+    DWC3State *s = DWC3_USB(ptr);
+    USBDevice *udev = USB_DEVICE(&s->device);
+    uint32_t *mmio;
+    uint32_t old;
+    int iflg = 0;
+
+    if (addr > DALEPENA) {
+        qemu_log_mask(LOG_GUEST_ERROR, "%s: Bad offset 0x%"HWADDR_PRIx"\n",
+                      __func__, addr);
+        return;
+    }
+
+    mmio = &s->dreg[index];
+    old = *mmio;
+
+    switch (addr) {
+    case DCFG: {
+        int devaddr = DCFG_DEVADDR_GET(val);
+        if (devaddr != udev->addr) {
+            udev->addr = devaddr;
+        }
+        trace_usb_set_addr(devaddr);
+        break;
+    }
+    case DCTL:
+        if (!(old & DCTL_CSFTRST) && (val & DCTL_CSFTRST)) {
+            dwc3_dcore_reset(s);
+            iflg = true;
+        }
+
+        if (!(old & DCTL_RUN_STOP) && (val & DCTL_RUN_STOP)) {
+            /* go on bus */
+            usb_device_attach(udev, NULL);
+            s->dsts &= ~DSTS_DEVCTRLHLT;
+        }
+        if ((old & DCTL_RUN_STOP) && !(val & DCTL_RUN_STOP)) {
+            /* go off bus */
+            if (udev->attached) {
+                usb_device_detach(udev);
+            }
+            s->dsts |= DSTS_DEVCTRLHLT;
+        }
+        /* Self clearing bits */
+        val |= old & (DCTL_CSFTRST);
+        break;
+    case DSTS:
+        val = old;
+        break;
+    case DGCMD:
+        val &= ~(DGCMD_CMDSTATUS);
+        val |= (old & (DGCMD_CMDSTATUS | DGCMD_CMDACT));
+        if (!(val & DGCMD_CMDACT)) {
+            break;
+        }
+        /* TODO DGCMD */
+        switch (DGCMD_CMDTYPE_GET(val)) {
+            case DGCMD_SET_LMP:
+                qemu_log_mask(LOG_UNIMP, "%s: Set Link Function LPM is "
+                              "not implemented\n", __func__);
+                break;
+            case DGCMD_SET_PERIODIC_PAR:
+                qemu_log_mask(LOG_UNIMP, "%s: Set Periodic Parameters is "
+                              "not implemented\n", __func__);
+                break;
+            case DGCMD_XMIT_FUNCTION:
+                qemu_log_mask(LOG_UNIMP, "%s: Transmit Function Notification "
+                              "is not implemented\n", __func__);
+                break;
+            default:
+                qemu_log_mask(LOG_UNIMP, "%s: Unsupported DGCMD\n", __func__);
+                val |= (DGCMD_CMDSTATUS);
+                break;
+        }
+        if (val & DGCMD_CMDIOC) {
+            struct dwc3_event_devt ioc = {1, 0, DEVT_CMDCMPLT};
+            dwc3_device_event(s, ioc);
+        }
+        break;
+    case DALEPENA:
+        break;
+    default:
+        break;
+    }
+
+    *mmio = val;
+
+    if (iflg) {
+        dwc3_update_irq(s);
+    }
+}
+
+static uint64_t usb_dwc3_depcmdreg_read(void *ptr, hwaddr addr, int index)
+{
+    DWC3State *s = DWC3_USB(ptr);
+    uint32_t val;
+    uint32_t *mmio;
+
+    if (addr > DEPCMD(DWC3_NUM_EPS)) {
+        qemu_log_mask(LOG_GUEST_ERROR, "%s: Bad offset 0x%"HWADDR_PRIx"\n",
+                      __func__, addr);
+        return 0;
+    }
+    mmio = &s->depcmdreg[index];
+    val = *mmio;
+
+    switch (DEPCMDPAR2(0) + (addr & 0xc)) {
+    case DEPCMD(0):
+        /* Self-clearing bits */
+        val &= ~(DEPCMD_CMDACT);
+        *mmio = val;
+        break;
+    default:
+        break;
+    }
+    return val;
+}
+
+static const char *DEPCMD_names[] = {
+    [DEPCMD_CFG]                = "DEPCFG",
+    [DEPCMD_XFERCFG]            = "DEPXFERCFG",
+    [DEPCMD_GETSEQNUMBER]       = "DEPGETDSEQ",
+    [DEPCMD_SETSTALL]           = "DEPSETSTALL",
+    [DEPCMD_CLEARSTALL]         = "DEPCSTALL",
+    [DEPCMD_STARTXFER]          = "DEPSTRTXFER",
+    [DEPCMD_UPDATEXFER]         = "DEPUPDXFER",
+    [DEPCMD_ENDXFER]            = "DEPENDXFER",
+    [DEPCMD_STARTCFG]           = "DEPSTARTCFG",
 };
 
-static void usb_dwc3_reset(DeviceState *dev)
+static void usb_dwc3_depcmdreg_write(void *ptr, hwaddr addr, int index,
+                                     uint64_t val)
 {
-    DWC3State *s = DWC3_USB(dev);
-    unsigned int i;
+    DWC3State *s = DWC3_USB(ptr);
+    USBDevice *udev = USB_DEVICE(&s->device);
+    uint32_t *mmio;
+    uint32_t old;
+    int iflg = 0;
+    uint32_t epid = index >> 2;
+    DWC3Endpoint *ep = &s->eps[epid];
 
-    for (i = 0; i < ARRAY_SIZE(s->regs_info); ++i) {
-        switch (i) {
-        case R_GHWPARAMS0...R_GHWPARAMS7:
-            break;
-        case R_GHWPARAMS8:
-            break;
-        default:
-            register_reset(&s->regs_info[i]);
-        };
+    if (addr > DEPCMD(DWC3_NUM_EPS)) {
+        qemu_log_mask(LOG_GUEST_ERROR, "%s: Bad offset 0x%"HWADDR_PRIx"\n",
+                      __func__, addr);
+        return;
     }
 
-    xhci_sysbus_reset(DEVICE(&s->sysbus_xhci));
+    mmio = &s->depcmdreg[index];
+    old = *mmio;
+
+    switch (DEPCMDPAR2(0) + (addr & 0xc)) {
+    case DEPCMD(0): {
+        uint32_t par0 = s->depcmdpar0(epid);
+        uint32_t par1 = s->depcmdpar1(epid);
+        uint32_t G_GNUC_UNUSED par2 = s->depcmdpar2(epid);
+        struct dwc3_event_depevt ioc = {0, epid, DEPEVT_EPCMDCMPLT, 0, 0,
+                                        DEPCMD_CMD_GET(val) << 8};
+        val &= ~(DEPCMD_STATUS);
+        val |= (old & (DEPCMD_CMDACT));
+        if (!(val & DEPCMD_CMDACT)) {
+            if (!(val & DEPCMD_CMDIOC)
+                && DEPCMD_CMD_GET(val) == DEPCMD_UPDATEXFER) {
+                /* Special no response update? */
+                dwc3_td_fetch(s, ep->xfer, ep->xfer->tdaddr);
+                ep->not_ready = false;
+                dwc3_ep_run(s, ep);
+            }
+            break;
+        }
+        (void)DEPCMD_names;
+        #ifdef DEBUG_DWC3
+        qemu_log_mask(LOG_UNIMP, "DEPCMD: %s epid: %d "
+                                 "par2: 0x%x par1: 0x%x par0: 0x%x\n",
+                      DEPCMD_names[DEPCMD_CMD_GET(val)], epid,
+                      par2, par1, par0);
+        #endif
+        switch (DEPCMD_CMD_GET(val)) {
+        case DEPCMD_CFG: {
+            int epnum = DEPCFG_EP_NUMBER(par1);
+            if (epid == 0 || epid == 1 || (epnum >> 1) == 0) {
+                if (epnum != epid) {
+                    val |= DEPCMD_STATUS;
+                    ioc.status = 1;
+                    break;
+                }
+            }
+            ep->epnum = epnum;
+            ep->intrnum = DEPCFG_INT_NUM(par1);
+            ep->event_en = DEPCFG_EVENT_EN(par1);
+            ep->uep = usb_ep_get(udev, epnum & 1 ? USB_TOKEN_IN : USB_TOKEN_OUT,
+                                 epnum >> 1);
+            ep->uep->max_packet_size = DEPCFG_MAX_PACKET_SIZE(par0);
+            ep->uep->type = DEPCFG_EP_TYPE(par0);
+            if (DEPCFG_ACTION(par0) == DEPCFG_ACTION_INIT) {
+                ep->dseqnum = 0;
+            }
+            break;
+        }
+        case DEPCMD_XFERCFG:
+            ioc.status = DEPXFERCFG_NUMXFERRES(par0) != 1;
+            val |= (ioc.status ? DEPCMD_STATUS : 0);
+            break;
+        case DEPCMD_SETSTALL:
+            ep->stalled = true;
+            dwc3_ep_run(s, ep);
+            break;
+        case DEPCMD_CLEARSTALL:
+            if (epid == 0 || epid == 1) {
+                /* Automatically cleared upon SETUP */
+                break;
+            }
+            ep->stalled = false;
+            ep->not_ready = false;
+            ep->dseqnum = 0;
+            dwc3_ep_run(s, ep);
+            break;
+        case DEPCMD_GETSEQNUMBER:
+            ioc.parameters = ep->dseqnum & 0xf;
+            break;
+        case DEPCMD_STARTXFER: {
+            dma_addr_t tdaddr = dwc3_addr64(par1, par0);
+            if (ep->xfer) {
+                qemu_log_mask(LOG_GUEST_ERROR, "DEPCMD_STARTXFER: xfer existed\n");
+                val |= DEPCMD_STATUS;
+                break;
+            }
+            if (ep->xfer) {
+                dwc3_td_free(s, ep->xfer);
+                ep->xfer = NULL;
+            }
+            ep->xfer = dwc3_xfer_alloc(s, epid, tdaddr);
+            if (!ep->xfer) {
+                qemu_log_mask(LOG_GUEST_ERROR, "DEPCMD_STARTXFER: Cannot alloc xfer\n");
+                val |= DEPCMD_STATUS;
+                break;
+            }
+            val &= ~DEPCMD_PARAM_MASK;
+            val |= DEPCFG_RSC_IDX(ep->xfer->rsc_idx);
+            ioc.parameters = ep->xfer->rsc_idx & 0x7f;
+            ep->not_ready = false;
+            dwc3_ep_run(s, ep);
+            break;
+        }
+        case DEPCMD_UPDATEXFER: {
+            if (!ep->xfer ||
+                (ep->xfer->rsc_idx) != DEPCFG_RSC_IDX_GET(val)) {
+                val |= DEPCMD_STATUS;
+                qemu_log_mask(LOG_GUEST_ERROR, "UPDATEXFER: Unknown rsc_idx\n");
+
+                break;
+            }
+            dwc3_td_fetch(s, ep->xfer, ep->xfer->tdaddr);
+            if (ep->xfer->count == 0) {
+                val |= DEPCMD_STATUS;
+                qemu_log_mask(LOG_GUEST_ERROR, "UPDATEXFER: empty xfer\n");
+                break;
+            }
+            ep->not_ready = false;
+            dwc3_ep_run(s, ep);
+            break;
+        }
+        case DEPCMD_ENDXFER:
+            if (ep->xfer) {
+                dwc3_td_free(s, ep->xfer);
+                ep->xfer = NULL;
+                if (ep->uep) {
+                    USBPacket *p = QTAILQ_FIRST(&ep->uep->queue);
+                    if (p) {
+                        p->status = USB_RET_IOERROR;
+                        usb_packet_complete(udev, p);
+                    }
+                }
+            } else {
+                val |= DEPCMD_STATUS;
+            }
+            break;
+        default:
+            break;
+        }
+
+        if (val & DEPCMD_CMDIOC) {
+            if ((val & DEPCMD_STATUS) && (ioc.status == 0)) {
+                ioc.status = 1;
+            }
+            dwc3_ep_event(s, epid, ioc);
+        }
+
+    }
+    default:
+        break;
+    }
+
+    *mmio = val;
+
+    if (iflg) {
+        dwc3_update_irq(s);
+    }
+}
+
+static uint64_t usb_dwc3_read(void *ptr, hwaddr addr, unsigned size)
+{
+    uint64_t val = 0;
+    switch (addr) {
+    case GLOBALS_REGS_START ... GLOBALS_REGS_END:
+        val = usb_dwc3_glbreg_read(ptr, addr, (addr - GLOBALS_REGS_START) >> 2);
+        break;
+    case DEVICE_REGS_START ... DEVICE_REGS_END:
+        val = usb_dwc3_dreg_read(ptr, addr, (addr - DEVICE_REGS_START) >> 2);
+        break;
+    case DEPCMD_REGS_START ... DEPCMD_REGS_END:
+        val = usb_dwc3_depcmdreg_read(ptr, addr, (addr - DEPCMD_REGS_START) >> 2);
+        break;
+    default:
+        qemu_log_mask(LOG_UNIMP, "%s: addr: 0x%llx\n", __func__, addr);
+        //g_assert_not_reached();
+        break;
+    };
+    //fprintf(stderr, "%s: addr: 0x%llx val: 0x%llx\n", __func__, addr, val);
+    return val;
+}
+
+static void usb_dwc3_write(void *ptr, hwaddr addr, uint64_t val, unsigned size)
+{
+    //fprintf(stderr, "%s: addr: 0x%llx val: 0x%llx\n", __func__, addr, val);
+    switch (addr) {
+    case GLOBALS_REGS_START ... GLOBALS_REGS_END:
+        usb_dwc3_glbreg_write(ptr, addr, (addr - GLOBALS_REGS_START) >> 2, val);
+        break;
+    case DEVICE_REGS_START ... DEVICE_REGS_END:
+        usb_dwc3_dreg_write(ptr, addr, (addr - DEVICE_REGS_START) >> 2, val);
+        break;
+    case DEPCMD_REGS_START ... DEPCMD_REGS_END:
+        usb_dwc3_depcmdreg_write(ptr, addr, (addr - DEPCMD_REGS_START) >> 2, val);
+        break;
+    default:
+        qemu_log_mask(LOG_UNIMP, "%s: addr: 0x%llx val: 0x%llx\n", __func__, addr, val);
+        //g_assert_not_reached();
+        break;
+    };
 }
 
 static const MemoryRegionOps usb_dwc3_ops = {
-    .read = register_read_memory,
-    .write = register_write_memory,
+    .read = usb_dwc3_read,
+    .write = usb_dwc3_write,
     .endianness = DEVICE_LITTLE_ENDIAN,
     .valid = {
         .min_access_size = 4,
@@ -597,91 +1372,392 @@ static void usb_dwc3_realize(DeviceState *dev, Error **errp)
     DWC3State *s = DWC3_USB(dev);
     SysBusDevice *sbd = SYS_BUS_DEVICE(dev);
     Error *err = NULL;
+    Object *obj;
+    MemoryRegion *dma_mr;
+
+    obj = object_property_get_link(OBJECT(dev), "dma-mr", &error_abort);
+
+    dma_mr = MEMORY_REGION(obj);
+    address_space_init(&s->dma_as, dma_mr, "dwc3");
+
+    obj = object_property_get_link(OBJECT(dev), "dma-xhci", &error_abort);
+    s->sysbus_xhci.xhci.dma_mr = MEMORY_REGION(obj);
 
     sysbus_realize(SYS_BUS_DEVICE(&s->sysbus_xhci), &err);
     if (err) {
         error_propagate(errp, err);
         return;
     }
+    s->numintrs = s->sysbus_xhci.xhci.numintrs;
 
     memory_region_add_subregion(&s->iomem, 0,
          sysbus_mmio_get_region(SYS_BUS_DEVICE(&s->sysbus_xhci), 0));
-    sysbus_init_mmio(sbd, &s->iomem);
-
-    /*
-     * Device Configuration
-     */
-    s->regs[R_GHWPARAMS0] = 0x40204048 | s->cfg.mode;
-    s->regs[R_GHWPARAMS1] = 0x222493b;
-    s->regs[R_GHWPARAMS2] = 0x12345678;
-    s->regs[R_GHWPARAMS3] = 0x618c088;
-    s->regs[R_GHWPARAMS4] = 0x47822004;
-    s->regs[R_GHWPARAMS5] = 0x4202088;
-    s->regs[R_GHWPARAMS6] = 0x7850c20;
-    s->regs[R_GHWPARAMS7] = 0x0;
-    s->regs[R_GHWPARAMS8] = 0x478;
+    sysbus_pass_irq(sbd, SYS_BUS_DEVICE(&s->sysbus_xhci));
+    s->sysbus_xhci.xhci.intr_raise = dwc3_host_intr_raise;
 }
 
 static void usb_dwc3_init(Object *obj)
 {
     DWC3State *s = DWC3_USB(obj);
-    RegisterInfoArray *reg_array;
+    SysBusDevice *sbd = SYS_BUS_DEVICE(obj);
 
-    memory_region_init(&s->iomem, obj, TYPE_DWC3_USB, DWC3_SIZE);
-    reg_array =
-        register_init_block32(DEVICE(obj), usb_dwc3_regs_info,
-                              ARRAY_SIZE(usb_dwc3_regs_info),
-                              s->regs_info, s->regs,
-                              &usb_dwc3_ops,
-                              DWC3_USB_ERR_DEBUG,
-                              DWC3_USB_R_MAX * 4);
-    memory_region_add_subregion(&s->iomem,
-                                DWC3_GLOBAL_OFFSET,
-                                &reg_array->mem);
     object_initialize_child(obj, "dwc3-xhci", &s->sysbus_xhci,
                             TYPE_XHCI_SYSBUS);
+    object_initialize_child(obj, "dwc3-usb-device", &s->device,
+                            TYPE_DWC3_USB_DEVICE);
     qdev_alias_all_properties(DEVICE(&s->sysbus_xhci), obj);
 
-    s->cfg.mode = HOST_MODE;
+    memory_region_init_io(&s->iomem, obj, &usb_dwc3_ops, s,
+                          "dwc3-io", DWC3_MMIO_SIZE);
+    sysbus_init_mmio(sbd, &s->iomem);
+
+    for (int i = 0; i < DWC3_NUM_EPS; i++) {
+        s->eps[i].epid = i;
+    }
 }
 
-static const VMStateDescription vmstate_usb_dwc3 = {
-    .name = "usb-dwc3",
+static void dwc3_process_packet(DWC3State *s, DWC3Endpoint *ep, USBPacket *p)
+{
+    USBDevice *udev = USB_DEVICE(&s->device);
+    DWC3BufferDesc *desc = NULL;
+    DWC3Transfer *xfer = NULL;
+
+    DPRINTF("%s: pid: 0x%x ep: %d id: 0x%llx (%d/%d)\n",
+            __func__, p->pid, ep->epid, p->id,
+            p->actual_length, usb_packet_size(p));
+    assert(qemu_mutex_iothread_locked());
+    if (ep->stalled && p->actual_length == 0) {
+        p->status = USB_RET_STALL;
+        goto complete;
+        return;
+    }
+
+    if (ep->xfer == NULL) {
+        struct dwc3_event_depevt event = {0, ep->epid, DEPEVT_XFERNOTREADY, 0, 0};
+        dwc3_ep_event(s, ep->epid, event);
+        p->status = USB_RET_ASYNC;
+        return;
+    }
+
+    xfer = ep->xfer;
+    desc = QTAILQ_FIRST(&xfer->buffers);
+    if (desc == NULL) {
+        struct dwc3_event_depevt event = {0, ep->epid, DEPEVT_XFERNOTREADY, 0, 0};
+        event.status |= DEPEVT_STATUS_TRANSFER_ACTIVE;
+        p->status = USB_RET_ASYNC;
+        dwc3_ep_event(s, ep->epid, event);
+        return;
+    }
+
+    dwc3_bd_copy(s, desc, p);
+    if (desc->ended) {
+        QTAILQ_REMOVE(&xfer->buffers, desc, queue);
+        xfer->count--;
+        dwc3_bd_free(s, desc);
+        if (xfer->count == 0 && xfer->tdaddr == -1) {
+            ep->xfer = NULL;
+            smp_wmb();
+            dwc3_td_free(s, xfer);
+        }
+    }
+    complete:
+    if (p->status != USB_RET_ASYNC) {
+        if (usb_packet_is_inflight(p)) {
+            usb_packet_complete(udev, p);
+        }
+    }
+}
+
+static void dwc3_usb_device_realize(USBDevice *dev, Error **errp)
+{
+    dev->speed = USB_SPEED_HIGH;
+    dev->speedmask = USB_SPEED_MASK_HIGH;
+    dev->auto_attach = false;
+}
+
+static void dwc3_usb_device_handle_attach(USBDevice *dev)
+{
+    DWC3DeviceState *udev = DWC3_USB_DEVICE(dev);
+    DWC3State *s = container_of(udev, DWC3State, device);
+
+    s->dsts = (s->dsts & ~DSTS_CONNECTSPD) | DSTS_HIGHSPEED;
+    s->dsts = (s->dsts & ~DSTS_USBLNKST_MASK) | DSTS_USBLNKST(LINK_STATE_U0);
+
+    struct dwc3_event_devt ulschng = {1, 0, DEVT_ULSTCHNG, 0, LINK_STATE_U0};
+    struct dwc3_event_devt connect = {1, 0, DEVT_CONNECTDONE};
+    dwc3_device_event(s, ulschng);
+    dwc3_device_event(s, connect);
+}
+
+static void dwc3_usb_device_handle_detach(USBDevice *dev)
+{
+    DWC3DeviceState *udev = DWC3_USB_DEVICE(dev);
+    DWC3State *s = container_of(udev, DWC3State, device);
+
+    s->dsts = (s->dsts & ~DSTS_CONNECTSPD) | DSTS_HIGHSPEED;
+    s->dsts = (s->dsts & ~DSTS_USBLNKST_MASK) | DSTS_USBLNKST(LINK_STATE_SS_DIS);
+
+    struct dwc3_event_devt ulschng = {1, 0, DEVT_ULSTCHNG, 0, LINK_STATE_SS_DIS};
+    dwc3_device_event(s, ulschng);
+    struct dwc3_event_devt disconn = {1, 0, DEVT_DISCONN};
+    dwc3_device_event(s, disconn);
+}
+
+static void dwc3_usb_device_handle_reset(USBDevice *dev)
+{
+    DWC3DeviceState *udev = DWC3_USB_DEVICE(dev);
+    DWC3State *s = container_of(udev, DWC3State, device);
+
+    s->dcfg &= ~DCFG_DEVADDR_MASK;
+    s->dsts = (s->dsts & ~DSTS_CONNECTSPD) | DSTS_HIGHSPEED;
+
+    struct dwc3_event_devt usbrst = {1, 0, DEVT_USBRST};
+    dwc3_device_event(s, usbrst);
+    struct dwc3_event_devt connect = {1, 0, DEVT_CONNECTDONE};
+    dwc3_device_event(s, connect);
+}
+
+static void dwc3_usb_device_cancel_packet(USBDevice *dev, USBPacket *p)
+{
+    /* TODO: complete td if packet partially complete */
+    DPRINTF("%s: pid: 0x%x ep: %d id: 0x%llx\n", __func__, p->pid, p->ep->nr,
+            p->id);
+    assert(p->actual_length == 0);
+}
+
+static void dwc3_usb_device_handle_packet(USBDevice *dev, USBPacket *p)
+{
+    DWC3DeviceState *udev = DWC3_USB_DEVICE(dev);
+    DWC3State *s = container_of(udev, DWC3State, device);
+    int epid = dwc3_packet_find_epid(s, p);
+    DWC3Endpoint *ep;
+
+    if (epid == -1) {
+        qemu_log_mask(LOG_GUEST_ERROR, "%s: Unable to find ep for nr: %d pid: 0x%x\n",
+                      __func__, p->ep->nr, p->pid);
+        p->status = USB_RET_NAK;
+        return;
+    }
+
+    ep = &s->eps[epid];
+
+    if (p->pid == USB_TOKEN_SETUP
+        && ep->uep->nr == 0) {
+        s->eps[0].stalled = false;
+        s->eps[0].not_ready = false;
+        s->eps[1].stalled = false;
+        s->eps[1].not_ready = false;
+    }
+
+
+    if (ep->stalled) {
+        p->status = USB_RET_STALL;
+        return;
+    }
+
+    if (!(s->dalepena & (1 << epid))) {
+        p->status = usb_packet_is_inflight(p) ? USB_RET_IOERROR : USB_RET_NAK;
+        return;
+    }
+
+    dwc3_process_packet(s, ep, p);
+}
+
+static void dwc3_ep_run(DWC3State *s, DWC3Endpoint *ep)
+{
+    USBPacket *p;
+    if (!ep->uep) {
+        return;
+    }
+
+    p = QTAILQ_FIRST(&ep->uep->queue);
+    if (p) {
+        dwc3_process_packet(s, ep, p);
+    }
+}
+
+static int dwc3_buffer_desc_pre_save(void *opaque)
+{
+    DWC3BufferDesc *s = opaque;
+    if (s->mapped) {
+        error_report("dwc3: Cannot save when a transfer is ongoing");
+        return -EINVAL;
+    }
+    return 0;
+}
+
+static int usb_dwc3_post_load(void *opaque, int version_id)
+{
+    DWC3State *s = opaque;
+    USBDevice *udev = USB_DEVICE(&s->device);
+
+    s->eps[0].uep = &udev->ep_ctl;
+    s->eps[1].uep = &udev->ep_ctl;
+    for (int i = 2; i < DWC3_NUM_EPS; i++) {
+        if (s->eps[i].epnum) {
+            s->eps[i].uep = usb_ep_get(udev, s->eps[i].epnum & 1 ?
+                                             USB_TOKEN_IN : USB_TOKEN_OUT,
+                                       s->eps[i].epnum >> 1);
+        }
+    }
+    return 0;
+}
+
+static const VMStateDescription vmstate_dwc3_event_ring = {
+    .name = "dwc3/event_ring",
     .version_id = 1,
+    .minimum_version_id = 1,
     .fields = (VMStateField[]) {
-        VMSTATE_UINT32_ARRAY(regs, DWC3State, DWC3_USB_R_MAX),
-        VMSTATE_UINT8(cfg.mode, DWC3State),
-        VMSTATE_UINT32(cfg.dwc_usb3_user, DWC3State),
+        VMSTATE_UINT32(size, DWC3EventRing),
+        VMSTATE_UINT32(head, DWC3EventRing),
+        VMSTATE_UINT32(count, DWC3EventRing),
+        VMSTATE_END_OF_LIST()
+    },
+};
+
+static const VMStateDescription vmstate_dwc3_trb = {
+    .name = "dwc3/trb",
+    .version_id = 1,
+    .minimum_version_id = 1,
+    .fields = (VMStateField[]) {
+        VMSTATE_UINT64(bp, DWC3TRB),
+        VMSTATE_UINT64(addr, DWC3TRB),
+        VMSTATE_UINT32(ctrl, DWC3TRB),
+        VMSTATE_END_OF_LIST()
+    },
+};
+
+static const VMStateDescription vmstate_dwc3_buffer_desc = {
+    .name = "dwc3/buffer_descriptor",
+    .version_id = 1,
+    .minimum_version_id = 1,
+    .pre_save = dwc3_buffer_desc_pre_save,
+    .fields = (VMStateField[]) {
+        VMSTATE_INT32(epid, DWC3BufferDesc),
+        VMSTATE_UINT32(count, DWC3BufferDesc),
+        VMSTATE_UINT32(length, DWC3BufferDesc),
+        VMSTATE_UINT32(actual_length, DWC3BufferDesc),
+        VMSTATE_UINT32(dir, DWC3BufferDesc),
+        VMSTATE_BOOL(ended, DWC3BufferDesc),
+        VMSTATE_STRUCT_VARRAY_POINTER_UINT32(trbs, DWC3BufferDesc, count,
+                                             vmstate_dwc3_trb, DWC3TRB),
+        VMSTATE_END_OF_LIST()
+    },
+};
+
+static const VMStateDescription vmstate_dwc3_transfer = {
+    .name = "dwc3/transfer",
+    .version_id = 1,
+    .minimum_version_id = 1,
+    .fields = (VMStateField[]) {
+        VMSTATE_UINT64(tdaddr, DWC3Transfer),
+        VMSTATE_INT32(epid, DWC3Transfer),
+        VMSTATE_UINT32(count, DWC3Transfer),
+        VMSTATE_UINT32(rsc_idx, DWC3Transfer),
+        VMSTATE_QTAILQ_V(buffers, DWC3Transfer, 1, vmstate_dwc3_buffer_desc,
+                         DWC3BufferDesc, queue),
+        VMSTATE_END_OF_LIST()
+    },
+};
+
+static const VMStateDescription vmstate_dwc3_endpoint = {
+    .name = "dwc3/endpoint",
+    .version_id = 1,
+    .minimum_version_id = 1,
+    .fields = (VMStateField[]) {
+        VMSTATE_UINT32(epnum, DWC3Endpoint),
+        VMSTATE_UINT32(intrnum, DWC3Endpoint),
+        VMSTATE_UINT32(event_en, DWC3Endpoint),
+        VMSTATE_UINT32(xfer_resource_idx, DWC3Endpoint),
+        VMSTATE_UINT8(dseqnum, DWC3Endpoint),
+        VMSTATE_BOOL(stalled, DWC3Endpoint),
+        VMSTATE_BOOL(not_ready, DWC3Endpoint),
+        VMSTATE_STRUCT_POINTER(xfer, DWC3Endpoint, vmstate_dwc3_transfer,
+                               DWC3Transfer),
+        VMSTATE_END_OF_LIST()
+    },
+};
+
+static const VMStateDescription vmstate_usb_dwc3 = {
+    .name = "dwc3",
+    .version_id = 1,
+    .post_load = usb_dwc3_post_load,
+    .fields = (VMStateField[]) {
+        VMSTATE_UINT32_ARRAY(glbreg, DWC3State,
+                             DWC3_GLBREG_SIZE / sizeof(uint32_t)),
+        VMSTATE_UINT32_ARRAY(dreg, DWC3State,
+                             DWC3_DREG_SIZE / sizeof(uint32_t)),
+        VMSTATE_UINT32_ARRAY(depcmdreg, DWC3State,
+                             DWC3_DEPCMDREG_SIZE / sizeof(uint32_t)),
+        VMSTATE_BOOL_ARRAY(host_intr_state, DWC3State, DWC3_NUM_INTRS),
+        VMSTATE_STRUCT_ARRAY(eps, DWC3State, DWC3_NUM_EPS, 1,
+                             vmstate_dwc3_endpoint, DWC3Endpoint),
+        VMSTATE_STRUCT_ARRAY(intrs, DWC3State, DWC3_NUM_INTRS, 1,
+                             vmstate_dwc3_event_ring, DWC3EventRing),
         VMSTATE_END_OF_LIST()
     }
 };
 
 static Property usb_dwc3_properties[] = {
-    DEFINE_PROP_UINT32("DWC_USB3_USERID", DWC3State, cfg.dwc_usb3_user,
-                       0x12345678),
     DEFINE_PROP_END_OF_LIST(),
 };
+
+static void dwc3_usb_device_class_initfn(ObjectClass *klass, void *data)
+{
+    DeviceClass *dc = DEVICE_CLASS(klass);
+    USBDeviceClass *uc = USB_DEVICE_CLASS(klass);
+
+    uc->realize        = dwc3_usb_device_realize;
+    uc->product_desc   = "DWC3 USB Device";
+    uc->unrealize      = NULL;
+    uc->cancel_packet  = dwc3_usb_device_cancel_packet;
+    uc->handle_attach  = dwc3_usb_device_handle_attach;
+    uc->handle_detach  = dwc3_usb_device_handle_detach;
+    uc->handle_reset   = dwc3_usb_device_handle_reset;
+    uc->handle_data    = NULL;
+    uc->handle_control = NULL;
+    uc->handle_packet  = dwc3_usb_device_handle_packet;
+    uc->flush_ep_queue = NULL;
+    uc->ep_stopped     = NULL;
+    uc->alloc_streams  = NULL;
+    uc->free_streams   = NULL;
+    uc->usb_desc       = NULL;
+    set_bit(DEVICE_CATEGORY_USB, dc->categories);
+}
 
 static void usb_dwc3_class_init(ObjectClass *klass, void *data)
 {
     DeviceClass *dc = DEVICE_CLASS(klass);
+    DWC3Class *c = DWC3_USB_CLASS(klass);
+    ResettableClass *rc = RESETTABLE_CLASS(klass);
 
-    dc->reset = usb_dwc3_reset;
     dc->realize = usb_dwc3_realize;
     dc->vmsd = &vmstate_usb_dwc3;
+    set_bit(DEVICE_CATEGORY_USB, dc->categories);
     device_class_set_props(dc, usb_dwc3_properties);
+    resettable_class_set_parent_phases(rc, dwc3_reset_enter, dwc3_reset_hold,
+                                       dwc3_reset_exit, &c->parent_phases);
 }
+
+static const TypeInfo dwc3_usb_device_type_info = {
+    .name = TYPE_DWC3_USB_DEVICE,
+    .parent = TYPE_USB_DEVICE,
+    .instance_size = sizeof(DWC3DeviceState),
+    .class_init = dwc3_usb_device_class_initfn,
+};
 
 static const TypeInfo usb_dwc3_info = {
     .name          = TYPE_DWC3_USB,
     .parent        = TYPE_SYS_BUS_DEVICE,
     .instance_size = sizeof(DWC3State),
-    .class_init    = usb_dwc3_class_init,
     .instance_init = usb_dwc3_init,
+    .class_size    = sizeof(DWC3Class),
+    .class_init    = usb_dwc3_class_init,
 };
 
 static void usb_dwc3_register_types(void)
 {
+    type_register_static(&dwc3_usb_device_type_info);
     type_register_static(&usb_dwc3_info);
 }
 
