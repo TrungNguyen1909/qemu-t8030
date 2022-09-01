@@ -24,8 +24,7 @@ struct USBTCPHostState {
     SysBusDevice parent_obj;
 
     USBBus bus;
-    USBPort uport;
-    USBPort uport2;
+    USBPort uports[3];
     QIOChannel *ioc;
     CoMutex write_mutex;
     Error *migration_blocker;
