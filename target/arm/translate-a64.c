@@ -14604,8 +14604,8 @@ static void disas_apple_insn(DisasContext *s, uint32_t insn)
         break;
     case 5:
         if (s->gxf_active) {
-            switch (insn) {
-                case 0x00201420: /* GENTER */
+            switch (rn) {
+                case 1: /* GENTER */
                     if (s->guarded) {
                         unallocated_encoding(s);
                         break;
@@ -14613,10 +14613,10 @@ static void disas_apple_insn(DisasContext *s, uint32_t insn)
                     gen_a64_set_pc_im(s->pc_curr);
                     gen_ss_advance(s);
                     gen_exception_insn(s, s->base.pc_next, EXCP_GENTER,
-                                       syn_aa64_genter(), s->current_el);
+                                       syn_aa64_genter(rd), s->current_el);
                     break;
 
-                case 0x00201400: /* GEXIT */
+                case 0: /* GEXIT */
                     if (!s->guarded) {
                         unallocated_encoding(s);
                         break;
