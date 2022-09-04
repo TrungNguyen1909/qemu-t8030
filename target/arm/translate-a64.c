@@ -14595,11 +14595,11 @@ static void disas_apple_insn(DisasContext *s, uint32_t insn)
 
     switch (opcode) {
     case 2: /* WKdmC */
-        tcg_rd = cpu_reg(s, rd);
+        tcg_rd = cpu_reg_sp(s, rd);
         gen_helper_wkdmc(tcg_rd, cpu_env, tcg_rd, cpu_reg_sp(s, rn));
         break;
     case 3: /* WKdmD */
-        tcg_rd = cpu_reg(s, rd);
+        tcg_rd = cpu_reg_sp(s, rd);
         gen_helper_wkdmd(tcg_rd, cpu_env, tcg_rd, cpu_reg_sp(s, rn));
         break;
     case 5:
