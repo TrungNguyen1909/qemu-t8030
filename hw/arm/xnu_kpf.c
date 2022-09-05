@@ -218,6 +218,41 @@ static void kpf_amfi_patch(xnu_pf_patchset_t *xnu_text_exec_patchset)
                      sizeof(matches)/sizeof(uint64_t), true, (void *)kpf_amfi_callback);
 }
 
+static bool kpf_found_trustcache = false;
+
+static bool kpf_trustcache_callback(struct xnu_pf_patch *patch,
+                                    uint32_t *opcode_stream)
+{
+    if (kpf_found_trustcache) {
+        return false;
+    }
+    uint32_t *start = find_prev_insn(opcode_stream, 100, PACIBSP, 0xffffffff);
+
+    if (!start) {
+        return false;
+    }
+    kpf_found_trustcache = true;
+    fprintf(stderr, "%s: Found pmap_lookup_in_static_trust_cache_internal "
+                    "@ 0x%llx\n", __func__, ptov_static((hwaddr)start));
+    *(start++) = 0x52802020; /* MOV W0, 0x101 */
+    *(start++) = RET;
+    return true;
+}
+
+static void kpf_trustcache_patch(xnu_pf_patchset_t *patchset)
+{
+    // This patch leads to AMFI believing that everything is in trustcache.
+    uint64_t matches[] = {
+        0xd29dcfc0, // mov w*, 0xee7e
+    };
+    uint64_t masks[] = {
+        0xffffffc0,
+    };
+    xnu_pf_maskmatch(patchset, "trustcache16", matches, masks,
+                     sizeof(matches)/sizeof(uint64_t), true,
+                     (void*)kpf_trustcache_callback);
+}
+
 static bool kpf_amfi_sha1(struct xnu_pf_patch *patch, uint32_t *opcode_stream)
 {
     uint32_t* cmp = find_next_insn(opcode_stream, 0x10, 0x7100081f, 0xFFFFFFFF); /* cmp w0, 2 */
@@ -419,6 +454,7 @@ void kpf(void)
     xnu_pf_patchset_destroy(xnu_text_exec_patchset);
 
     kpf_amfi_patch(xnu_ppl_text_patchset);
+    kpf_trustcache_patch(xnu_ppl_text_patchset);
     xnu_pf_apply(ppltext_exec_range, xnu_ppl_text_patchset);
     xnu_pf_patchset_destroy(xnu_ppl_text_patchset);
 
