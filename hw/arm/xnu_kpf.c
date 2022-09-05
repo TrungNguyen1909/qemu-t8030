@@ -422,15 +422,15 @@ void kpf(void)
 
     xnu_pf_patchset_t *apfs_patchset;
     struct mach_header_64 *apfs_header;
-    g_autofree xnu_pf_range_t *apfs_text_exec_range;
+    g_autofree xnu_pf_range_t *apfs_text_exec_range = NULL;
 
     struct mach_header_64 *amfi_header;
     xnu_pf_patchset_t *amfi_patchset;
-    g_autofree xnu_pf_range_t *amfi_text_exec_range;
+    g_autofree xnu_pf_range_t *amfi_text_exec_range = NULL;
 
     struct mach_header_64 *aks_header;
     xnu_pf_patchset_t *aks_patchset;
-    g_autofree xnu_pf_range_t *aks_text_exec_range;
+    g_autofree xnu_pf_range_t *aks_text_exec_range = NULL;
 
 
     apfs_patchset = xnu_pf_patchset_create(XNU_PF_ACCESS_32BIT);
