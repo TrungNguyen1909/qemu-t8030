@@ -70,7 +70,7 @@ typedef struct AppleUartReg {
 
 static const AppleUartReg apple_uart_regs[] = {
     {"ULCON",    ULCON,    0x00000000},
-    {"UCON",     UCON,     0x00003000},
+    {"UCON",     UCON,     0x00000000},
     {"UFCON",    UFCON,    0x00000000},
     {"UMCON",    UMCON,    0x00000000},
     {"UTRSTAT",  UTRSTAT,  0x00000006},
@@ -88,6 +88,7 @@ static const AppleUartReg apple_uart_regs[] = {
 /* UART Control */
 #define UCON_TXTHRESH_ENA           (1 << 13)
 #define UCON_RXTHRESH_ENA           (1 << 12)
+#define UCON_RXERR_ENA              (1 << 11)
 #define UCON_RXTIMEOUT_ENA          (1 << 9)
 #define UCON_TXMODE                 (3 << 2)
 #define UCON_TXMODE_DMA             (3 << 2)
@@ -159,6 +160,7 @@ struct AppleUartState {
     qemu_irq          dmairq;
 
     uint32_t channel;
+    uint32_t last_irq;
 
 };
 
@@ -232,14 +234,15 @@ static void apple_uart_update_irq(AppleUartState *s)
      * The Tx interrupt is always requested if the number of data in the
      * transmit FIFO is smaller than the trigger level.
      */
-    uint32_t mask = UTRSTAT_Rx_BUFFER_DATA_READY | UTRSTAT_Tx_EMPTY
-                    | UTRSTAT_Tx_BUFFER_EMPTY;
+    uint32_t mask = UTRSTAT_Rx_BUFFER_DATA_READY;
     if (s->reg[I_(UFCON)] & UFCON_FIFO_ENABLE) {
         uint32_t count = fifo8_num_used(&s->tx);
 
         if (s->reg[I_(UCON)] & UCON_TXTHRESH_ENA) {
-            mask |= UTRSTAT_Tx_THRESH;
-            if(count <= apple_uart_Tx_FIFO_trigger_level(s)) {
+            mask |= UTRSTAT_Tx_THRESH | UTRSTAT_Tx_EMPTY |
+                    UTRSTAT_Tx_BUFFER_EMPTY;
+            if(count <= apple_uart_Tx_FIFO_trigger_level(s) && 
+               !(s->last_irq & UTRSTAT_Tx_THRESH)) {
                 s->reg[I_(UTRSTAT)] |= UTRSTAT_Tx_THRESH;
             }
         }
@@ -263,6 +266,7 @@ static void apple_uart_update_irq(AppleUartState *s)
     }
 
     if (s->reg[I_(UTRSTAT)] & mask) {
+        s->last_irq = s->reg[I_(UTRSTAT)] & mask; 
         qemu_irq_raise(s->irq);
         trace_apple_uart_irq_raised(s->channel, s->reg[I_(UTRSTAT)]);
     } else {
@@ -388,11 +392,15 @@ static void apple_uart_write(void *opaque, hwaddr offset,
         break;
 
     case UTRSTAT:
+        val &= (UTRSTAT_Tx_EMPTY);
         s->reg[I_(UTRSTAT)] &= ~val;
         trace_apple_uart_intclr(s->channel, s->reg[I_(UTRSTAT)]);
         apple_uart_update_irq(s);
         break;
     case UERSTAT:
+        s->reg[I_(UERSTAT)] &= ~val;
+        apple_uart_update_irq(s);
+        break;
     case UFSTAT:
     case UMSTAT:
     case URXH:
@@ -400,6 +408,8 @@ static void apple_uart_write(void *opaque, hwaddr offset,
                     s->channel, apple_uart_regname(offset), offset);
         break;
     case UCON:
+        apple_uart_update_irq(s);
+        break;
     case UMCON:
     default:
         s->reg[I_(offset)] = val;
@@ -491,7 +501,6 @@ static int apple_uart_can_receive(void *opaque)
 static void apple_uart_receive(void *opaque, const uint8_t *buf, int size)
 {
     AppleUartState *s = (AppleUartState *)opaque;
-    int i;
 
     if (s->reg[I_(UFCON)] & UFCON_FIFO_ENABLE) {
         if (fifo8_num_free(&s->rx) < size) {
