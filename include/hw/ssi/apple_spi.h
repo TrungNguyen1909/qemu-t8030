@@ -6,6 +6,8 @@
 #include "hw/arm/xnu_dtb.h"
 #include "hw/ssi/ssi.h"
 
+#define APPLE_SPI_MMIO_SIZE              (0x4000)
+
 #define TYPE_APPLE_SPI "apple.spi"
 OBJECT_DECLARE_SIMPLE_TYPE(AppleSPIState, APPLE_SPI)
 

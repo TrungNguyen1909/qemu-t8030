@@ -61,7 +61,6 @@
 #define R_FIFO_MAX_DEPTH        (16 * 8)
 
 #define REG(_s,_v)             ((_s)->regs[(_v)>>2])
-#define MMIO_SIZE              (0x4000)
 
 struct AppleSPIState {
     SysBusDevice parent_obj;
@@ -77,7 +76,7 @@ struct AppleSPIState {
 
     Fifo32 rx_fifo;
     Fifo32 tx_fifo;
-    uint32_t regs[MMIO_SIZE >> 2];
+    uint32_t regs[APPLE_SPI_MMIO_SIZE >> 2];
     uint32_t mmio_size;
 
     int tx_chan_id;
@@ -481,7 +480,7 @@ SysBusDevice *apple_spi_create(DTBNode *node)
 static void apple_spi_init(Object *obj)
 {
     AppleSPIState *s = APPLE_SPI(obj);
-    s->mmio_size = MMIO_SIZE;
+    s->mmio_size = APPLE_SPI_MMIO_SIZE;
 }
 
 static const VMStateDescription vmstate_apple_spi = {
@@ -489,7 +488,7 @@ static const VMStateDescription vmstate_apple_spi = {
     .version_id = 1,
     .minimum_version_id = 1,
     .fields = (VMStateField[]) {
-        VMSTATE_UINT32_ARRAY(regs, AppleSPIState, MMIO_SIZE >> 2),
+        VMSTATE_UINT32_ARRAY(regs, AppleSPIState, APPLE_SPI_MMIO_SIZE >> 2),
         VMSTATE_FIFO32(rx_fifo, AppleSPIState),
         VMSTATE_FIFO32(tx_fifo, AppleSPIState),
         VMSTATE_UINT32(last_irq, AppleSPIState),
