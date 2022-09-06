@@ -77,6 +77,8 @@
 
 #define T8030_DWC2_IRQ          (495)
 
+#define T8030_NUM_UARTS         (9)
+
 #define T8030_ANS_TEXT_BASE     (0x800024000)
 #define T8030_ANS_TEXT_SIZE     (0x124000)
 #define T8030_ANS_DATA_BASE     (0x8fc400000)
@@ -120,7 +122,8 @@ static void t8030_start_cpus(MachineState* machine, uint64_t cpu_mask)
     }
 }
 
-static void t8030_create_s3c_uart(const T8030MachineState *tms, Chardev *chr)
+static void t8030_create_s3c_uart(const T8030MachineState *tms, uint32_t port,
+                                  Chardev *chr)
 {
     DeviceState *dev;
     hwaddr base;
@@ -128,30 +131,28 @@ static void t8030_create_s3c_uart(const T8030MachineState *tms, Chardev *chr)
     int vector;
     DTBProp *prop;
     hwaddr *uart_offset;
-    DTBNode *child = find_dtb_node(tms->device_tree, "arm-io");
+    DTBNode *child = find_dtb_node(tms->device_tree, "arm-io/uart0");
+    char name[32] = { 0 };
+
+    assert(port < T8030_NUM_UARTS);
 
     assert(child != NULL);
-
-    child = find_dtb_node(child, "uart0");
-    assert(child != NULL);
-
-    //make sure this node has the boot-console prop
-    prop = find_dtb_prop(child, "boot-console");
-    assert(prop != NULL);
+    snprintf(name, sizeof(name), "uart%d", port);
 
     prop = find_dtb_prop(child, "reg");
     assert(prop != NULL);
 
     uart_offset = (hwaddr *)prop->value;
-    base = tms->soc_base_pa + uart_offset[0];
+    base = tms->soc_base_pa + uart_offset[0] + uart_offset[1] * port;
 
     prop = find_dtb_prop(child, "interrupts");
     assert(prop);
 
-    vector = *(uint32_t*)prop->value;
-    dev = apple_uart_create(base, 15, 0, chr, qdev_get_gpio_in(DEVICE(tms->aic), vector));
-    dev->id = g_strdup("uart0");
+    vector = *(uint32_t*)prop->value + port;
+    dev = apple_uart_create(base, 15, 0, chr,
+                            qdev_get_gpio_in(DEVICE(tms->aic), vector));
     assert(dev);
+    dev->id = g_strdup(name);
 }
 
 static void t8030_patch_kernel(struct mach_header_64 *hdr)
@@ -1611,7 +1612,9 @@ static void t8030_machine_init(MachineState *machine)
 
     t8030_create_aic(machine);
 
-    t8030_create_s3c_uart(tms, serial_hd(0));
+    for (int i = 0; i < T8030_NUM_UARTS; i++) {
+        t8030_create_s3c_uart(tms, i, serial_hd(i));
+    }
 
     t8030_pmgr_setup(machine);
     t8030_amcc_setup(machine);
