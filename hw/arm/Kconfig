@@ -583,6 +583,7 @@ config APPLE_SOC
     select APPLE_OTG
     select APPLE_TYPEC
     select APPLE_NVRAM
+    select APPLE_SIO
     select APPLE_SPMI
     select APPLE_SPMI_PMU
     select APPLE_DART

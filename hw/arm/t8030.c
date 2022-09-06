@@ -61,6 +61,7 @@
 #include "hw/spmi/apple_spmi_pmu.h"
 #include "hw/misc/apple_smc.h"
 #include "hw/arm/apple_dart.h"
+#include "hw/dma/apple_sio.h"
 #include "hw/char/apple_uart.h"
 
 #include "hw/arm/xnu_pf.h"
@@ -90,9 +91,18 @@
 #define T8030_SMC_DATA_SIZE     (0x30000)
 #define T8030_SMC_SRAM_BASE     (0x23fe60000)
 #define T8030_SMC_SRAM_SIZE     (0x4000)
+
+#define T8030_SIO_TEXT_BASE     (0x8010a8000)
+#define T8030_SIO_TEXT_SIZE     (0x1c000)
+#define T8030_SIO_TEXT_REMAP    (0x200000)
+#define T8030_SIO_DATA_BASE     (0x80186c000)
+#define T8030_SIO_DATA_SIZE     (0xf8000)
+#define T8030_SIO_DATA_REMAP    (0x220000)
+
 #define T8030_DISPLAY_BASE      (0x8f7fb4000)
-#define T8030_DISPLAY_SIZE      (67 * 1024 * 1024)
-#define T8030_PANIC_BASE        (0x8fc2b4000)
+#define T8030_DISPLAY_SIZE      (35 * 1024 * 1024)
+
+#define T8030_PANIC_BASE        (0x8ffeb0000)
 #define T8030_PANIC_SIZE        (0x100000)
 
 #define NOP_INST 0xd503201f
@@ -1391,6 +1401,85 @@ static void t8030_create_smc(MachineState* machine)
     sysbus_realize_and_unref(smc, &error_fatal);
 }
 
+static void t8030_create_sio(MachineState* machine)
+{
+    int i;
+    uint32_t *ints;
+    DTBProp *prop;
+    uint64_t *reg;
+    uint64_t data;
+    T8030MachineState *tms = T8030_MACHINE(machine);
+    SysBusDevice *sio;
+    AppleDARTState *dart;
+    DTBNode *child = find_dtb_node(tms->device_tree, "arm-io");
+    DTBNode *iop_nub;
+    struct xnu_iop_segment_range segranges[2] = { 0 };
+    IOMMUMemoryRegion *dma_mr = NULL;
+    DTBNode *dart_sio = find_dtb_node(child, "dart-sio");
+    DTBNode *dart_sio_mapper = find_dtb_node(dart_sio, "mapper-sio");
+    Object *obj;
+
+    assert(child != NULL);
+    child = find_dtb_node(child, "sio");
+    assert(child != NULL);
+    iop_nub = find_dtb_node(child, "iop-sio-nub");
+    assert(iop_nub != NULL);
+
+    set_dtb_prop(child, "segment-names", 14, "__TEXT;__DATA");
+    set_dtb_prop(iop_nub, "segment-names", 14, "__TEXT;__DATA");
+
+    segranges[0].phys = T8030_SIO_TEXT_BASE;
+    segranges[0].virt = 0x0;
+    segranges[0].remap = T8030_SIO_TEXT_REMAP;
+    segranges[0].size = T8030_SIO_TEXT_SIZE;
+    segranges[0].flag = 0x1;
+
+    segranges[1].phys = T8030_SIO_DATA_BASE;
+    segranges[1].virt = T8030_SIO_TEXT_SIZE;
+    segranges[1].remap = T8030_SIO_DATA_REMAP;
+    segranges[1].size = T8030_SIO_DATA_SIZE;
+    segranges[1].flag = 0x0;
+
+    set_dtb_prop(child, "segment-ranges", sizeof(segranges), segranges);
+    set_dtb_prop(iop_nub, "segment-ranges", sizeof(segranges), segranges);
+
+    sio = apple_sio_create(child, tms->rtbuddyv2_protocol_version);
+    assert(sio);
+
+    object_property_add_child(OBJECT(machine), "sio", OBJECT(sio));
+    prop = find_dtb_prop(child, "reg");
+    assert(prop);
+    reg = (uint64_t*)prop->value;
+
+    /*
+    0: AppleA7IOP akfRegMap
+    1: AppleASCWrapV2 coreRegisterMap
+    */
+    for (int i = 0; i < 2; i++) {
+        sysbus_mmio_map(sio, i, tms->soc_base_pa + reg[i * 2]);
+    }
+
+    prop = find_dtb_prop(child, "interrupts");
+    assert(prop);
+    ints = (uint32_t*)prop->value;
+
+    for(i = 0; i < prop->length / sizeof(uint32_t); i++) {
+        sysbus_connect_irq(sio, i, qdev_get_gpio_in(DEVICE(tms->aic), ints[i]));
+    }
+
+    dart = APPLE_DART(object_property_get_link(OBJECT(machine),
+                      "dart-sio", &error_fatal));
+    assert(dart);
+
+    prop = find_dtb_prop(dart_sio_mapper, "reg");
+
+    dma_mr = apple_dart_iommu_mr(dart, *(uint32_t *)prop->value);
+    assert(dma_mr);
+    assert(object_property_add_const_link(OBJECT(sio), "dma-mr", OBJECT(dma_mr)));
+
+    sysbus_realize_and_unref(sio, &error_fatal);
+}
+
 static void t8030_create_boot_display(MachineState *machine)
 {
     T8030MachineState *tms = T8030_MACHINE(machine);
@@ -1648,6 +1737,7 @@ static void t8030_machine_init(MachineState *machine)
     t8030_create_pmu(machine, "spmi0", "spmi-pmu");
 
     t8030_create_smc(machine);
+    t8030_create_sio(machine);
 
     t8030_create_boot_display(machine);
 

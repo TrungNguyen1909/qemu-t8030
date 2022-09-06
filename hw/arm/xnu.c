@@ -66,6 +66,7 @@ static const char *KEEP_COMP[] = {
     "smc-pmu\0$",
     "buttons\0$",
     "dart,t8020\0$", "iommu-mapper\0$",
+    "sio-dma-controller\0$",
     "soc-tuner,t8030\0$",
     "atc-phy,t8030\0atc-phy,t8027\0$",
     "usb-drd,t8030\0usb-drd,t8027\0$",
