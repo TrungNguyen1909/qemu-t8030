@@ -368,3 +368,11 @@ uint8_t clock_freq_nclk[] = {
   0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00
 };
 
+uint32_t spi_cs_pins[] = {
+    204, 95, -1, 66,
+};
+
+uint32_t spi_irqs[] = {
+    444, 445, 446, 447,
+};
+

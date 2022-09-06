@@ -62,6 +62,8 @@
 #include "hw/misc/apple_smc.h"
 #include "hw/arm/apple_dart.h"
 #include "hw/dma/apple_sio.h"
+#include "hw/ssi/ssi.h"
+#include "hw/ssi/apple_spi.h"
 #include "hw/char/apple_uart.h"
 
 #include "hw/arm/xnu_pf.h"
@@ -76,9 +78,12 @@
 #define T8030_KERNEL_REGION_BASE (0x801964000)
 #define T8030_KERNEL_REGION_SIZE (0xf09cc000)
 
+#define T8030_SPI_BASE(_x)      (0x35100000 + (_x) * APPLE_SPI_MMIO_SIZE)
+
 #define T8030_DWC2_IRQ          (495)
 
 #define T8030_NUM_UARTS         (9)
+#define T8030_NUM_SPIS          (4)
 
 #define T8030_ANS_TEXT_BASE     (0x800024000)
 #define T8030_ANS_TEXT_SIZE     (0x124000)
@@ -1092,6 +1097,71 @@ static void t8030_create_i2c(MachineState *machine, const char *name)
     sysbus_realize_and_unref(i2c, &error_fatal);
 }
 
+static void t8030_create_spi(MachineState *machine, uint32_t port)
+{
+    SysBusDevice *spi = NULL;
+    DeviceState *gpio = NULL;
+    DTBProp *prop;
+    uint64_t *reg;
+    uint32_t *ints;
+    T8030MachineState *tms = T8030_MACHINE(machine);
+    DTBNode *child = find_dtb_node(tms->device_tree, "arm-io");
+    Object *sio;
+    char name[32] = { 0 };
+    hwaddr base = tms->soc_base_pa + T8030_SPI_BASE(port);
+    uint32_t irq = spi_irqs[port];
+    uint32_t cs_pin = spi_cs_pins[port];
+
+    assert(port < T8030_NUM_SPIS);
+    snprintf(name, sizeof(name), "spi%d", port);
+    child = find_dtb_node(child, name);
+
+    if (child) {
+        spi = apple_spi_create(child);
+    } else {
+        spi = SYS_BUS_DEVICE(qdev_new(TYPE_APPLE_SPI));
+        DEVICE(spi)->id = g_strdup(name);
+    }
+    assert(spi);
+    object_property_add_child(OBJECT(machine), name, OBJECT(spi));
+
+    sio = object_property_get_link(OBJECT(machine), "sio", &error_fatal);
+    assert(object_property_add_const_link(OBJECT(spi), "sio", sio));
+    sysbus_realize_and_unref(SYS_BUS_DEVICE(spi), &error_fatal);
+
+    if (child) {
+        prop = find_dtb_prop(child, "reg");
+        assert(prop);
+        reg = (uint64_t*)prop->value;
+        base = tms->soc_base_pa + reg[0];
+
+        prop = find_dtb_prop(child, "interrupts");
+        assert(prop);
+        ints = (uint32_t *)prop->value;
+        irq = ints[0];
+    }
+    sysbus_mmio_map(spi, 0, base);
+
+    /* The second sysbus IRQ is the cs line */
+    sysbus_connect_irq(SYS_BUS_DEVICE(spi), 0,
+                       qdev_get_gpio_in(DEVICE(tms->aic), irq));
+
+    if (child) {
+        prop = find_dtb_prop(child, "function-spi_cs0");
+        if (prop) {
+            ints = (uint32_t *)prop->value;
+            cs_pin = ints[2];
+        }
+    }
+    if (cs_pin != -1) {
+        gpio = DEVICE(object_property_get_link(OBJECT(machine), "gpio", &error_fatal));
+        assert(gpio);
+        qdev_connect_gpio_out(gpio, cs_pin,
+                              qdev_get_gpio_in_named(DEVICE(spi),
+                                                     SSI_GPIO_CS, 0));
+    }
+}
+
 static void t8030_create_usb(MachineState *machine)
 {
     T8030MachineState *tms = T8030_MACHINE(machine);
@@ -1738,6 +1808,10 @@ static void t8030_machine_init(MachineState *machine)
 
     t8030_create_smc(machine);
     t8030_create_sio(machine);
+
+    for (int i = 0; i < T8030_NUM_SPIS; i++) {
+        t8030_create_spi(machine, i);
+    }
 
     t8030_create_boot_display(machine);
 
