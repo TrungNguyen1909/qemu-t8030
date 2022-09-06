@@ -190,8 +190,14 @@ static void apple_spi_update_cs(AppleSPIState *s)
     BusState *b = BUS(s->spi);
     BusChild *kid = QTAILQ_FIRST(&b->children);
     if (kid) {
-        qemu_set_irq(qdev_get_gpio_in_named(kid->child, SSI_GPIO_CS, 0),
-                     (REG(s, R_PIN) & R_PIN_CS) != 0);
+        SSIPeripheralClass *ssc = SSI_PERIPHERAL_GET_CLASS(kid->child);
+        if (ssc->cs_polarity == SSI_CS_NONE) {
+            return;
+        }
+        qemu_irq cs_pin = qdev_get_gpio_in_named(kid->child, SSI_GPIO_CS, 0);
+        if (cs_pin) {
+            qemu_set_irq(cs_pin, (REG(s, R_PIN) & R_PIN_CS) != 0);
+        }
     }
 }
 
