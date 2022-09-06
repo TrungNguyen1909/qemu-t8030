@@ -9,6 +9,7 @@
 #include "qemu/timer.h"
 #include "hw/arm/xnu_dtb.h"
 #include "qemu/fifo32.h"
+#include "hw/dma/apple_sio.h"
 
 /* XXX: Based on linux/drivers/spi/spi-apple.c */
 
@@ -67,6 +68,8 @@ struct AppleSPIState {
 
     MemoryRegion iomem;
     SSIBus *spi;
+    AppleSIODMAEndpoint *tx_chan;
+    AppleSIODMAEndpoint *rx_chan;
 
     qemu_irq irq;
     uint32_t last_irq;
@@ -76,6 +79,10 @@ struct AppleSPIState {
     Fifo32 tx_fifo;
     uint32_t regs[MMIO_SIZE >> 2];
     uint32_t mmio_size;
+
+    int tx_chan_id;
+    int rx_chan_id;
+    bool dma_capable;
 };
 
 static int apple_spi_word_size(AppleSPIState *s)
@@ -96,8 +103,56 @@ static int apple_spi_word_size(AppleSPIState *s)
 static void apple_spi_update_xfer_tx(AppleSPIState *s)
 {
     if (fifo32_is_empty(&s->tx_fifo)) {
-        REG(s, R_STATUS) |= R_STATUS_TXEMPTY;
+        if ((R_CFG_MODE(REG(s, R_CFG))) == R_CFG_MODE_DMA) {
+            uint8_t buffer[R_FIFO_MAX_DEPTH] = { 0 };
+            int word_size = apple_spi_word_size(s);
+            int dma_len = apple_sio_dma_remaining(s->tx_chan);
+            int xfer_len = REG(s, R_TXCNT) * word_size;
+            int fifo_len = fifo32_num_free(&s->tx_fifo) * word_size;
+            if (dma_len > xfer_len) {
+                dma_len = xfer_len;
+            }
+            if (dma_len > fifo_len) {
+                dma_len = fifo_len;
+            }
+            dma_len = apple_sio_dma_read(s->tx_chan, buffer, dma_len);
+            if (dma_len == 0) {
+                REG(s, R_STATUS) |= R_STATUS_TXEMPTY;
+            } else {
+                for (int i = 0; i < dma_len; i += word_size) {
+                    uint32_t v = *(uint32_t *)&buffer[i];
+                    v &= (1U << (word_size * 8)) - 1;
+                    fifo32_push(&s->tx_fifo, v);
+                }
+            }
+        } else {
+            REG(s, R_STATUS) |= R_STATUS_TXEMPTY;
+        }
     }
+}
+
+static void apple_spi_flush_rx(AppleSPIState *s)
+{
+    uint8_t buffer[R_FIFO_MAX_DEPTH] = { 0 };
+    int word_size = apple_spi_word_size(s);
+    if ((R_CFG_MODE(REG(s, R_CFG))) != R_CFG_MODE_DMA) {
+        return;
+    }
+    int dma_len = apple_sio_dma_remaining(s->rx_chan);
+
+    if (dma_len > fifo32_num_used(&s->rx_fifo)) {
+        dma_len = fifo32_num_used(&s->rx_fifo);
+    }
+    if (dma_len == 0) {
+        return;
+    }
+
+    for (int i = 0; i < dma_len; i += word_size) {
+        uint32_t v = fifo32_pop(&s->rx_fifo);
+        memcpy(buffer + i, &v, word_size);
+    }
+
+    dma_len = apple_sio_dma_write(s->rx_chan, buffer, dma_len);
 }
 
 static void apple_spi_update_xfer_rx(AppleSPIState *s)
@@ -167,7 +222,7 @@ static void apple_spi_run(AppleSPIState *s)
     if (REG(s, R_RXCNT) == 0 && REG(s, R_TXCNT) == 0) {
         return;
     }
-    if ((R_CFG_MODE(REG(s, R_CFG))) == R_CFG_MODE_DMA) {
+    if ((R_CFG_MODE(REG(s, R_CFG))) == R_CFG_MODE_DMA && !s->dma_capable) {
         qemu_log_mask(LOG_GUEST_ERROR,
                       "%s: DMA mode is not supported on this device\n",
                       __func__);
@@ -188,6 +243,9 @@ static void apple_spi_run(AppleSPIState *s)
         apple_spi_update_xfer_tx(s);
         if (REG(s, R_RXCNT) > 0) {
             if (fifo32_is_full(&s->rx_fifo)) {
+                apple_spi_flush_rx(s);
+            }
+            if (fifo32_is_full(&s->rx_fifo)) {
                 qemu_log_mask(LOG_GUEST_ERROR, "%s: rx overflow\n", __func__);
                 REG(s, R_STATUS) |= R_STATUS_RXOVERFLOW;
                 break;
@@ -199,6 +257,9 @@ static void apple_spi_run(AppleSPIState *s)
         }
     }
 
+    if (fifo32_is_full(&s->rx_fifo)) {
+        apple_spi_flush_rx(s);
+    }
     while (!fifo32_is_full(&s->rx_fifo)
            && (REG(s, R_RXCNT) > 0)
            && (REG(s, R_CFG) & R_CFG_AGD)) {
@@ -207,7 +268,9 @@ static void apple_spi_run(AppleSPIState *s)
             rx <<= 8;
             rx |= ssi_transfer(s->spi, 0xff);
         }
-        //rx = bswap32(rx);
+        if (fifo32_is_full(&s->rx_fifo)) {
+            apple_spi_flush_rx(s);
+        }
         if (fifo32_is_full(&s->rx_fifo)) {
             qemu_log_mask(LOG_GUEST_ERROR, "%s: rx overflow\n", __func__);
             REG(s, R_STATUS) |= R_STATUS_RXOVERFLOW;
@@ -218,6 +281,8 @@ static void apple_spi_run(AppleSPIState *s)
             apple_spi_update_xfer_rx(s);
         }
     }
+
+    apple_spi_flush_rx(s);
     if (REG(s, R_RXCNT) == 0 && REG(s, R_TXCNT) == 0) {
         REG(s, R_STATUS) |= R_STATUS_COMPLETE;
     }
@@ -363,6 +428,8 @@ static void apple_spi_realize(DeviceState *dev, struct Error **errp)
     SysBusDevice *sbd = SYS_BUS_DEVICE(dev);
     char mmio_name[32] = { 0 };
     char bus_name[32] = { 0 };
+    Object *obj;
+    AppleSIOState *sio;
 
     snprintf(bus_name, sizeof(bus_name), "%s.bus", dev->id);
     s->spi = ssi_create_bus(dev, (const char *)bus_name);
@@ -378,6 +445,16 @@ static void apple_spi_realize(DeviceState *dev, struct Error **errp)
 
     fifo32_create(&s->tx_fifo, R_FIFO_DEPTH);
     fifo32_create(&s->rx_fifo, R_FIFO_DEPTH);
+
+    obj = object_property_get_link(OBJECT(dev), "sio", NULL);
+    sio = APPLE_SIO(obj);
+
+    if (!sio) {
+        s->dma_capable = false;
+    } else if (s->dma_capable) {
+        s->tx_chan = apple_sio_get_endpoint(sio, s->tx_chan_id);
+        s->rx_chan = apple_sio_get_endpoint(sio, s->rx_chan_id);
+    }
 }
 
 SysBusDevice *apple_spi_create(DTBNode *node)
@@ -387,20 +464,16 @@ SysBusDevice *apple_spi_create(DTBNode *node)
     AppleSPIState *s = APPLE_SPI(dev);
     DTBProp *prop = find_dtb_prop(node, "reg");
     uint64_t mmio_size = ((hwaddr *)prop->value)[1];
-    uint32_t data = 0;
 
     prop = find_dtb_prop(node, "name");
     dev->id = g_strdup((const char *)prop->value);
     s->mmio_size = mmio_size;
 
-    data = 0;
-    /* TODO: SIO */
-    set_dtb_prop(node, "dma-capable", sizeof(data), (uint8_t *)&data);
     if ((prop = find_dtb_prop(node, "dma-channels")) != NULL) {
-        remove_dtb_prop(node, prop);
-    }
-    if ((prop = find_dtb_prop(node, "dma-parent")) != NULL) {
-        remove_dtb_prop(node, prop);
+        uint32_t *data = (uint32_t *)prop->value;
+        s->dma_capable = true;
+        s->tx_chan_id = data[0];
+        s->rx_chan_id = data[8];
     }
     return sbd;
 }

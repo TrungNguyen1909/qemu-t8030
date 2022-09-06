@@ -24,3 +24,4 @@ config STM32F2XX_SPI
 config APPLE_SPI
     bool
     select SSI
+    depends on APPLE_SIO
