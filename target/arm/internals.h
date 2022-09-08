@@ -669,6 +669,10 @@ static inline bool regime_has_2_ranges(ARMMMUIdx mmu_idx)
     case ARMMMUIdx_E20_0:
     case ARMMMUIdx_E20_2:
     case ARMMMUIdx_E20_2_PAN:
+    case ARMMMUIdx_GE10_1:
+    case ARMMMUIdx_GE10_1_PAN:
+    case ARMMMUIdx_GE20_2:
+    case ARMMMUIdx_GE20_2_PAN:
     case ARMMMUIdx_SE10_0:
     case ARMMMUIdx_SE10_1:
     case ARMMMUIdx_SE10_1_PAN:
