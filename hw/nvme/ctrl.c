@@ -5800,6 +5800,7 @@ static void nvme_create_ns_ns_cb(void *opaque, int ret)
     NvmeFormatAIOCB *iocb = opaque;
     NvmeNamespace *ns = iocb->ns;
     int bytes;
+    int zero_size = MIN(ns->size, 512 * KiB);
 
     if (ret < 0) {
         iocb->ret = ret;
@@ -5808,8 +5809,8 @@ static void nvme_create_ns_ns_cb(void *opaque, int ret)
 
     assert(ns);
 
-    if (iocb->offset < ns->size) {
-        bytes = MIN(BDRV_REQUEST_MAX_BYTES, ns->size - iocb->offset);
+    if (iocb->offset < zero_size) {
+        bytes = MIN(BDRV_REQUEST_MAX_BYTES, zero_size - iocb->offset);
 
         iocb->aiocb = blk_aio_pwrite_zeroes(ns->blkconf.blk, iocb->offset,
                                             bytes, BDRV_REQ_MAY_UNMAP,
