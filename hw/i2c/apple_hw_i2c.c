@@ -124,7 +124,6 @@ static void apple_hw_i2c_reg_write(void *opaque,
 
             if (kMTXFIFOData(value) & 1) {
                 s->is_recv = true;
-                s->read_head = s->read_tail = 0;
                 //assert(kMTXFIFOData(value) & 1);
             } else {
                 s->is_recv = false;
@@ -154,7 +153,7 @@ static void apple_hw_i2c_reg_write(void *opaque,
                     }
                 }
                 while (len--) {
-                    s->read_buffer[s->read_tail++] = i2c_recv(s->bus);
+                    fifo8_push(&s->rx_fifo, i2c_recv(s->bus));
                 }
             } else {
                 if (s->is_recv) {
@@ -186,7 +185,7 @@ static void apple_hw_i2c_reg_write(void *opaque,
         break;
     case rCTL:
         if (value & kCTLMRR) {
-            s->read_head = s->read_tail = 0;
+            fifo8_reset(&s->rx_fifo);
         }
         value = 0;
         break;
@@ -210,14 +209,15 @@ static uint64_t apple_hw_i2c_reg_read(void *opaque,
 
     switch (addr) {
     case rMRXFIFO:
-        if (s->read_head >= s->read_tail) {
+        if (fifo8_is_empty(&s->rx_fifo)) {
             value = kMRXFIFOEmpty;
             break;
         }
-        value = kMRXFIFOData(s->read_buffer[s->read_head++]);
+        value = kMRXFIFOData(fifo8_pop(&s->rx_fifo));
         break;
     case rMCNT:
-        value = kMCNTRxCnt(s->read_tail - s->read_head);
+        value &= ~(kMCNTRxCnt(0xff) | kMCNTTxCnt(0xff));
+        value |= kMCNTRxCnt(fifo8_num_used(&s->rx_fifo));
         break;
     default:
         break;
@@ -254,6 +254,7 @@ SysBusDevice *apple_hw_i2c_create(const char *name)
     sysbus_init_irq(sbd, &s->irq);
 
     s->last_irq = 0;
+    fifo8_create(&s->rx_fifo, 0x100);
 
     return sbd;
 }
@@ -264,9 +265,7 @@ static const VMStateDescription vmstate_apple_hw_i2c = {
     .minimum_version_id = 1,
     .fields = (VMStateField[]) {
         VMSTATE_UINT8_ARRAY(reg, AppleHWI2CState, APPLE_HW_I2C_MMIO_SIZE),
-        VMSTATE_UINT8_ARRAY(read_buffer, AppleHWI2CState, 0xff),
-        VMSTATE_UINT8(read_head, AppleHWI2CState),
-        VMSTATE_UINT8(read_tail, AppleHWI2CState),
+        VMSTATE_FIFO8(rx_fifo, AppleHWI2CState),
         VMSTATE_BOOL(last_irq, AppleHWI2CState),
         VMSTATE_BOOL(nak, AppleHWI2CState),
         VMSTATE_BOOL(xip, AppleHWI2CState),

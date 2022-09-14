@@ -3,6 +3,7 @@
 
 #include "hw/sysbus.h"
 #include "qom/object.h"
+#include "qemu/fifo8.h"
 #include "hw/arm/xnu_dtb.h"
 
 #define TYPE_APPLE_HW_I2C "apple.hw-i2c"
@@ -19,9 +20,7 @@ typedef struct AppleHWI2CState {
     I2CBus *bus;
     qemu_irq irq;
     uint8_t reg[APPLE_HW_I2C_MMIO_SIZE];
-    uint8_t read_buffer[0xff];
-    uint8_t read_head;
-    uint8_t read_tail;
+    Fifo8 rx_fifo;
     bool last_irq;
     bool nak;
     bool xip;
