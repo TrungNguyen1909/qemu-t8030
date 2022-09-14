@@ -22,6 +22,7 @@
 #define rIMASK		0x18
 #define rCTL		0x1C
 #define rVERSION	0x28
+#define rRDCOUNT    0x2C
 #define rFILTER		0x38
 
 #define kMTXFIFOWrite		(0 << 10)
@@ -60,16 +61,19 @@
 /* NAK */
 #define kSMSTAmtn			(1 << 21)
 
-/* RX finished */
+/* RX full */
 #define kSMSTAmrf			(1 << 20)
+/* RX not empty */
 #define kSMSTAmrne			(1 << 19)
+
 #define kSMSTAmtr			(1 << 18)
 
-/* TX finished */
+/* TX full */
 #define kSMSTAmtf			(1 << 17)
+/* Tx empty */
 #define kSMSTAmte			(1 << 16)
 
-/* IO error */
+/* timeout error */
 #define kSMSTAtom			(1 << 6)
 
 /* reset RX */
@@ -84,6 +88,8 @@
 #define kCTLCLK(_c)		    (((_c) & 0xff) << 0)
 
 #define kMIXDIV			    4
+
+#define kRDCOUNT(_v)        (((_v) >> 8) & 0xff)
 
 #define REG(_s,_x) *(uint32_t *)&_s->reg[_x]
 
@@ -125,10 +131,8 @@ static void apple_hw_i2c_reg_write(void *opaque,
 
             if (kMTXFIFOData(value) & 1) {
                 s->is_recv = true;
-                //assert(kMTXFIFOData(value) & 1);
             } else {
                 s->is_recv = false;
-                //assert((kMTXFIFOData(value) & 1) == 0);
             }
             if (i2c_start_transfer(s->bus, addr, s->is_recv) != 0) {
                 qemu_log_mask(LOG_GUEST_ERROR,
@@ -137,9 +141,6 @@ static void apple_hw_i2c_reg_write(void *opaque,
                 break;
             }
 
-            if (s->is_recv) {
-                REG(s, rSMSTA) |= kSMSTAmrne;
-            }
             s->xip = true;
             REG(s, rSMSTA) |= kSMSTAxip;
         } else if (s->xip) {
@@ -155,6 +156,12 @@ static void apple_hw_i2c_reg_write(void *opaque,
                 }
                 while (len--) {
                     fifo8_push(&s->rx_fifo, i2c_recv(s->bus));
+                }
+                if (kMTXFIFOData(value) > 0) {
+                    REG(s, rSMSTA) |= (kSMSTAmrne);
+                    if (kMTXFIFOData(value) >= kRDCOUNT(REG(s, rRDCOUNT))) {
+                        REG(s, rSMSTA) |= (kSMSTAmrf);
+                    }
                 }
             } else {
                 if (s->is_recv) {
@@ -172,9 +179,6 @@ static void apple_hw_i2c_reg_write(void *opaque,
         }
         if (value & kMTXFIFOStop) {
             if (s->xip) {
-                if (!s->is_recv && i2c_send(s->bus, kMTXFIFOData(value))) {
-                    REG(s, rSMSTA) |= kSMSTAmtn;
-                }
                 i2c_end_transfer(s->bus);
                 REG(s, rSMSTA) |= kSMSTAxen;
             }
@@ -223,6 +227,9 @@ static uint64_t apple_hw_i2c_reg_read(void *opaque,
     case rMCNT:
         value &= ~(kMCNTRxCnt(0xff) | kMCNTTxCnt(0xff));
         value |= kMCNTRxCnt(fifo8_num_used(&s->rx_fifo));
+        break;
+    case rVERSION:
+        value = 2;
         break;
     default:
         break;
