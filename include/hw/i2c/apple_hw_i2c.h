@@ -7,9 +7,17 @@
 #include "hw/arm/xnu_dtb.h"
 
 #define TYPE_APPLE_HW_I2C "apple.hw-i2c"
-OBJECT_DECLARE_SIMPLE_TYPE(AppleHWI2CState, APPLE_HW_I2C)
+OBJECT_DECLARE_TYPE(AppleHWI2CState, AppleHWI2CClass, APPLE_HW_I2C)
 
 #define APPLE_HW_I2C_MMIO_SIZE  (0x10000)
+
+typedef struct AppleHWI2CClass {
+    /*< private >*/
+    SysBusDeviceClass parent_class;
+    ResettablePhases parent_phases;
+
+    /*< public >*/
+} AppleHWI2CClass;
 
 typedef struct AppleHWI2CState {
     /*< private >*/

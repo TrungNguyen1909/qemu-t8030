@@ -250,6 +250,42 @@ static const MemoryRegionOps i2c_reg_ops = {
     .endianness = DEVICE_NATIVE_ENDIAN,
 };
 
+static void apple_hw_i2c_reset_enter(Object *obj, ResetType type)
+{
+    AppleHWI2CClass *c = APPLE_HW_I2C_GET_CLASS(obj);
+    AppleHWI2CState *s = APPLE_HW_I2C(obj);
+
+    if (c->parent_phases.enter) {
+        c->parent_phases.enter(obj, type);
+    }
+    memset(s->reg, 0, sizeof(s->reg));
+    s->nak = s->xip = s->is_recv = 0;
+    fifo8_reset(&s->rx_fifo);
+}
+
+static void apple_hw_i2c_reset_hold(Object *obj)
+{
+    AppleHWI2CClass *c = APPLE_HW_I2C_GET_CLASS(obj);
+    AppleHWI2CState *s = APPLE_HW_I2C(obj);
+
+    if (c->parent_phases.hold) {
+        c->parent_phases.hold(obj);
+    }
+    qemu_set_irq(s->irq, 0);
+    s->last_irq = 0;
+}
+
+static void apple_hw_i2c_reset_exit(Object *obj)
+{
+    AppleHWI2CClass *c = APPLE_HW_I2C_GET_CLASS(obj);
+    AppleHWI2CState *s = APPLE_HW_I2C(obj);
+
+    if (c->parent_phases.exit) {
+        c->parent_phases.exit(obj);
+    }
+
+}
+
 SysBusDevice *apple_hw_i2c_create(const char *name)
 {
     DeviceState *dev = qdev_new(TYPE_APPLE_HW_I2C);
@@ -289,15 +325,22 @@ static const VMStateDescription vmstate_apple_hw_i2c = {
 static void apple_hw_i2c_class_init(ObjectClass *klass, void *data)
 {
     DeviceClass *dc = DEVICE_CLASS(klass);
+    AppleHWI2CClass *c = APPLE_HW_I2C_CLASS(klass);
+    ResettableClass *rc = RESETTABLE_CLASS(klass);
 
     dc->desc = "Apple HW I2C Controller";
     dc->vmsd = &vmstate_apple_hw_i2c;
+    resettable_class_set_parent_phases(rc, apple_hw_i2c_reset_enter,
+                                       apple_hw_i2c_reset_hold,
+                                       apple_hw_i2c_reset_exit,
+                                       &c->parent_phases);
 }
 
 static const TypeInfo apple_hw_i2c_type_info = {
     .name = TYPE_APPLE_HW_I2C,
     .parent = TYPE_SYS_BUS_DEVICE,
     .instance_size = sizeof(AppleHWI2CState),
+    .class_size = sizeof(AppleHWI2CClass),
     .class_init = apple_hw_i2c_class_init,
 };
 
