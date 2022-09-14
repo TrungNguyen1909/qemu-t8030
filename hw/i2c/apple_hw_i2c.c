@@ -97,6 +97,7 @@ static void apple_hw_i2c_update_irq(AppleHWI2CState *s)
     }
     if (level != s->last_irq) {
         qemu_set_irq(s->irq, level);
+        s->last_irq = level;
     }
 }
 
@@ -182,6 +183,10 @@ static void apple_hw_i2c_reg_write(void *opaque,
     }
     case rSMSTA:
         value = orig & (~value);
+        iflg = true;
+        break;
+    case rIMASK:
+        iflg = true;
         break;
     case rCTL:
         if (value & kCTLMRR) {
@@ -193,10 +198,10 @@ static void apple_hw_i2c_reg_write(void *opaque,
         break;
     }
 
+    *mmio = value;
     if (iflg) {
         apple_hw_i2c_update_irq(s);
     }
-    *mmio = value;
 }
 
 static uint64_t apple_hw_i2c_reg_read(void *opaque,
