@@ -24,7 +24,7 @@
 #ifndef HW_ARM_XNU_MEM_H
 #define HW_ARM_XNU_MEM_H
 
-#include "qemu-common.h"
+#include "exec/hwaddr.h"
 
 extern hwaddr g_virt_base;
 extern hwaddr g_phys_base;

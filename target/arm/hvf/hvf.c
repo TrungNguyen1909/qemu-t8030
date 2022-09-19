@@ -10,7 +10,6 @@
  */
 
 #include "qemu/osdep.h"
-#include "qemu-common.h"
 #include "qemu/error-report.h"
 
 #include "sysemu/runstate.h"
@@ -18,6 +17,7 @@
 #include "sysemu/hvf_int.h"
 #include "sysemu/hw_accel.h"
 #include "hvf_arm.h"
+#include "cpregs.h"
 
 #include <mach/mach_time.h>
 
@@ -565,7 +565,7 @@ int hvf_arch_init_vcpu(CPUState *cpu)
     hv_return_t ret;
     int i;
 
-    env->aarch64 = 1;
+    env->aarch64 = true;
     asm volatile("mrs %0, cntfrq_el0" : "=r"(arm_cpu->gt_cntfrq_hz));
 
     /* Allocate enough space for our sysreg sync */
@@ -978,8 +978,8 @@ static int hvf_sysreg_write(CPUState *cpu, uint32_t reg, uint64_t val)
             }
         }
 
-        env->cp15.c9_pmcr &= ~PMCR_WRITEABLE_MASK;
-        env->cp15.c9_pmcr |= (val & PMCR_WRITEABLE_MASK);
+        env->cp15.c9_pmcr &= ~PMCR_WRITABLE_MASK;
+        env->cp15.c9_pmcr |= (val & PMCR_WRITABLE_MASK);
 
         pmu_op_finish(env);
         break;
@@ -1201,7 +1201,7 @@ int hvf_vcpu_exec(CPUState *cpu)
         /* we got kicked, no exit to process */
         return 0;
     default:
-        assert(0);
+        g_assert_not_reached();
     }
 
     hvf_sync_vtimer(cpu);

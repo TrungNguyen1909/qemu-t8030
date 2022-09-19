@@ -39,14 +39,22 @@
  * to catch when they are accidentally called by the wrong API.
  */
 
-int bdrv_pwrite_zeroes(BdrvChild *child, int64_t offset,
-                       int64_t bytes, BdrvRequestFlags flags);
+int generated_co_wrapper bdrv_pwrite_zeroes(BdrvChild *child, int64_t offset,
+                                            int64_t bytes,
+                                            BdrvRequestFlags flags);
 int bdrv_make_zero(BdrvChild *child, BdrvRequestFlags flags);
-int bdrv_pread(BdrvChild *child, int64_t offset, void *buf, int64_t bytes);
-int bdrv_pwrite(BdrvChild *child, int64_t offset, const void *buf,
-                int64_t bytes);
-int bdrv_pwrite_sync(BdrvChild *child, int64_t offset,
-                     const void *buf, int64_t bytes);
+int generated_co_wrapper bdrv_pread(BdrvChild *child, int64_t offset,
+                                    int64_t bytes, void *buf,
+                                    BdrvRequestFlags flags);
+int generated_co_wrapper bdrv_pwrite(BdrvChild *child, int64_t offset,
+                                     int64_t bytes, const void *buf,
+                                     BdrvRequestFlags flags);
+int generated_co_wrapper bdrv_pwrite_sync(BdrvChild *child, int64_t offset,
+                                          int64_t bytes, const void *buf,
+                                          BdrvRequestFlags flags);
+int coroutine_fn bdrv_co_pwrite_sync(BdrvChild *child, int64_t offset,
+                                     int64_t bytes, const void *buf,
+                                     BdrvRequestFlags flags);
 /*
  * Efficiently zero a region of the disk image.  Note that this is a regular
  * I/O request like read or write and should have a reasonable size.  This
@@ -103,6 +111,7 @@ int bdrv_apply_auto_read_only(BlockDriverState *bs, const char *errmsg,
 bool bdrv_is_read_only(BlockDriverState *bs);
 bool bdrv_is_writable(BlockDriverState *bs);
 bool bdrv_is_sg(BlockDriverState *bs);
+int bdrv_get_flags(BlockDriverState *bs);
 bool bdrv_is_inserted(BlockDriverState *bs);
 void bdrv_lock_medium(BlockDriverState *bs, bool locked);
 void bdrv_eject(BlockDriverState *bs, bool eject_flag);
@@ -269,7 +278,6 @@ void bdrv_drained_end_no_poll(BlockDriverState *bs, int *drained_end_counter);
                    cond); })
 
 void bdrv_drain(BlockDriverState *bs);
-void coroutine_fn bdrv_co_drain(BlockDriverState *bs);
 
 int generated_co_wrapper
 bdrv_truncate(BdrvChild *child, int64_t offset, bool exact,

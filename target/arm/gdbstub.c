@@ -19,8 +19,9 @@
  */
 #include "qemu/osdep.h"
 #include "cpu.h"
-#include "internals.h"
 #include "exec/gdbstub.h"
+#include "internals.h"
+#include "cpregs.h"
 
 typedef struct RegisterSysregXmlParam {
     CPUState *cs;
@@ -117,7 +118,7 @@ int arm_cpu_gdb_write_register(CPUState *cs, uint8_t *mem_buf, int n)
             /*
              * Don't allow writing to XPSR.Exception as it can cause
              * a transition into or out of handler mode (it's not
-             * writeable via the MSR insn so this is a reasonable
+             * writable via the MSR insn so this is a reasonable
              * restriction). Other fields are safe to update.
              */
             xpsr_write(env, tmp, ~XPSR_EXCP);
@@ -272,7 +273,7 @@ static void arm_gen_one_xml_sysreg_tag(GString *s, DynamicGDBXMLInfo *dyn_xml,
 static void arm_register_sysreg_for_xml(gpointer key, gpointer value,
                                         gpointer p)
 {
-    uint32_t ri_key = *(uint32_t *)key;
+    uint32_t ri_key = (uintptr_t)key;
     ARMCPRegInfo *ri = value;
     RegisterSysregXmlParam *param = (RegisterSysregXmlParam *)p;
     GString *s = param->s;

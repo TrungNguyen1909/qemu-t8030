@@ -10,7 +10,6 @@
 #include "qemu/log.h"
 #include "qapi/visitor.h"
 #include "qapi/error.h"
-#include "qemu-common.h"
 #include "monitor/monitor.h"
 #include "target/ppc/cpu.h"
 #include "hw/pci-host/pnv_phb4_regs.h"
@@ -31,22 +30,6 @@
 #define phb_pec_error(pec, fmt, ...)                                    \
     qemu_log_mask(LOG_GUEST_ERROR, "phb4_pec[%d:%d]: " fmt "\n",        \
                   (pec)->chip_id, (pec)->index, ## __VA_ARGS__)
-
-/*
- * QEMU version of the GETFIELD/SETFIELD macros
- *
- * These are common with the PnvXive model.
- */
-static inline uint64_t GETFIELD(uint64_t mask, uint64_t word)
-{
-    return (word & mask) >> ctz64(mask);
-}
-
-static inline uint64_t SETFIELD(uint64_t mask, uint64_t word,
-                                uint64_t value)
-{
-    return (word & ~mask) | ((value << ctz64(mask)) & mask);
-}
 
 static PCIDevice *pnv_phb4_find_cfg_dev(PnvPHB4 *phb)
 {
@@ -1548,6 +1531,7 @@ static void pnv_phb4_instance_init(Object *obj)
 static void pnv_phb4_realize(DeviceState *dev, Error **errp)
 {
     PnvPHB4 *phb = PNV_PHB4(dev);
+    PnvPhb4PecClass *pecc = PNV_PHB4_PEC_GET_CLASS(phb->pec);
     PCIHostState *pci = PCI_HOST_BRIDGE(dev);
     XiveSource *xsrc = &phb->xsrc;
     int nr_irqs;
@@ -1583,6 +1567,10 @@ static void pnv_phb4_realize(DeviceState *dev, Error **errp)
                                      0, 4, TYPE_PNV_PHB4_ROOT_BUS);
     pci_setup_iommu(pci->bus, pnv_phb4_dma_iommu, phb);
     pci->bus->flags |= PCI_BUS_EXTENDED_CONFIG_SPACE;
+
+    /* Add a single Root port if running with defaults */
+    pnv_phb_attach_root_port(pci, pecc->rp_model,
+                             phb->phb_id, phb->chip_id);
 
     /* Setup XIVE Source */
     if (phb->big_phb) {
@@ -1693,11 +1681,11 @@ static void pnv_phb4_xive_notify(XiveNotifier *xf, uint32_t srcno,
 }
 
 static Property pnv_phb4_properties[] = {
-        DEFINE_PROP_UINT32("index", PnvPHB4, phb_id, 0),
-        DEFINE_PROP_UINT32("chip-id", PnvPHB4, chip_id, 0),
-        DEFINE_PROP_LINK("pec", PnvPHB4, pec, TYPE_PNV_PHB4_PEC,
-                         PnvPhb4PecState *),
-        DEFINE_PROP_END_OF_LIST(),
+    DEFINE_PROP_UINT32("index", PnvPHB4, phb_id, 0),
+    DEFINE_PROP_UINT32("chip-id", PnvPHB4, chip_id, 0),
+    DEFINE_PROP_LINK("pec", PnvPHB4, pec, TYPE_PNV_PHB4_PEC,
+                     PnvPhb4PecState *),
+    DEFINE_PROP_END_OF_LIST(),
 };
 
 static void pnv_phb4_class_init(ObjectClass *klass, void *data)
@@ -1748,10 +1736,6 @@ static const TypeInfo pnv_phb4_root_bus_info = {
     .name = TYPE_PNV_PHB4_ROOT_BUS,
     .parent = TYPE_PCIE_BUS,
     .class_init = pnv_phb4_root_bus_class_init,
-    .interfaces = (InterfaceInfo[]) {
-        { INTERFACE_PCIE_DEVICE },
-        { }
-    },
 };
 
 static void pnv_phb4_root_port_reset(DeviceState *dev)
@@ -1772,27 +1756,13 @@ static void pnv_phb4_root_port_reset(DeviceState *dev)
     pci_set_word(conf + PCI_PREF_MEMORY_LIMIT, 0xfff1);
     pci_set_long(conf + PCI_PREF_BASE_UPPER32, 0x1); /* Hack */
     pci_set_long(conf + PCI_PREF_LIMIT_UPPER32, 0xffffffff);
+    pci_config_set_interrupt_pin(conf, 0);
 }
 
 static void pnv_phb4_root_port_realize(DeviceState *dev, Error **errp)
 {
     PCIERootPortClass *rpc = PCIE_ROOT_PORT_GET_CLASS(dev);
-    PCIDevice *pci = PCI_DEVICE(dev);
-    PCIBus *bus = pci_get_bus(pci);
-    PnvPHB4 *phb = NULL;
     Error *local_err = NULL;
-
-    phb = (PnvPHB4 *) object_dynamic_cast(OBJECT(bus->qbus.parent),
-                                          TYPE_PNV_PHB4);
-
-    if (!phb) {
-        error_setg(errp, "%s must be connected to pnv-phb4 buses", dev->id);
-        return;
-    }
-
-    /* Set unique chassis/slot values for the root port */
-    qdev_prop_set_uint8(&pci->qdev, "chassis", phb->chip_id);
-    qdev_prop_set_uint16(&pci->qdev, "slot", phb->phb_id);
 
     rpc->parent_realize(dev, &local_err);
     if (local_err) {

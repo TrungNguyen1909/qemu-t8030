@@ -159,13 +159,13 @@ static void free_dsr(PVRDMADev *dev)
     free_dev_ring(pci_dev, &dev->dsr_info.cq, dev->dsr_info.cq_ring_state);
 
     rdma_pci_dma_unmap(pci_dev, dev->dsr_info.req,
-                         sizeof(union pvrdma_cmd_req));
+                       sizeof(union pvrdma_cmd_req));
 
     rdma_pci_dma_unmap(pci_dev, dev->dsr_info.rsp,
-                         sizeof(union pvrdma_cmd_resp));
+                       sizeof(union pvrdma_cmd_resp));
 
     rdma_pci_dma_unmap(pci_dev, dev->dsr_info.dsr,
-                         sizeof(struct pvrdma_device_shared_region));
+                       sizeof(struct pvrdma_device_shared_region));
 
     dev->dsr_info.dsr = NULL;
 }
@@ -249,7 +249,8 @@ static void init_dsr_dev_caps(PVRDMADev *dev)
 {
     struct pvrdma_device_shared_region *dsr;
 
-    if (dev->dsr_info.dsr == NULL) {
+    if (!dev->dsr_info.dsr) {
+        /* Buggy or malicious guest driver */
         rdma_error_report("Can't initialized DSR");
         return;
     }
@@ -608,7 +609,7 @@ static void pvrdma_realize(PCIDevice *pdev, Error **errp)
     rdma_info_report("Initializing device %s %x.%x", pdev->name,
                      PCI_SLOT(pdev->devfn), PCI_FUNC(pdev->devfn));
 
-    if (TARGET_PAGE_SIZE != qemu_real_host_page_size) {
+    if (TARGET_PAGE_SIZE != qemu_real_host_page_size()) {
         error_setg(errp, "Target page size must be the same as host page size");
         return;
     }

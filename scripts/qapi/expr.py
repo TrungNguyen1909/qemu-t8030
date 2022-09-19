@@ -443,7 +443,7 @@ def check_features(features: Optional[object],
         check_keys(feat, info, source, ['name'], ['if'])
         check_name_is_str(feat['name'], info, source)
         source = "%s '%s'" % (source, feat['name'])
-        check_name_str(feat['name'], info, source)
+        check_name_lower(feat['name'], info, source)
         check_if(feat, info, source)
 
 
@@ -554,7 +554,7 @@ def check_alternate(expr: _JSONObject, info: QAPISourceInfo) -> None:
         check_name_lower(key, info, source)
         check_keys(value, info, source, ['type'], ['if'])
         check_if(value, info, source)
-        check_type(value['type'], info, source)
+        check_type(value['type'], info, source, allow_array=True)
 
 
 def check_command(expr: _JSONObject, info: QAPISourceInfo) -> None:

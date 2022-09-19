@@ -2166,7 +2166,11 @@ uint32_t ide_ioport_read(void *opaque, uint32_t addr)
     hob = bus->cmd & (IDE_CTRL_HOB);
     switch (reg_num) {
     case ATA_IOPORT_RR_DATA:
-        ret = 0xff;
+        /*
+         * The pre-GRUB Solaris x86 bootloader relies upon inb
+         * consuming a word from the drive's sector buffer.
+         */
+        ret = ide_data_readw(bus, addr) & 0xff;
         break;
     case ATA_IOPORT_RR_ERROR:
         if ((!bus->ifs[0].blk && !bus->ifs[1].blk) ||
@@ -2544,7 +2548,6 @@ int ide_init_drive(IDEState *s, BlockBackend *blk, IDEDriveKind kind,
     s->smart_selftest_count = 0;
     if (kind == IDE_CD) {
         blk_set_dev_ops(blk, &ide_cd_block_ops, s);
-        blk_set_guest_block_size(blk, 2048);
     } else {
         if (!blk_is_inserted(s->blk)) {
             error_setg(errp, "Device needs media, but drive is empty");

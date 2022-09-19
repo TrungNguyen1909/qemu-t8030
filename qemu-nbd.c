@@ -21,7 +21,7 @@
 #include <libgen.h>
 #include <pthread.h>
 
-#include "qemu-common.h"
+#include "qemu/help-texts.h"
 #include "qapi/error.h"
 #include "qemu/cutils.h"
 #include "sysemu/block-backend.h"
@@ -567,7 +567,7 @@ int main(int argc, char **argv)
     QDict *options = NULL;
     const char *export_name = NULL; /* defaults to "" later for server mode */
     const char *export_description = NULL;
-    strList *bitmaps = NULL;
+    BlockDirtyBitmapOrStrList *bitmaps = NULL;
     bool alloc_depth = false;
     const char *tlscredsid = NULL;
     const char *tlshostname = NULL;
@@ -687,7 +687,14 @@ int main(int argc, char **argv)
             alloc_depth = true;
             break;
         case 'B':
-            QAPI_LIST_PREPEND(bitmaps, g_strdup(optarg));
+            {
+                BlockDirtyBitmapOrStr *el = g_new(BlockDirtyBitmapOrStr, 1);
+                *el = (BlockDirtyBitmapOrStr) {
+                    .type = QTYPE_QSTRING,
+                    .u.local = g_strdup(optarg),
+                };
+                QAPI_LIST_PREPEND(bitmaps, el);
+            }
             break;
         case 'k':
             sockpath = optarg;
@@ -804,7 +811,7 @@ int main(int argc, char **argv)
         exit(1);
     }
     trace_init_file();
-    qemu_set_log(LOG_TRACE);
+    qemu_set_log(LOG_TRACE, &error_fatal);
 
     socket_activation = check_socket_activation();
     if (socket_activation == 0) {
@@ -902,13 +909,14 @@ int main(int argc, char **argv)
 
     if ((device && !verbose) || fork_process) {
 #ifndef WIN32
+        g_autoptr(GError) err = NULL;
         int stderr_fd[2];
         pid_t pid;
         int ret;
 
-        if (qemu_pipe(stderr_fd) < 0) {
+        if (!g_unix_open_pipe(stderr_fd, FD_CLOEXEC, &err)) {
             error_report("Error setting up communication pipe: %s",
-                         strerror(errno));
+                         err->message);
             exit(EXIT_FAILURE);
         }
 
@@ -1087,7 +1095,7 @@ int main(int argc, char **argv)
 
     bs->detect_zeroes = detect_zeroes;
 
-    nbd_server_is_qemu_nbd(true);
+    nbd_server_is_qemu_nbd(shared);
 
     export_opts = g_new(BlockExportOptions, 1);
     *export_opts = (BlockExportOptions) {

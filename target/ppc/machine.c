@@ -157,7 +157,8 @@ static int cpu_pre_save(void *opaque)
         | PPC2_ATOMIC_ISA206 | PPC2_FP_CVT_ISA206
         | PPC2_FP_TST_ISA206 | PPC2_BCTAR_ISA207
         | PPC2_LSQ_ISA207 | PPC2_ALTIVEC_207
-        | PPC2_ISA205 | PPC2_ISA207S | PPC2_FP_CVT_S64 | PPC2_TM;
+        | PPC2_ISA205 | PPC2_ISA207S | PPC2_FP_CVT_S64 | PPC2_TM
+        | PPC2_MEM_LWSYNC;
 
     env->spr[SPR_LR] = env->lr;
     env->spr[SPR_CTR] = env->ctr;
@@ -417,7 +418,7 @@ static bool tm_needed(void *opaque)
 {
     PowerPCCPU *cpu = opaque;
     CPUPPCState *env = &cpu->env;
-    return msr_ts;
+    return FIELD_EX64(env->msr, MSR, TS);
 }
 
 static const VMStateDescription vmstate_tm = {

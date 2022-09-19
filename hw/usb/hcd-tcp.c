@@ -4,7 +4,7 @@
 #include "hw/usb.h"
 #include "tcp-usb.h"
 #include "hw/usb/hcd-tcp.h"
-#include "qemu-common.h"
+#include "qemu/cutils.h"
 #include "hw/qdev-properties.h"
 #include "qemu/main-loop.h"
 #include "qemu/coroutine.h"
@@ -86,7 +86,7 @@ static bool tcp_usb_write(QIOChannel *ioc, void *buf, ssize_t len)
         qemu_mutex_unlock_iothread();
     }
 
-    if (!qio_channel_writev_full_all(ioc, &iov, 1, NULL, 0, &err)) {
+    if (!qio_channel_writev_full_all(ioc, &iov, 1, NULL, 0, 0, &err)) {
         ret = true;
     }
 

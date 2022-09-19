@@ -13,10 +13,8 @@
 #ifndef LIBQOS_PCI_H
 #define LIBQOS_PCI_H
 
-#include "libqtest.h"
+#include "../libqtest.h"
 #include "qgraph.h"
-
-#define QPCI_PIO_LIMIT    0x10000
 
 #define QPCI_DEVFN(dev, fn) (((dev) << 3) | (fn))
 
@@ -51,14 +49,16 @@ struct QPCIBus {
                           uint8_t offset, uint32_t value);
 
     QTestState *qts;
-    uint16_t pio_alloc_ptr;
+    uint64_t pio_alloc_ptr, pio_limit;
     uint64_t mmio_alloc_ptr, mmio_limit;
     bool has_buggy_msi; /* TRUE for spapr, FALSE for pci */
+    bool not_hotpluggable; /* TRUE if devices cannot be hotplugged */
 
 };
 
 struct QPCIBar {
     uint64_t addr;
+    bool is_io;
 };
 
 struct QPCIDevice

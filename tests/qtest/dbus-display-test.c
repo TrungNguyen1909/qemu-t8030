@@ -2,8 +2,7 @@
 #include "qemu/dbus.h"
 #include <gio/gio.h>
 #include <gio/gunixfdlist.h>
-#include "libqos/libqtest.h"
-#include "qemu-common.h"
+#include "libqtest.h"
 #include "dbus-display1.h"
 
 static GDBusConnection*

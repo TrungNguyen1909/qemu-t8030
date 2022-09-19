@@ -351,7 +351,7 @@ static void via1_one_second(void *opaque)
 static void pram_update(MOS6522Q800VIA1State *v1s)
 {
     if (v1s->blk) {
-        if (blk_pwrite(v1s->blk, 0, v1s->PRAM, sizeof(v1s->PRAM), 0) < 0) {
+        if (blk_pwrite(v1s->blk, 0, sizeof(v1s->PRAM), v1s->PRAM, 0) < 0) {
             qemu_log("pram_update: cannot write to file\n");
         }
     }
@@ -587,7 +587,7 @@ static void adb_via_poll(void *opaque)
         /*
          * For older Linux kernels that switch to IDLE mode after sending the
          * ADB command, detect if there is an existing response and return that
-         * as a a "fake" autopoll reply or bus timeout accordingly
+         * as a "fake" autopoll reply or bus timeout accordingly
          */
         *data = v1s->adb_data_out[0];
         olen = v1s->adb_data_in_size;
@@ -1029,8 +1029,8 @@ static void mos6522_q800_via1_realize(DeviceState *dev, Error **errp)
             return;
         }
 
-        len = blk_pread(v1s->blk, 0, v1s->PRAM, sizeof(v1s->PRAM));
-        if (len != sizeof(v1s->PRAM)) {
+        ret = blk_pread(v1s->blk, 0, sizeof(v1s->PRAM), v1s->PRAM, 0);
+        if (ret < 0) {
             error_setg(errp, "can't read PRAM contents");
             return;
         }

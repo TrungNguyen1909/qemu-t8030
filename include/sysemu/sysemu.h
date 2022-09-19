@@ -13,6 +13,8 @@ extern const char *qemu_name;
 extern QemuUUID qemu_uuid;
 extern bool qemu_uuid_set;
 
+const char *qemu_get_vm_name(void);
+
 void qemu_add_exit_notifier(Notifier *notify);
 void qemu_remove_exit_notifier(Notifier *notify);
 
@@ -32,6 +34,7 @@ typedef enum {
 } VGAInterfaceType;
 
 extern int vga_interface_type;
+extern bool vga_interface_created;
 
 extern int graphic_width;
 extern int graphic_height;
@@ -39,12 +42,8 @@ extern int graphic_depth;
 extern int display_opengl;
 extern const char *keyboard_layout;
 extern int win2k_install_hack;
-extern int alt_grab;
-extern int ctrl_grab;
 extern int graphic_rotate;
 extern int old_param;
-extern int boot_menu;
-extern bool boot_strict;
 extern uint8_t *boot_splash_filedata;
 extern bool enable_mlock;
 extern bool enable_cpu_pm;
@@ -104,7 +103,7 @@ void qemu_boot_set(const char *boot_order, Error **errp);
 bool defaults_enabled(void);
 
 void qemu_init(int argc, char **argv, char **envp);
-void qemu_main_loop(void);
+int qemu_main_loop(void);
 void qemu_cleanup(void);
 
 extern QemuOptsList qemu_legacy_drive_opts;

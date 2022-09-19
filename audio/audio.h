@@ -32,7 +32,7 @@
 
 typedef void (*audio_callback_fn) (void *opaque, int avail);
 
-#ifdef HOST_WORDS_BIGENDIAN
+#if HOST_BIG_ENDIAN
 #define AUDIO_HOST_ENDIANNESS 1
 #else
 #define AUDIO_HOST_ENDIANNESS 0
@@ -168,6 +168,7 @@ void audio_sample_to_uint64(const void *samples, int pos,
 void audio_sample_from_uint64(void *samples, int pos,
                             uint64_t left, uint64_t right);
 
+void audio_define(Audiodev *audio);
 void audio_parse_option(const char *opt);
 void audio_init_audiodevs(void);
 void audio_legacy_help(void);

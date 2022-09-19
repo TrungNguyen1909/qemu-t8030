@@ -375,7 +375,7 @@ static bool tcg_target_const_match(int64_t val, TCGType type, int ct)
 #define OPC_PSLLQ       (0xf3 | P_EXT | P_DATA16)
 #define OPC_PSRAW       (0xe1 | P_EXT | P_DATA16)
 #define OPC_PSRAD       (0xe2 | P_EXT | P_DATA16)
-#define OPC_VPSRAQ      (0x72 | P_EXT | P_DATA16 | P_VEXW | P_EVEX)
+#define OPC_VPSRAQ      (0xe2 | P_EXT | P_DATA16 | P_VEXW | P_EVEX)
 #define OPC_PSRLW       (0xd1 | P_EXT | P_DATA16)
 #define OPC_PSRLD       (0xd2 | P_EXT | P_DATA16)
 #define OPC_PSRLQ       (0xd3 | P_EXT | P_DATA16)
@@ -1652,7 +1652,7 @@ static void tcg_out_branch(TCGContext *s, int call, const tcg_insn_unit *dest)
     } else {
         /* rip-relative addressing into the constant pool.
            This is 6 + 8 = 14 bytes, as compared to using an
-           an immediate load 10 + 6 = 16 bytes, plus we may
+           immediate load 10 + 6 = 16 bytes, plus we may
            be able to re-use the pool constant for more calls.  */
         tcg_out_opc(s, OPC_GRP5, 0, 0, 0);
         tcg_out8(s, (call ? EXT5_CALLN_Ev : EXT5_JMPN_Ev) << 3 | 5);

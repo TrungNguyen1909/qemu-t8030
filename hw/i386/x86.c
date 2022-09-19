@@ -25,8 +25,8 @@
 #include "qemu/option.h"
 #include "qemu/cutils.h"
 #include "qemu/units.h"
-#include "qemu-common.h"
 #include "qemu/datadir.h"
+#include "qemu/guest-random.h"
 #include "qapi/error.h"
 #include "qapi/qmp/qerror.h"
 #include "qapi/qapi-visit-common.h"
@@ -39,6 +39,7 @@
 #include "sysemu/replay.h"
 #include "sysemu/sysemu.h"
 #include "sysemu/cpu-timers.h"
+#include "sysemu/xen.h"
 #include "trace.h"
 
 #include "hw/i386/x86.h"
@@ -123,6 +124,21 @@ void x86_cpus_init(X86MachineState *x86ms, int default_cpu_version)
      */
     x86ms->apic_id_limit = x86_cpu_apic_id_from_index(x86ms,
                                                       ms->smp.max_cpus - 1) + 1;
+
+    /*
+     * Can we support APIC ID 255 or higher?
+     *
+     * Under Xen: yes.
+     * With userspace emulated lapic: no
+     * With KVM's in-kernel lapic: only if X2APIC API is enabled.
+     */
+    if (x86ms->apic_id_limit > 255 && !xen_enabled() &&
+        (!kvm_irqchip_in_kernel() || !kvm_enable_x2apic())) {
+        error_report("current -smp configuration requires kernel "
+                     "irqchip and X2APIC API support.");
+        exit(EXIT_FAILURE);
+    }
+
     possible_cpus = mc->possible_cpu_arch_ids(ms);
     for (i = 0; i < ms->smp.cpus; i++) {
         x86_cpu_new(x86ms, possible_cpus->cpus[i].arch_id, &error_fatal);
@@ -751,7 +767,8 @@ static bool load_elfboot(const char *kernel_filename,
 void x86_load_linux(X86MachineState *x86ms,
                     FWCfgState *fw_cfg,
                     int acpi_data_size,
-                    bool pvh_enabled)
+                    bool pvh_enabled,
+                    bool legacy_no_rng_seed)
 {
     bool linuxboot_dma_enabled = X86_MACHINE_GET_CLASS(x86ms)->fwcfg_dma_enabled;
     uint16_t protocol;
@@ -759,7 +776,7 @@ void x86_load_linux(X86MachineState *x86ms,
     int dtb_size, setup_data_offset;
     uint32_t initrd_max;
     uint8_t header[8192], *setup, *kernel;
-    hwaddr real_addr, prot_addr, cmdline_addr, initrd_addr = 0;
+    hwaddr real_addr, prot_addr, cmdline_addr, initrd_addr = 0, first_setup_data = 0;
     FILE *f;
     char *vmode;
     MachineState *machine = MACHINE(x86ms);
@@ -769,6 +786,7 @@ void x86_load_linux(X86MachineState *x86ms,
     const char *dtb_filename = machine->dtb;
     const char *kernel_cmdline = machine->kernel_cmdline;
     SevKernelLoaderContext sev_load_ctx = {};
+    enum { RNG_SEED_LENGTH = 32 };
 
     /* Align to 16 bytes as a paranoia measure */
     cmdline_size = (strlen(kernel_cmdline) + 16) & ~15;
@@ -1048,15 +1066,30 @@ void x86_load_linux(X86MachineState *x86ms,
         kernel_size = setup_data_offset + sizeof(struct setup_data) + dtb_size;
         kernel = g_realloc(kernel, kernel_size);
 
-        stq_p(header + 0x250, prot_addr + setup_data_offset);
 
         setup_data = (struct setup_data *)(kernel + setup_data_offset);
-        setup_data->next = 0;
+        setup_data->next = cpu_to_le64(first_setup_data);
+        first_setup_data = prot_addr + setup_data_offset;
         setup_data->type = cpu_to_le32(SETUP_DTB);
         setup_data->len = cpu_to_le32(dtb_size);
 
         load_image_size(dtb_filename, setup_data->data, dtb_size);
     }
+
+    if (!legacy_no_rng_seed) {
+        setup_data_offset = QEMU_ALIGN_UP(kernel_size, 16);
+        kernel_size = setup_data_offset + sizeof(struct setup_data) + RNG_SEED_LENGTH;
+        kernel = g_realloc(kernel, kernel_size);
+        setup_data = (struct setup_data *)(kernel + setup_data_offset);
+        setup_data->next = cpu_to_le64(first_setup_data);
+        first_setup_data = prot_addr + setup_data_offset;
+        setup_data->type = cpu_to_le32(SETUP_RNG_SEED);
+        setup_data->len = cpu_to_le32(RNG_SEED_LENGTH);
+        qemu_guest_getrandom_nofail(setup_data->data, RNG_SEED_LENGTH);
+    }
+
+    /* Offset 0x250 is a pointer to the first setup_data link. */
+    stq_p(header + 0x250, first_setup_data);
 
     /*
      * If we're starting an encrypted VM, it will be OVMF based, which uses the
@@ -1100,7 +1133,7 @@ void x86_bios_rom_init(MachineState *ms, const char *default_firmware,
     char *filename;
     MemoryRegion *bios, *isa_bios;
     int bios_size, isa_bios_size;
-    int ret;
+    ssize_t ret;
 
     /* BIOS load */
     bios_name = ms->firmware ?: default_firmware;
@@ -1116,14 +1149,25 @@ void x86_bios_rom_init(MachineState *ms, const char *default_firmware,
     }
     bios = g_malloc(sizeof(*bios));
     memory_region_init_ram(bios, NULL, "pc.bios", bios_size, &error_fatal);
-    if (!isapc_ram_fw) {
-        memory_region_set_readonly(bios, true);
-    }
-    ret = rom_add_file_fixed(bios_name, (uint32_t)(-bios_size), -1);
-    if (ret != 0) {
-    bios_error:
-        fprintf(stderr, "qemu: could not load PC BIOS '%s'\n", bios_name);
-        exit(1);
+    if (sev_enabled()) {
+        /*
+         * The concept of a "reset" simply doesn't exist for
+         * confidential computing guests, we have to destroy and
+         * re-launch them instead.  So there is no need to register
+         * the firmware as rom to properly re-initialize on reset.
+         * Just go for a straight file load instead.
+         */
+        void *ptr = memory_region_get_ram_ptr(bios);
+        load_image_size(filename, ptr, bios_size);
+        x86_firmware_configure(ptr, bios_size);
+    } else {
+        if (!isapc_ram_fw) {
+            memory_region_set_readonly(bios, true);
+        }
+        ret = rom_add_file_fixed(bios_name, (uint32_t)(-bios_size), -1);
+        if (ret != 0) {
+            goto bios_error;
+        }
     }
     g_free(filename);
 
@@ -1144,6 +1188,11 @@ void x86_bios_rom_init(MachineState *ms, const char *default_firmware,
     memory_region_add_subregion(rom_memory,
                                 (uint32_t)(-bios_size),
                                 bios);
+    return;
+
+bios_error:
+    fprintf(stderr, "qemu: could not load PC BIOS '%s'\n", bios_name);
+    exit(1);
 }
 
 bool x86_machine_is_smm_enabled(const X86MachineState *x86ms)
@@ -1211,6 +1260,40 @@ static void x86_machine_set_acpi(Object *obj, Visitor *v, const char *name,
     X86MachineState *x86ms = X86_MACHINE(obj);
 
     visit_type_OnOffAuto(v, name, &x86ms->acpi, errp);
+}
+
+static void x86_machine_get_pit(Object *obj, Visitor *v, const char *name,
+                                    void *opaque, Error **errp)
+{
+    X86MachineState *x86ms = X86_MACHINE(obj);
+    OnOffAuto pit = x86ms->pit;
+
+    visit_type_OnOffAuto(v, name, &pit, errp);
+}
+
+static void x86_machine_set_pit(Object *obj, Visitor *v, const char *name,
+                                    void *opaque, Error **errp)
+{
+    X86MachineState *x86ms = X86_MACHINE(obj);;
+
+    visit_type_OnOffAuto(v, name, &x86ms->pit, errp);
+}
+
+static void x86_machine_get_pic(Object *obj, Visitor *v, const char *name,
+                                void *opaque, Error **errp)
+{
+    X86MachineState *x86ms = X86_MACHINE(obj);
+    OnOffAuto pic = x86ms->pic;
+
+    visit_type_OnOffAuto(v, name, &pic, errp);
+}
+
+static void x86_machine_set_pic(Object *obj, Visitor *v, const char *name,
+                                void *opaque, Error **errp)
+{
+    X86MachineState *x86ms = X86_MACHINE(obj);
+
+    visit_type_OnOffAuto(v, name, &x86ms->pic, errp);
 }
 
 static char *x86_machine_get_oem_id(Object *obj, Error **errp)
@@ -1302,10 +1385,13 @@ static void x86_machine_initfn(Object *obj)
 
     x86ms->smm = ON_OFF_AUTO_AUTO;
     x86ms->acpi = ON_OFF_AUTO_AUTO;
+    x86ms->pit = ON_OFF_AUTO_AUTO;
+    x86ms->pic = ON_OFF_AUTO_AUTO;
     x86ms->pci_irq_mask = ACPI_BUILD_PCI_IRQS;
     x86ms->oem_id = g_strndup(ACPI_BUILD_APPNAME6, 6);
     x86ms->oem_table_id = g_strndup(ACPI_BUILD_APPNAME8, 8);
     x86ms->bus_lock_ratelimit = 0;
+    x86ms->above_4g_mem_start = 4 * GiB;
 }
 
 static void x86_machine_class_init(ObjectClass *oc, void *data)
@@ -1332,6 +1418,20 @@ static void x86_machine_class_init(ObjectClass *oc, void *data)
         NULL, NULL);
     object_class_property_set_description(oc, X86_MACHINE_ACPI,
         "Enable ACPI");
+
+    object_class_property_add(oc, X86_MACHINE_PIT, "OnOffAuto",
+                              x86_machine_get_pit,
+                              x86_machine_set_pit,
+                              NULL, NULL);
+    object_class_property_set_description(oc, X86_MACHINE_PIT,
+        "Enable i8254 PIT");
+
+    object_class_property_add(oc, X86_MACHINE_PIC, "OnOffAuto",
+                              x86_machine_get_pic,
+                              x86_machine_set_pic,
+                              NULL, NULL);
+    object_class_property_set_description(oc, X86_MACHINE_PIC,
+        "Enable i8259 PIC");
 
     object_class_property_add_str(oc, X86_MACHINE_OEM_ID,
                                   x86_machine_get_oem_id,

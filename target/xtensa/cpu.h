@@ -29,7 +29,9 @@
 #define XTENSA_CPU_H
 
 #include "cpu-qom.h"
+#include "qemu/cpu-float.h"
 #include "exec/cpu-defs.h"
+#include "hw/clock.h"
 #include "xtensa-isa.h"
 
 /* Xtensa processors have a weak memory model */
@@ -494,7 +496,7 @@ typedef struct XtensaConfigList {
     struct XtensaConfigList *next;
 } XtensaConfigList;
 
-#ifdef HOST_WORDS_BIGENDIAN
+#if HOST_BIG_ENDIAN
 enum {
     FP_F32_HIGH,
     FP_F32_LOW,
@@ -558,6 +560,7 @@ struct ArchCPU {
     CPUState parent_obj;
     /*< public >*/
 
+    Clock *clock;
     CPUNegativeOffsetState neg;
     CPUXtensaState env;
 };
@@ -580,9 +583,9 @@ void xtensa_count_regs(const XtensaConfig *config,
                        unsigned *n_regs, unsigned *n_core_regs);
 int xtensa_cpu_gdb_read_register(CPUState *cpu, GByteArray *buf, int reg);
 int xtensa_cpu_gdb_write_register(CPUState *cpu, uint8_t *buf, int reg);
-void xtensa_cpu_do_unaligned_access(CPUState *cpu, vaddr addr,
-                                    MMUAccessType access_type, int mmu_idx,
-                                    uintptr_t retaddr) QEMU_NORETURN;
+G_NORETURN void xtensa_cpu_do_unaligned_access(CPUState *cpu, vaddr addr,
+                                               MMUAccessType access_type, int mmu_idx,
+                                               uintptr_t retaddr);
 
 #define cpu_list xtensa_cpu_list
 
@@ -590,7 +593,7 @@ void xtensa_cpu_do_unaligned_access(CPUState *cpu, vaddr addr,
 #define XTENSA_CPU_TYPE_NAME(model) model XTENSA_CPU_TYPE_SUFFIX
 #define CPU_RESOLVING_TYPE TYPE_XTENSA_CPU
 
-#ifdef TARGET_WORDS_BIGENDIAN
+#if TARGET_BIG_ENDIAN
 #define XTENSA_DEFAULT_CPU_MODEL "fsf"
 #define XTENSA_DEFAULT_CPU_NOMMU_MODEL "fsf"
 #else
@@ -791,5 +794,8 @@ static inline void cpu_get_tb_cpu_state(CPUXtensaState *env, target_ulong *pc,
         *flags |= XTENSA_TBFLAG_YIELD;
     }
 }
+
+XtensaCPU *xtensa_cpu_create_with_clock(const char *cpu_type,
+                                        Clock *cpu_refclk);
 
 #endif

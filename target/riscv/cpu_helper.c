@@ -65,6 +65,8 @@ void cpu_get_tb_cpu_state(CPURISCVState *env, target_ulong *pc,
         flags = FIELD_DP32(flags, TB_FLAGS, LMUL,
                     FIELD_EX64(env->vtype, VTYPE, VLMUL));
         flags = FIELD_DP32(flags, TB_FLAGS, VL_EQ_VLMAX, vl_eq_vlmax);
+        flags = FIELD_DP32(flags, TB_FLAGS, VTA,
+                    FIELD_EX64(env->vtype, VTYPE, VTA));
     } else {
         flags = FIELD_DP32(flags, TB_FLAGS, VILL, 1);
     }
@@ -166,17 +168,17 @@ void riscv_cpu_update_mask(CPURISCVState *env)
  * 14 "
  * 15 "
  * 16 "
- * 18 Debug/trace interrupt
- * 20 (Reserved interrupt)
+ * 17 "
+ * 18 "
+ * 19 "
+ * 20 "
+ * 21 "
  * 22 "
- * 24 "
- * 26 "
- * 28 "
- * 30 (Reserved for standard reporting of bus or system errors)
+ * 23 "
  */
 
 static const int hviprio_index2irq[] = {
-    0, 1, 4, 5, 8, 13, 14, 15, 16, 18, 20, 22, 24, 26, 28, 30 };
+    0, 1, 4, 5, 8, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23 };
 static const int hviprio_index2rdzero[] = {
     1, 0, 1, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0 };
 
@@ -205,50 +207,60 @@ int riscv_cpu_hviprio_index2irq(int index, int *out_irq, int *out_rdzero)
  *  Default  |
  *  Priority | Major Interrupt Numbers
  * ----------------------------------------------------------------
- *  Highest  | 63 (3f), 62 (3e), 31 (1f), 30 (1e), 61 (3d), 60 (3c),
- *           | 59 (3b), 58 (3a), 29 (1d), 28 (1c), 57 (39), 56 (38),
- *           | 55 (37), 54 (36), 27 (1b), 26 (1a), 53 (35), 52 (34),
- *           | 51 (33), 50 (32), 25 (19), 24 (18), 49 (31), 48 (30)
+ *  Highest  | 47, 23, 46, 45, 22, 44,
+ *           | 43, 21, 42, 41, 20, 40
  *           |
  *           | 11 (0b),  3 (03),  7 (07)
  *           |  9 (09),  1 (01),  5 (05)
  *           | 12 (0c)
  *           | 10 (0a),  2 (02),  6 (06)
  *           |
- *           | 47 (2f), 46 (2e), 23 (17), 22 (16), 45 (2d), 44 (2c),
- *           | 43 (2b), 42 (2a), 21 (15), 20 (14), 41 (29), 40 (28),
- *           | 39 (27), 38 (26), 19 (13), 18 (12), 37 (25), 36 (24),
- *  Lowest   | 35 (23), 34 (22), 17 (11), 16 (10), 33 (21), 32 (20)
+ *           | 39, 19, 38, 37, 18, 36,
+ *  Lowest   | 35, 17, 34, 33, 16, 32
  * ----------------------------------------------------------------
  */
 static const uint8_t default_iprio[64] = {
- [63] = IPRIO_DEFAULT_UPPER,
- [62] = IPRIO_DEFAULT_UPPER + 1,
- [31] = IPRIO_DEFAULT_UPPER + 2,
- [30] = IPRIO_DEFAULT_UPPER + 3,
- [61] = IPRIO_DEFAULT_UPPER + 4,
- [60] = IPRIO_DEFAULT_UPPER + 5,
+ /* Custom interrupts 48 to 63 */
+ [63] = IPRIO_MMAXIPRIO,
+ [62] = IPRIO_MMAXIPRIO,
+ [61] = IPRIO_MMAXIPRIO,
+ [60] = IPRIO_MMAXIPRIO,
+ [59] = IPRIO_MMAXIPRIO,
+ [58] = IPRIO_MMAXIPRIO,
+ [57] = IPRIO_MMAXIPRIO,
+ [56] = IPRIO_MMAXIPRIO,
+ [55] = IPRIO_MMAXIPRIO,
+ [54] = IPRIO_MMAXIPRIO,
+ [53] = IPRIO_MMAXIPRIO,
+ [52] = IPRIO_MMAXIPRIO,
+ [51] = IPRIO_MMAXIPRIO,
+ [50] = IPRIO_MMAXIPRIO,
+ [49] = IPRIO_MMAXIPRIO,
+ [48] = IPRIO_MMAXIPRIO,
 
- [59] = IPRIO_DEFAULT_UPPER + 6,
- [58] = IPRIO_DEFAULT_UPPER + 7,
- [29] = IPRIO_DEFAULT_UPPER + 8,
- [28] = IPRIO_DEFAULT_UPPER + 9,
- [57] = IPRIO_DEFAULT_UPPER + 10,
- [56] = IPRIO_DEFAULT_UPPER + 11,
+ /* Custom interrupts 24 to 31 */
+ [31] = IPRIO_MMAXIPRIO,
+ [30] = IPRIO_MMAXIPRIO,
+ [29] = IPRIO_MMAXIPRIO,
+ [28] = IPRIO_MMAXIPRIO,
+ [27] = IPRIO_MMAXIPRIO,
+ [26] = IPRIO_MMAXIPRIO,
+ [25] = IPRIO_MMAXIPRIO,
+ [24] = IPRIO_MMAXIPRIO,
 
- [55] = IPRIO_DEFAULT_UPPER + 12,
- [54] = IPRIO_DEFAULT_UPPER + 13,
- [27] = IPRIO_DEFAULT_UPPER + 14,
- [26] = IPRIO_DEFAULT_UPPER + 15,
- [53] = IPRIO_DEFAULT_UPPER + 16,
- [52] = IPRIO_DEFAULT_UPPER + 17,
+ [47] = IPRIO_DEFAULT_UPPER,
+ [23] = IPRIO_DEFAULT_UPPER + 1,
+ [46] = IPRIO_DEFAULT_UPPER + 2,
+ [45] = IPRIO_DEFAULT_UPPER + 3,
+ [22] = IPRIO_DEFAULT_UPPER + 4,
+ [44] = IPRIO_DEFAULT_UPPER + 5,
 
- [51] = IPRIO_DEFAULT_UPPER + 18,
- [50] = IPRIO_DEFAULT_UPPER + 19,
- [25] = IPRIO_DEFAULT_UPPER + 20,
- [24] = IPRIO_DEFAULT_UPPER + 21,
- [49] = IPRIO_DEFAULT_UPPER + 22,
- [48] = IPRIO_DEFAULT_UPPER + 23,
+ [43] = IPRIO_DEFAULT_UPPER + 6,
+ [21] = IPRIO_DEFAULT_UPPER + 7,
+ [42] = IPRIO_DEFAULT_UPPER + 8,
+ [41] = IPRIO_DEFAULT_UPPER + 9,
+ [20] = IPRIO_DEFAULT_UPPER + 10,
+ [40] = IPRIO_DEFAULT_UPPER + 11,
 
  [11] = IPRIO_DEFAULT_M,
  [3]  = IPRIO_DEFAULT_M + 1,
@@ -264,33 +276,19 @@ static const uint8_t default_iprio[64] = {
  [2]  = IPRIO_DEFAULT_VS + 1,
  [6]  = IPRIO_DEFAULT_VS + 2,
 
- [47] = IPRIO_DEFAULT_LOWER,
- [46] = IPRIO_DEFAULT_LOWER + 1,
- [23] = IPRIO_DEFAULT_LOWER + 2,
- [22] = IPRIO_DEFAULT_LOWER + 3,
- [45] = IPRIO_DEFAULT_LOWER + 4,
- [44] = IPRIO_DEFAULT_LOWER + 5,
+ [39] = IPRIO_DEFAULT_LOWER,
+ [19] = IPRIO_DEFAULT_LOWER + 1,
+ [38] = IPRIO_DEFAULT_LOWER + 2,
+ [37] = IPRIO_DEFAULT_LOWER + 3,
+ [18] = IPRIO_DEFAULT_LOWER + 4,
+ [36] = IPRIO_DEFAULT_LOWER + 5,
 
- [43] = IPRIO_DEFAULT_LOWER + 6,
- [42] = IPRIO_DEFAULT_LOWER + 7,
- [21] = IPRIO_DEFAULT_LOWER + 8,
- [20] = IPRIO_DEFAULT_LOWER + 9,
- [41] = IPRIO_DEFAULT_LOWER + 10,
- [40] = IPRIO_DEFAULT_LOWER + 11,
-
- [39] = IPRIO_DEFAULT_LOWER + 12,
- [38] = IPRIO_DEFAULT_LOWER + 13,
- [19] = IPRIO_DEFAULT_LOWER + 14,
- [18] = IPRIO_DEFAULT_LOWER + 15,
- [37] = IPRIO_DEFAULT_LOWER + 16,
- [36] = IPRIO_DEFAULT_LOWER + 17,
-
- [35] = IPRIO_DEFAULT_LOWER + 18,
- [34] = IPRIO_DEFAULT_LOWER + 19,
- [17] = IPRIO_DEFAULT_LOWER + 20,
- [16] = IPRIO_DEFAULT_LOWER + 21,
- [33] = IPRIO_DEFAULT_LOWER + 22,
- [32] = IPRIO_DEFAULT_LOWER + 23,
+ [35] = IPRIO_DEFAULT_LOWER + 6,
+ [17] = IPRIO_DEFAULT_LOWER + 7,
+ [34] = IPRIO_DEFAULT_LOWER + 8,
+ [33] = IPRIO_DEFAULT_LOWER + 9,
+ [16] = IPRIO_DEFAULT_LOWER + 10,
+ [32] = IPRIO_DEFAULT_LOWER + 11,
 };
 
 uint8_t riscv_cpu_default_priority(int irq)
@@ -340,7 +338,7 @@ static int riscv_cpu_pending_to_irq(CPURISCVState *env,
     return best_irq;
 }
 
-static uint64_t riscv_cpu_all_pending(CPURISCVState *env)
+uint64_t riscv_cpu_all_pending(CPURISCVState *env)
 {
     uint32_t gein = get_field(env->hstatus, HSTATUS_VGEIN);
     uint64_t vsgein = (env->hgeip & (1ULL << gein)) ? MIP_VSEIP : 0;
@@ -632,8 +630,8 @@ uint64_t riscv_cpu_update_mip(RISCVCPU *cpu, uint64_t mask, uint64_t value)
     return old;
 }
 
-void riscv_cpu_set_rdtime_fn(CPURISCVState *env, uint64_t (*fn)(uint32_t),
-                             uint32_t arg)
+void riscv_cpu_set_rdtime_fn(CPURISCVState *env, uint64_t (*fn)(void *),
+                             void *arg)
 {
     env->rdtime_fn = fn;
     env->rdtime_fn_arg = arg;
@@ -1150,7 +1148,7 @@ void riscv_cpu_do_transaction_failed(CPUState *cs, hwaddr physaddr,
     env->badaddr = addr;
     env->two_stage_lookup = riscv_cpu_virt_enabled(env) ||
                             riscv_cpu_two_stage_lookup(mmu_idx);
-    riscv_raise_exception(&cpu->env, cs->exception_index, retaddr);
+    cpu_loop_exit_restore(cs, retaddr);
 }
 
 void riscv_cpu_do_unaligned_access(CPUState *cs, vaddr addr,
@@ -1175,7 +1173,7 @@ void riscv_cpu_do_unaligned_access(CPUState *cs, vaddr addr,
     env->badaddr = addr;
     env->two_stage_lookup = riscv_cpu_virt_enabled(env) ||
                             riscv_cpu_two_stage_lookup(mmu_idx);
-    riscv_raise_exception(env, cs->exception_index, retaddr);
+    cpu_loop_exit_restore(cs, retaddr);
 }
 
 bool riscv_cpu_tlb_fill(CPUState *cs, vaddr address, int size,
@@ -1311,7 +1309,7 @@ bool riscv_cpu_tlb_fill(CPUState *cs, vaddr address, int size,
                             first_stage_error,
                             riscv_cpu_virt_enabled(env) ||
                                 riscv_cpu_two_stage_lookup(mmu_idx));
-        riscv_raise_exception(env, cs->exception_index, retaddr);
+        cpu_loop_exit_restore(cs, retaddr);
     }
 
     return true;
@@ -1345,7 +1343,7 @@ void riscv_cpu_do_interrupt(CPUState *cs)
 
     if  (cause == RISCV_EXCP_SEMIHOST) {
         if (env->priv >= PRV_S) {
-            env->gpr[xA0] = do_common_semihosting(cs);
+            do_common_semihosting(cs);
             env->pc += 4;
             return;
         }
@@ -1367,10 +1365,11 @@ void riscv_cpu_do_interrupt(CPUState *cs)
         case RISCV_EXCP_INST_PAGE_FAULT:
         case RISCV_EXCP_LOAD_PAGE_FAULT:
         case RISCV_EXCP_STORE_PAGE_FAULT:
-            write_gva = true;
+            write_gva = env->two_stage_lookup;
             tval = env->badaddr;
             break;
         case RISCV_EXCP_ILLEGAL_INST:
+        case RISCV_EXCP_VIRT_INSTRUCTION_FAULT:
             tval = env->bins;
             break;
         default:
@@ -1434,7 +1433,6 @@ void riscv_cpu_do_interrupt(CPUState *cs)
                 /* Trap into HS mode */
                 env->hstatus = set_field(env->hstatus, HSTATUS_SPV, false);
                 htval = env->guest_phys_fault_addr;
-                write_gva = false;
             }
             env->hstatus = set_field(env->hstatus, HSTATUS_GVA, write_gva);
         }

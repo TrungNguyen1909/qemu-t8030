@@ -10,7 +10,6 @@
  */
 
 #include "qemu/osdep.h"
-#include "qemu-common.h"
 #include "qemu/timer.h"
 #include "qemu/range.h"
 #include "qemu/units.h"
@@ -294,7 +293,7 @@ static uint32_t vof_setprop(MachineState *ms, void *fdt, Vof *vof,
                             uint32_t nodeph, uint32_t pname,
                             uint32_t valaddr, uint32_t vallen)
 {
-    char propname[OF_PROPNAME_LEN_MAX + 1];
+    char propname[OF_PROPNAME_LEN_MAX + 1] = "";
     uint32_t ret = PROM_ERROR;
     int offset, rc;
     char trval[64] = "";

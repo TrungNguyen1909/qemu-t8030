@@ -25,7 +25,6 @@
 #include "qemu/osdep.h"
 #include "qemu/guest-random.h"
 #include "qapi/error.h"
-#include "qemu-common.h"
 #include "hw/arm/boot.h"
 #include "sysemu/sysemu.h"
 #include "qemu/error-report.h"

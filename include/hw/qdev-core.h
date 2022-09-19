@@ -193,6 +193,7 @@ struct DeviceState {
     int instance_id_alias;
     int alias_required_for_version;
     ResettableState reset;
+    GSList *unplug_blockers;
 };
 
 struct DeviceListener {
@@ -385,7 +386,7 @@ bool qdev_realize_and_unref(DeviceState *dev, BusState *bus, Error **errp);
  *
  *  - unrealize any child buses by calling qbus_unrealize()
  *    (this will recursively unrealize any devices on those buses)
- *  - call the the unrealize method of @dev
+ *  - call the unrealize method of @dev
  *
  * The device can then be freed by causing its reference count to go
  * to zero.
@@ -418,6 +419,34 @@ void qdev_simple_device_unplug_cb(HotplugHandler *hotplug_dev,
                                   DeviceState *dev, Error **errp);
 void qdev_machine_creation_done(void);
 bool qdev_machine_modified(void);
+
+/**
+ * qdev_add_unplug_blocker: Add an unplug blocker to a device
+ *
+ * @dev: Device to be blocked from unplug
+ * @reason: Reason for blocking
+ */
+void qdev_add_unplug_blocker(DeviceState *dev, Error *reason);
+
+/**
+ * qdev_del_unplug_blocker: Remove an unplug blocker from a device
+ *
+ * @dev: Device to be unblocked
+ * @reason: Pointer to the Error used with qdev_add_unplug_blocker.
+ *          Used as a handle to lookup the blocker for deletion.
+ */
+void qdev_del_unplug_blocker(DeviceState *dev, Error *reason);
+
+/**
+ * qdev_unplug_blocked: Confirm if a device is blocked from unplug
+ *
+ * @dev: Device to be tested
+ * @reason: Returns one of the reasons why the device is blocked,
+ *          if any
+ *
+ * Returns: true if device is blocked from unplug, false otherwise
+ */
+bool qdev_unplug_blocked(DeviceState *dev, Error **errp);
 
 /**
  * GpioPolarity: Polarity of a GPIO line

@@ -24,8 +24,8 @@
 #include "exec/helper-proto.h"
 
 /* Exceptions processing helpers */
-void QEMU_NORETURN riscv_raise_exception(CPURISCVState *env,
-                                          uint32_t exception, uintptr_t pc)
+G_NORETURN void riscv_raise_exception(CPURISCVState *env,
+                                      uint32_t exception, uintptr_t pc)
 {
     CPUState *cs = env_cpu(env);
     cs->exception_index = exception;
@@ -39,6 +39,15 @@ void helper_raise_exception(CPURISCVState *env, uint32_t exception)
 
 target_ulong helper_csrr(CPURISCVState *env, int csr)
 {
+    /*
+     * The seed CSR must be accessed with a read-write instruction. A
+     * read-only instruction such as CSRRS/CSRRC with rs1=x0 or CSRRSI/
+     * CSRRCI with uimm=0 will raise an illegal instruction exception.
+     */
+    if (csr == CSR_SEED) {
+        riscv_raise_exception(env, RISCV_EXCP_ILLEGAL_INST, GETPC());
+    }
+
     target_ulong val = 0;
     RISCVException ret = riscv_csrrw(env, csr, &val, 0, 0);
 

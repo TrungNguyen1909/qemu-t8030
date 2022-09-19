@@ -1,6 +1,5 @@
 #include "qemu/osdep.h"
 #include "qapi/error.h"
-#include "qemu-common.h"
 #include "hw/irq.h"
 #include "hw/misc/apple_aes.h"
 #include "hw/misc/apple_aes_reg.h"

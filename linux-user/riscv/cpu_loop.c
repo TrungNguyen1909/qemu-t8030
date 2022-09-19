@@ -18,7 +18,6 @@
  */
 
 #include "qemu/osdep.h"
-#include "qemu-common.h"
 #include "qemu/error-report.h"
 #include "qemu.h"
 #include "user-internals.h"
@@ -82,7 +81,7 @@ void cpu_loop(CPURISCVState *env)
             force_sig_fault(TARGET_SIGTRAP, TARGET_TRAP_BRKPT, env->pc);
             break;
         case RISCV_EXCP_SEMIHOST:
-            env->gpr[xA0] = do_common_semihosting(cs);
+            do_common_semihosting(cs);
             env->pc += 4;
             break;
         default:

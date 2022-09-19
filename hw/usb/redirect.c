@@ -26,7 +26,7 @@
  */
 
 #include "qemu/osdep.h"
-#include "qemu-common.h"
+#include "qemu/cutils.h"
 #include "qemu/units.h"
 #include "qapi/error.h"
 #include "qemu/timer.h"
@@ -1280,7 +1280,8 @@ static void usbredir_create_parser(USBRedirDevice *dev)
     }
 #endif
 
-    if (runstate_check(RUN_STATE_INMIGRATE)) {
+    if (runstate_check(RUN_STATE_INMIGRATE) ||
+        runstate_check(RUN_STATE_PRELAUNCH)) {
         flags |= usbredirparser_fl_no_hello;
     }
     usbredirparser_init(dev->parser, VERSION, caps, USB_REDIR_CAPS_SIZE,
@@ -2620,6 +2621,7 @@ static const TypeInfo usbredir_dev_info = {
     .instance_init = usbredir_instance_init,
 };
 module_obj(TYPE_USB_REDIR);
+module_kconfig(USB);
 
 static void usbredir_register_types(void)
 {

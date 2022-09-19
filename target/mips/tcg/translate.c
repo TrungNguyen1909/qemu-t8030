@@ -1213,9 +1213,6 @@ TCGv_i64 fpu_f64[32];
 
 #include "exec/gen-icount.h"
 
-#define DISAS_STOP       DISAS_TARGET_0
-#define DISAS_EXIT       DISAS_TARGET_1
-
 static const char regnames_HI[][4] = {
     "HI0", "HI1", "HI2", "HI3",
 };
@@ -12094,14 +12091,6 @@ static inline bool is_uhi(int sdbbp_code)
 #endif
 }
 
-#ifdef CONFIG_USER_ONLY
-/* The above should dead-code away any calls to this..*/
-static inline void gen_helper_do_semihosting(void *env)
-{
-    g_assert_not_reached();
-}
-#endif
-
 void gen_ldxs(DisasContext *ctx, int base, int index, int rd)
 {
     TCGv t0 = tcg_temp_new();
@@ -13910,7 +13899,7 @@ static void decode_opc_special_r6(CPUMIPSState *env, DisasContext *ctx)
         break;
     case R6_OPC_SDBBP:
         if (is_uhi(extract32(ctx->opcode, 6, 20))) {
-            gen_helper_do_semihosting(cpu_env);
+            ctx->base.is_jmp = DISAS_SEMIHOST;
         } else {
             if (ctx->hflags & MIPS_HFLAG_SBRI) {
                 gen_reserved_instruction(ctx);
@@ -14322,7 +14311,7 @@ static void decode_opc_special2_legacy(CPUMIPSState *env, DisasContext *ctx)
         break;
     case OPC_SDBBP:
         if (is_uhi(extract32(ctx->opcode, 6, 20))) {
-            gen_helper_do_semihosting(cpu_env);
+            ctx->base.is_jmp = DISAS_SEMIHOST;
         } else {
             /*
              * XXX: not clear which exception should be raised
@@ -15963,6 +15952,11 @@ static void decode_opc(CPUMIPSState *env, DisasContext *ctx)
     if (cpu_supports_isa(env, INSN_VR54XX) && decode_ext_vr54xx(ctx, ctx->opcode)) {
         return;
     }
+#if defined(TARGET_MIPS64)
+    if (cpu_supports_isa(env, INSN_OCTEON) && decode_ext_octeon(ctx, ctx->opcode)) {
+        return;
+    }
+#endif
 
     /* ISA extensions */
     if (ase_msa_available(env) && decode_ase_msa(ctx, ctx->opcode)) {
@@ -16023,8 +16017,9 @@ static void mips_tr_init_disas_context(DisasContextBase *dcbase, CPUState *cs)
 #else
         ctx->mem_idx = hflags_mmu_index(ctx->hflags);
 #endif
-    ctx->default_tcg_memop_mask = (ctx->insn_flags & (ISA_MIPS_R6 |
-                                  INSN_LOONGSON3A)) ? MO_UNALN : MO_ALIGN;
+    ctx->default_tcg_memop_mask = (!(ctx->insn_flags & ISA_NANOMIPS32) &&
+                                  (ctx->insn_flags & (ISA_MIPS_R6 |
+                                  INSN_LOONGSON3A))) ? MO_UNALN : MO_ALIGN;
 
     /*
      * Execute a branch and its delay slot as a single instruction.
@@ -16100,6 +16095,9 @@ static void mips_tr_translate_insn(DisasContextBase *dcbase, CPUState *cs)
     if (is_slot) {
         gen_branch(ctx, insn_bytes);
     }
+    if (ctx->base.is_jmp == DISAS_SEMIHOST) {
+        generate_exception_err(ctx, EXCP_SEMIHOST, insn_bytes);
+    }
     ctx->base.pc_next += insn_bytes;
 
     if (ctx->base.is_jmp != DISAS_NEXT) {
@@ -16141,10 +16139,11 @@ static void mips_tr_tb_stop(DisasContextBase *dcbase, CPUState *cs)
     }
 }
 
-static void mips_tr_disas_log(const DisasContextBase *dcbase, CPUState *cs)
+static void mips_tr_disas_log(const DisasContextBase *dcbase,
+                              CPUState *cs, FILE *logfile)
 {
-    qemu_log("IN: %s\n", lookup_symbol(dcbase->pc_first));
-    log_target_disas(cs, dcbase->pc_first, dcbase->tb->size);
+    fprintf(logfile, "IN: %s\n", lookup_symbol(dcbase->pc_first));
+    target_disas(logfile, cs, dcbase->pc_first, dcbase->tb->size);
 }
 
 static const TranslatorOps mips_tr_ops = {

@@ -26,7 +26,7 @@
 #ifndef HW_ARM_T8030_H
 #define HW_ARM_T8030_H
 
-#include "qemu-common.h"
+#include "qemu/osdep.h"
 #include "exec/hwaddr.h"
 #include "hw/boards.h"
 #include "hw/arm/boot.h"

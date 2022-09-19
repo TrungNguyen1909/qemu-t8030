@@ -173,7 +173,7 @@ static void gen_mtvscr(DisasContext *ctx)
 
     val = tcg_temp_new_i32();
     bofs = avr_full_offset(rB(ctx->opcode));
-#ifdef HOST_WORDS_BIGENDIAN
+#if HOST_BIG_ENDIAN
     bofs += 3 * 4;
 #endif
 
@@ -1234,18 +1234,6 @@ GEN_VXFORM_SAT(vsubuws, MO_32, sub, ussub, 0, 26);
 GEN_VXFORM_SAT(vsubsbs, MO_8, sub, sssub, 0, 28);
 GEN_VXFORM_SAT(vsubshs, MO_16, sub, sssub, 0, 29);
 GEN_VXFORM_SAT(vsubsws, MO_32, sub, sssub, 0, 30);
-GEN_VXFORM(vadduqm, 0, 4);
-GEN_VXFORM(vaddcuq, 0, 5);
-GEN_VXFORM3(vaddeuqm, 30, 0);
-GEN_VXFORM3(vaddecuq, 30, 0);
-GEN_VXFORM_DUAL(vaddeuqm, PPC_NONE, PPC2_ALTIVEC_207, \
-            vaddecuq, PPC_NONE, PPC2_ALTIVEC_207)
-GEN_VXFORM(vsubuqm, 0, 20);
-GEN_VXFORM(vsubcuq, 0, 21);
-GEN_VXFORM3(vsubeuqm, 31, 0);
-GEN_VXFORM3(vsubecuq, 31, 0);
-GEN_VXFORM_DUAL(vsubeuqm, PPC_NONE, PPC2_ALTIVEC_207, \
-            vsubecuq, PPC_NONE, PPC2_ALTIVEC_207)
 GEN_VXFORM_TRANS(vsl, 2, 7);
 GEN_VXFORM_TRANS(vsr, 2, 11);
 GEN_VXFORM_ENV(vpkuhum, 7, 0);
@@ -1692,7 +1680,7 @@ static void gen_vsplt(DisasContext *ctx, int vece)
 
     /* Experimental testing shows that hardware masks the immediate.  */
     bofs += (uimm << vece) & 15;
-#ifndef HOST_WORDS_BIGENDIAN
+#if !HOST_BIG_ENDIAN
     bofs ^= 15;
     bofs &= ~((1 << vece) - 1);
 #endif
@@ -2553,20 +2541,17 @@ static void gen_vmladduhm(DisasContext *ctx)
     tcg_temp_free_ptr(rd);
 }
 
-static bool trans_VPERM(DisasContext *ctx, arg_VA *a)
+static bool do_va_helper(DisasContext *ctx, arg_VA *a,
+    void (*gen_helper)(TCGv_ptr, TCGv_ptr, TCGv_ptr, TCGv_ptr))
 {
     TCGv_ptr vrt, vra, vrb, vrc;
-
-    REQUIRE_INSNS_FLAGS(ctx, ALTIVEC);
     REQUIRE_VECTOR(ctx);
 
     vrt = gen_avr_ptr(a->vrt);
     vra = gen_avr_ptr(a->vra);
     vrb = gen_avr_ptr(a->vrb);
     vrc = gen_avr_ptr(a->rc);
-
-    gen_helper_VPERM(vrt, vra, vrb, vrc);
-
+    gen_helper(vrt, vra, vrb, vrc);
     tcg_temp_free_ptr(vrt);
     tcg_temp_free_ptr(vra);
     tcg_temp_free_ptr(vrb);
@@ -2575,27 +2560,14 @@ static bool trans_VPERM(DisasContext *ctx, arg_VA *a)
     return true;
 }
 
-static bool trans_VPERMR(DisasContext *ctx, arg_VA *a)
-{
-    TCGv_ptr vrt, vra, vrb, vrc;
+TRANS_FLAGS2(ALTIVEC_207, VADDECUQ, do_va_helper, gen_helper_VADDECUQ)
+TRANS_FLAGS2(ALTIVEC_207, VADDEUQM, do_va_helper, gen_helper_VADDEUQM)
 
-    REQUIRE_INSNS_FLAGS2(ctx, ISA300);
-    REQUIRE_VECTOR(ctx);
+TRANS_FLAGS2(ALTIVEC_207, VSUBEUQM, do_va_helper, gen_helper_VSUBEUQM)
+TRANS_FLAGS2(ALTIVEC_207, VSUBECUQ, do_va_helper, gen_helper_VSUBECUQ)
 
-    vrt = gen_avr_ptr(a->vrt);
-    vra = gen_avr_ptr(a->vra);
-    vrb = gen_avr_ptr(a->vrb);
-    vrc = gen_avr_ptr(a->rc);
-
-    gen_helper_VPERMR(vrt, vra, vrb, vrc);
-
-    tcg_temp_free_ptr(vrt);
-    tcg_temp_free_ptr(vra);
-    tcg_temp_free_ptr(vrb);
-    tcg_temp_free_ptr(vrc);
-
-    return true;
-}
+TRANS_FLAGS(ALTIVEC, VPERM, do_va_helper, gen_helper_VPERM)
+TRANS_FLAGS2(ISA300, VPERMR, do_va_helper, gen_helper_VPERMR)
 
 static bool trans_VSEL(DisasContext *ctx, arg_VA *a)
 {
@@ -2609,9 +2581,33 @@ static bool trans_VSEL(DisasContext *ctx, arg_VA *a)
     return true;
 }
 
-GEN_VAFORM_PAIRED(vmsumubm, vmsummbm, 18)
-GEN_VAFORM_PAIRED(vmsumuhm, vmsumuhs, 19)
-GEN_VAFORM_PAIRED(vmsumshm, vmsumshs, 20)
+TRANS_FLAGS(ALTIVEC, VMSUMUBM, do_va_helper, gen_helper_VMSUMUBM)
+TRANS_FLAGS(ALTIVEC, VMSUMMBM, do_va_helper, gen_helper_VMSUMMBM)
+TRANS_FLAGS(ALTIVEC, VMSUMSHM, do_va_helper, gen_helper_VMSUMSHM)
+TRANS_FLAGS(ALTIVEC, VMSUMUHM, do_va_helper, gen_helper_VMSUMUHM)
+
+static bool do_va_env_helper(DisasContext *ctx, arg_VA *a,
+    void (*gen_helper)(TCGv_ptr, TCGv_ptr, TCGv_ptr, TCGv_ptr, TCGv_ptr))
+{
+    TCGv_ptr vrt, vra, vrb, vrc;
+    REQUIRE_VECTOR(ctx);
+
+    vrt = gen_avr_ptr(a->vrt);
+    vra = gen_avr_ptr(a->vra);
+    vrb = gen_avr_ptr(a->vrb);
+    vrc = gen_avr_ptr(a->rc);
+    gen_helper(cpu_env, vrt, vra, vrb, vrc);
+    tcg_temp_free_ptr(vrt);
+    tcg_temp_free_ptr(vra);
+    tcg_temp_free_ptr(vrb);
+    tcg_temp_free_ptr(vrc);
+
+    return true;
+}
+
+TRANS_FLAGS(ALTIVEC, VMSUMUHS, do_va_env_helper, gen_helper_VMSUMUHS)
+TRANS_FLAGS(ALTIVEC, VMSUMSHS, do_va_env_helper, gen_helper_VMSUMSHS)
+
 GEN_VAFORM_PAIRED(vmaddfp, vnmsubfp, 23)
 
 GEN_VXFORM_NOA(vclzb, 1, 28)
@@ -2715,7 +2711,6 @@ GEN_VXFORM_TRANS(vgbbd, 6, 20);
 GEN_VXFORM(vpmsumb, 4, 16)
 GEN_VXFORM(vpmsumh, 4, 17)
 GEN_VXFORM(vpmsumw, 4, 18)
-GEN_VXFORM(vpmsumd, 4, 19)
 
 #define GEN_BCD(op)                                 \
 static void gen_##op(DisasContext *ctx)             \
@@ -2860,11 +2855,6 @@ GEN_VXFORM_DUAL(vsubuwm, PPC_ALTIVEC, PPC_NONE, \
                 bcdus, PPC_NONE, PPC2_ISA300)
 GEN_VXFORM_DUAL(vsubsbs, PPC_ALTIVEC, PPC_NONE, \
                 bcdtrunc, PPC_NONE, PPC2_ISA300)
-GEN_VXFORM_DUAL(vsubuqm, PPC2_ALTIVEC_207, PPC_NONE, \
-                bcdtrunc, PPC_NONE, PPC2_ISA300)
-GEN_VXFORM_DUAL(vsubcuq, PPC2_ALTIVEC_207, PPC_NONE, \
-                bcdutrunc, PPC_NONE, PPC2_ISA300)
-
 
 static void gen_vsbox(DisasContext *ctx)
 {
@@ -3099,6 +3089,14 @@ static bool do_vx_helper(DisasContext *ctx, arg_VX *a,
     return true;
 }
 
+TRANS_FLAGS2(ALTIVEC_207, VADDCUQ, do_vx_helper, gen_helper_VADDCUQ)
+TRANS_FLAGS2(ALTIVEC_207, VADDUQM, do_vx_helper, gen_helper_VADDUQM)
+
+TRANS_FLAGS2(ALTIVEC_207, VPMSUMD, do_vx_helper, gen_helper_VPMSUMD)
+
+TRANS_FLAGS2(ALTIVEC_207, VSUBCUQ, do_vx_helper, gen_helper_VSUBCUQ)
+TRANS_FLAGS2(ALTIVEC_207, VSUBUQM, do_vx_helper, gen_helper_VSUBUQM)
+
 static bool do_vx_vmuleo(DisasContext *ctx, arg_VX *a, bool even,
                          void (*gen_mul)(TCGv_i64, TCGv_i64, TCGv_i64, TCGv_i64))
 {
@@ -3235,6 +3233,157 @@ TRANS(VMULHSW, do_vx_mulh, true , do_vx_vmulhw_i64)
 TRANS(VMULHSD, do_vx_mulh, true , do_vx_vmulhd_i64)
 TRANS(VMULHUW, do_vx_mulh, false, do_vx_vmulhw_i64)
 TRANS(VMULHUD, do_vx_mulh, false, do_vx_vmulhd_i64)
+
+static bool do_vdiv_vmod(DisasContext *ctx, arg_VX *a, const int vece,
+                         void (*func_32)(TCGv_i32 t, TCGv_i32 a, TCGv_i32 b),
+                         void (*func_64)(TCGv_i64 t, TCGv_i64 a, TCGv_i64 b))
+{
+    const GVecGen3 op = {
+        .fni4 = func_32,
+        .fni8 = func_64,
+        .vece = vece
+    };
+
+    REQUIRE_VECTOR(ctx);
+
+    tcg_gen_gvec_3(avr_full_offset(a->vrt), avr_full_offset(a->vra),
+                   avr_full_offset(a->vrb), 16, 16, &op);
+
+    return true;
+}
+
+#define DIVU32(NAME, DIV)                                               \
+static void NAME(TCGv_i32 t, TCGv_i32 a, TCGv_i32 b)                    \
+{                                                                       \
+    TCGv_i32 zero = tcg_constant_i32(0);                                \
+    TCGv_i32 one = tcg_constant_i32(1);                                 \
+    tcg_gen_movcond_i32(TCG_COND_EQ, b, b, zero, one, b);               \
+    DIV(t, a, b);                                                       \
+}
+
+#define DIVS32(NAME, DIV)                                               \
+static void NAME(TCGv_i32 t, TCGv_i32 a, TCGv_i32 b)                    \
+{                                                                       \
+    TCGv_i32 t0 = tcg_temp_new_i32();                                   \
+    TCGv_i32 t1 = tcg_temp_new_i32();                                   \
+    tcg_gen_setcondi_i32(TCG_COND_EQ, t0, a, INT32_MIN);                \
+    tcg_gen_setcondi_i32(TCG_COND_EQ, t1, b, -1);                       \
+    tcg_gen_and_i32(t0, t0, t1);                                        \
+    tcg_gen_setcondi_i32(TCG_COND_EQ, t1, b, 0);                        \
+    tcg_gen_or_i32(t0, t0, t1);                                         \
+    tcg_gen_movi_i32(t1, 0);                                            \
+    tcg_gen_movcond_i32(TCG_COND_NE, b, t0, t1, t0, b);                 \
+    DIV(t, a, b);                                                       \
+    tcg_temp_free_i32(t0);                                              \
+    tcg_temp_free_i32(t1);                                              \
+}
+
+#define DIVU64(NAME, DIV)                                               \
+static void NAME(TCGv_i64 t, TCGv_i64 a, TCGv_i64 b)                    \
+{                                                                       \
+    TCGv_i64 zero = tcg_constant_i64(0);                                \
+    TCGv_i64 one = tcg_constant_i64(1);                                 \
+    tcg_gen_movcond_i64(TCG_COND_EQ, b, b, zero, one, b);               \
+    DIV(t, a, b);                                                       \
+}
+
+#define DIVS64(NAME, DIV)                                               \
+static void NAME(TCGv_i64 t, TCGv_i64 a, TCGv_i64 b)                    \
+{                                                                       \
+    TCGv_i64 t0 = tcg_temp_new_i64();                                   \
+    TCGv_i64 t1 = tcg_temp_new_i64();                                   \
+    tcg_gen_setcondi_i64(TCG_COND_EQ, t0, a, INT64_MIN);                \
+    tcg_gen_setcondi_i64(TCG_COND_EQ, t1, b, -1);                       \
+    tcg_gen_and_i64(t0, t0, t1);                                        \
+    tcg_gen_setcondi_i64(TCG_COND_EQ, t1, b, 0);                        \
+    tcg_gen_or_i64(t0, t0, t1);                                         \
+    tcg_gen_movi_i64(t1, 0);                                            \
+    tcg_gen_movcond_i64(TCG_COND_NE, b, t0, t1, t0, b);                 \
+    DIV(t, a, b);                                                       \
+    tcg_temp_free_i64(t0);                                              \
+    tcg_temp_free_i64(t1);                                              \
+}
+
+DIVS32(do_divsw, tcg_gen_div_i32)
+DIVU32(do_divuw, tcg_gen_divu_i32)
+DIVS64(do_divsd, tcg_gen_div_i64)
+DIVU64(do_divud, tcg_gen_divu_i64)
+
+TRANS_FLAGS2(ISA310, VDIVSW, do_vdiv_vmod, MO_32, do_divsw, NULL)
+TRANS_FLAGS2(ISA310, VDIVUW, do_vdiv_vmod, MO_32, do_divuw, NULL)
+TRANS_FLAGS2(ISA310, VDIVSD, do_vdiv_vmod, MO_64, NULL, do_divsd)
+TRANS_FLAGS2(ISA310, VDIVUD, do_vdiv_vmod, MO_64, NULL, do_divud)
+TRANS_FLAGS2(ISA310, VDIVSQ, do_vx_helper, gen_helper_VDIVSQ)
+TRANS_FLAGS2(ISA310, VDIVUQ, do_vx_helper, gen_helper_VDIVUQ)
+
+static void do_dives_i32(TCGv_i32 t, TCGv_i32 a, TCGv_i32 b)
+{
+    TCGv_i64 val1, val2;
+
+    val1 = tcg_temp_new_i64();
+    val2 = tcg_temp_new_i64();
+
+    tcg_gen_ext_i32_i64(val1, a);
+    tcg_gen_ext_i32_i64(val2, b);
+
+    /* (a << 32)/b */
+    tcg_gen_shli_i64(val1, val1, 32);
+    tcg_gen_div_i64(val1, val1, val2);
+
+    /* if quotient doesn't fit in 32 bits the result is undefined */
+    tcg_gen_extrl_i64_i32(t, val1);
+
+    tcg_temp_free_i64(val1);
+    tcg_temp_free_i64(val2);
+}
+
+static void do_diveu_i32(TCGv_i32 t, TCGv_i32 a, TCGv_i32 b)
+{
+    TCGv_i64 val1, val2;
+
+    val1 = tcg_temp_new_i64();
+    val2 = tcg_temp_new_i64();
+
+    tcg_gen_extu_i32_i64(val1, a);
+    tcg_gen_extu_i32_i64(val2, b);
+
+    /* (a << 32)/b */
+    tcg_gen_shli_i64(val1, val1, 32);
+    tcg_gen_divu_i64(val1, val1, val2);
+
+    /* if quotient doesn't fit in 32 bits the result is undefined */
+    tcg_gen_extrl_i64_i32(t, val1);
+
+    tcg_temp_free_i64(val1);
+    tcg_temp_free_i64(val2);
+}
+
+DIVS32(do_divesw, do_dives_i32)
+DIVU32(do_diveuw, do_diveu_i32)
+
+DIVS32(do_modsw, tcg_gen_rem_i32)
+DIVU32(do_moduw, tcg_gen_remu_i32)
+DIVS64(do_modsd, tcg_gen_rem_i64)
+DIVU64(do_modud, tcg_gen_remu_i64)
+
+TRANS_FLAGS2(ISA310, VDIVESW, do_vdiv_vmod, MO_32, do_divesw, NULL)
+TRANS_FLAGS2(ISA310, VDIVEUW, do_vdiv_vmod, MO_32, do_diveuw, NULL)
+TRANS_FLAGS2(ISA310, VDIVESD, do_vx_helper, gen_helper_VDIVESD)
+TRANS_FLAGS2(ISA310, VDIVEUD, do_vx_helper, gen_helper_VDIVEUD)
+TRANS_FLAGS2(ISA310, VDIVESQ, do_vx_helper, gen_helper_VDIVESQ)
+TRANS_FLAGS2(ISA310, VDIVEUQ, do_vx_helper, gen_helper_VDIVEUQ)
+
+TRANS_FLAGS2(ISA310, VMODSW, do_vdiv_vmod, MO_32, do_modsw , NULL)
+TRANS_FLAGS2(ISA310, VMODUW, do_vdiv_vmod, MO_32, do_moduw, NULL)
+TRANS_FLAGS2(ISA310, VMODSD, do_vdiv_vmod, MO_64, NULL, do_modsd)
+TRANS_FLAGS2(ISA310, VMODUD, do_vdiv_vmod, MO_64, NULL, do_modud)
+TRANS_FLAGS2(ISA310, VMODSQ, do_vx_helper, gen_helper_VMODSQ)
+TRANS_FLAGS2(ISA310, VMODUQ, do_vx_helper, gen_helper_VMODUQ)
+
+#undef DIVS32
+#undef DIVU32
+#undef DIVS64
+#undef DIVU64
 
 #undef GEN_VR_LDX
 #undef GEN_VR_STX

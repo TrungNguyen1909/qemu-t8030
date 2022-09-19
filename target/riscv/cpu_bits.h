@@ -148,6 +148,7 @@
 #define CSR_MARCHID         0xf12
 #define CSR_MIMPID          0xf13
 #define CSR_MHARTID         0xf14
+#define CSR_MCONFIGPTR      0xf15
 
 /* Machine Trap Setup */
 #define CSR_MSTATUS         0x300
@@ -173,14 +174,8 @@
 #define CSR_MIREG           0x351
 
 /* Machine-Level Interrupts (AIA) */
-#define CSR_MTOPI           0xfb0
-
-/* Machine-Level IMSIC Interface (AIA) */
-#define CSR_MSETEIPNUM      0x358
-#define CSR_MCLREIPNUM      0x359
-#define CSR_MSETEIENUM      0x35a
-#define CSR_MCLREIENUM      0x35b
 #define CSR_MTOPEI          0x35c
+#define CSR_MTOPI           0xfb0
 
 /* Virtual Interrupts for Supervisor Level (AIA) */
 #define CSR_MVIEN           0x308
@@ -201,6 +196,9 @@
 #define CSR_STVEC           0x105
 #define CSR_SCOUNTEREN      0x106
 
+/* Supervisor Configuration CSRs */
+#define CSR_SENVCFG         0x10A
+
 /* Supervisor Trap Handling */
 #define CSR_SSCRATCH        0x140
 #define CSR_SEPC            0x141
@@ -217,14 +215,8 @@
 #define CSR_SIREG           0x151
 
 /* Supervisor-Level Interrupts (AIA) */
-#define CSR_STOPI           0xdb0
-
-/* Supervisor-Level IMSIC Interface (AIA) */
-#define CSR_SSETEIPNUM      0x158
-#define CSR_SCLREIPNUM      0x159
-#define CSR_SSETEIENUM      0x15a
-#define CSR_SCLREIENUM      0x15b
 #define CSR_STOPEI          0x15c
+#define CSR_STOPI           0xdb0
 
 /* Supervisor-Level High-Half CSRs (AIA) */
 #define CSR_SIEH            0x114
@@ -245,6 +237,10 @@
 #define CSR_HGATP           0x680
 #define CSR_HTIMEDELTA      0x605
 #define CSR_HTIMEDELTAH     0x615
+
+/* Hypervisor Configuration CSRs */
+#define CSR_HENVCFG         0x60A
+#define CSR_HENVCFGH        0x61A
 
 /* Virtual CSRs */
 #define CSR_VSSTATUS        0x200
@@ -271,14 +267,8 @@
 #define CSR_VSIREG          0x251
 
 /* VS-Level Interrupts (H-extension with AIA) */
-#define CSR_VSTOPI          0xeb0
-
-/* VS-Level IMSIC Interface (H-extension with AIA) */
-#define CSR_VSSETEIPNUM     0x258
-#define CSR_VSCLREIPNUM     0x259
-#define CSR_VSSETEIENUM     0x25a
-#define CSR_VSCLREIENUM     0x25b
 #define CSR_VSTOPEI         0x25c
+#define CSR_VSTOPI          0xeb0
 
 /* Hypervisor and VS-Level High-Half CSRs (H-extension with AIA) */
 #define CSR_HIDELEGH        0x613
@@ -288,6 +278,10 @@
 #define CSR_HVIPRIO2H       0x657
 #define CSR_VSIEH           0x214
 #define CSR_VSIPH           0x254
+
+/* Machine Configuration CSRs */
+#define CSR_MENVCFG         0x30A
+#define CSR_MENVCFGH        0x31A
 
 /* Enhanced Physical Memory Protection (ePMP) */
 #define CSR_MSECCFG         0x747
@@ -355,6 +349,10 @@
 #define CSR_MHPMCOUNTER29   0xb1d
 #define CSR_MHPMCOUNTER30   0xb1e
 #define CSR_MHPMCOUNTER31   0xb1f
+
+/* Machine counter-inhibit register */
+#define CSR_MCOUNTINHIBIT   0x320
+
 #define CSR_MHPMEVENT3      0x323
 #define CSR_MHPMEVENT4      0x324
 #define CSR_MHPMEVENT5      0x325
@@ -445,6 +443,9 @@
 #define CSR_VSMTE           0x2c0
 #define CSR_VSPMMASK        0x2c1
 #define CSR_VSPMBASE        0x2c2
+
+/* Crypto Extension */
+#define CSR_SEED            0x015
 
 /* mstatus CSR bits */
 #define MSTATUS_UIE         0x00000001
@@ -662,6 +663,34 @@ typedef enum RISCVException {
 #define PM_EXT_CLEAN    0x00000002ULL
 #define PM_EXT_DIRTY    0x00000003ULL
 
+/* Execution enviornment configuration bits */
+#define MENVCFG_FIOM                       BIT(0)
+#define MENVCFG_CBIE                       (3UL << 4)
+#define MENVCFG_CBCFE                      BIT(6)
+#define MENVCFG_CBZE                       BIT(7)
+#define MENVCFG_PBMTE                      (1ULL << 62)
+#define MENVCFG_STCE                       (1ULL << 63)
+
+/* For RV32 */
+#define MENVCFGH_PBMTE                     BIT(30)
+#define MENVCFGH_STCE                      BIT(31)
+
+#define SENVCFG_FIOM                       MENVCFG_FIOM
+#define SENVCFG_CBIE                       MENVCFG_CBIE
+#define SENVCFG_CBCFE                      MENVCFG_CBCFE
+#define SENVCFG_CBZE                       MENVCFG_CBZE
+
+#define HENVCFG_FIOM                       MENVCFG_FIOM
+#define HENVCFG_CBIE                       MENVCFG_CBIE
+#define HENVCFG_CBCFE                      MENVCFG_CBCFE
+#define HENVCFG_CBZE                       MENVCFG_CBZE
+#define HENVCFG_PBMTE                      MENVCFG_PBMTE
+#define HENVCFG_STCE                       MENVCFG_STCE
+
+/* For RV32 */
+#define HENVCFGH_PBMTE                      MENVCFGH_PBMTE
+#define HENVCFGH_STCE                       MENVCFGH_STCE
+
 /* Offsets for every pair of control bits per each priv level */
 #define XS_OFFSET    0ULL
 #define U_OFFSET     2ULL
@@ -745,7 +774,7 @@ typedef enum RISCVException {
 #define IPRIO_IRQ_BITS                     8
 #define IPRIO_MMAXIPRIO                    255
 #define IPRIO_DEFAULT_UPPER                4
-#define IPRIO_DEFAULT_MIDDLE               (IPRIO_DEFAULT_UPPER + 24)
+#define IPRIO_DEFAULT_MIDDLE               (IPRIO_DEFAULT_UPPER + 12)
 #define IPRIO_DEFAULT_M                    IPRIO_DEFAULT_MIDDLE
 #define IPRIO_DEFAULT_S                    (IPRIO_DEFAULT_M + 3)
 #define IPRIO_DEFAULT_SGEXT                (IPRIO_DEFAULT_S + 3)
@@ -760,4 +789,10 @@ typedef enum RISCVException {
 #define HVICTL_VALID_MASK                  \
     (HVICTL_VTI | HVICTL_IID | HVICTL_IPRIOM | HVICTL_IPRIO)
 
+/* seed CSR bits */
+#define SEED_OPST                        (0b11 << 30)
+#define SEED_OPST_BIST                   (0b00 << 30)
+#define SEED_OPST_WAIT                   (0b01 << 30)
+#define SEED_OPST_ES16                   (0b10 << 30)
+#define SEED_OPST_DEAD                   (0b11 << 30)
 #endif

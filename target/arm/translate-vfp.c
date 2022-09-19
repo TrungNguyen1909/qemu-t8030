@@ -93,7 +93,7 @@ uint64_t vfp_expand_imm(int size, uint8_t imm8)
 static inline long vfp_f16_offset(unsigned reg, bool top)
 {
     long offs = vfp_reg_offset(false, reg);
-#ifdef HOST_WORDS_BIGENDIAN
+#if HOST_BIG_ENDIAN
     if (!top) {
         offs += 2;
     }
@@ -180,8 +180,7 @@ static void gen_update_fp_context(DisasContext *s)
         gen_helper_vfp_set_fpscr(cpu_env, fpscr);
         tcg_temp_free_i32(fpscr);
         if (dc_isar_feature(aa32_mve, s)) {
-            TCGv_i32 z32 = tcg_const_i32(0);
-            store_cpu_field(z32, v7m.vpr);
+            store_cpu_field(tcg_constant_i32(0), v7m.vpr);
         }
         /*
          * We just updated the FPSCR and VPR. Some of this state is cached
@@ -220,8 +219,30 @@ static void gen_update_fp_context(DisasContext *s)
 static bool vfp_access_check_a(DisasContext *s, bool ignore_vfp_enabled)
 {
     if (s->fp_excp_el) {
+        /*
+         * The full syndrome is only used for HSR when HCPTR traps:
+         * For v8, when TA==0, coproc is RES0.
+         * For v7, any use of a Floating-point instruction or access
+         * to a Floating-point Extension register that is trapped to
+         * Hyp mode because of a trap configured in the HCPTR sets
+         * this field to 0xA.
+         */
+        int coproc = arm_dc_feature(s, ARM_FEATURE_V8) ? 0 : 0xa;
+        uint32_t syn = syn_fp_access_trap(1, 0xe, false, coproc);
+
+        gen_exception_insn_el(s, s->pc_curr, EXCP_UDEF, syn, s->fp_excp_el);
+        return false;
+    }
+
+    /*
+     * Note that rebuild_hflags_a32 has already accounted for being in EL0
+     * and the higher EL in A64 mode, etc.  Unlike A64 mode, there do not
+     * appear to be any insns which touch VFP which are allowed.
+     */
+    if (s->sme_trap_nonstreaming) {
         gen_exception_insn(s, s->pc_curr, EXCP_UDEF,
-                           syn_fp_access_trap(1, 0xe, false), s->fp_excp_el);
+                           syn_smetrap(SME_ET_Streaming,
+                                       s->base.pc_next - s->pc_curr == 2));
         return false;
     }
 
@@ -251,8 +272,8 @@ bool vfp_access_check_m(DisasContext *s, bool skip_context_update)
          * the encoding space handled by the patterns in m-nocp.decode,
          * and for them we may need to raise NOCP here.
          */
-        gen_exception_insn(s, s->pc_curr, EXCP_NOCP,
-                           syn_uncategorized(), s->fp_excp_el);
+        gen_exception_insn_el(s, s->pc_curr, EXCP_NOCP,
+                              syn_uncategorized(), s->fp_excp_el);
         return false;
     }
 
@@ -317,7 +338,7 @@ static bool trans_VSEL(DisasContext *s, arg_VSEL *a)
         TCGv_i64 frn, frm, dest;
         TCGv_i64 tmp, zero, zf, nf, vf;
 
-        zero = tcg_const_i64(0);
+        zero = tcg_constant_i64(0);
 
         frn = tcg_temp_new_i64();
         frm = tcg_temp_new_i64();
@@ -335,27 +356,22 @@ static bool trans_VSEL(DisasContext *s, arg_VSEL *a)
         vfp_load_reg64(frm, rm);
         switch (a->cc) {
         case 0: /* eq: Z */
-            tcg_gen_movcond_i64(TCG_COND_EQ, dest, zf, zero,
-                                frn, frm);
+            tcg_gen_movcond_i64(TCG_COND_EQ, dest, zf, zero, frn, frm);
             break;
         case 1: /* vs: V */
-            tcg_gen_movcond_i64(TCG_COND_LT, dest, vf, zero,
-                                frn, frm);
+            tcg_gen_movcond_i64(TCG_COND_LT, dest, vf, zero, frn, frm);
             break;
         case 2: /* ge: N == V -> N ^ V == 0 */
             tmp = tcg_temp_new_i64();
             tcg_gen_xor_i64(tmp, vf, nf);
-            tcg_gen_movcond_i64(TCG_COND_GE, dest, tmp, zero,
-                                frn, frm);
+            tcg_gen_movcond_i64(TCG_COND_GE, dest, tmp, zero, frn, frm);
             tcg_temp_free_i64(tmp);
             break;
         case 3: /* gt: !Z && N == V */
-            tcg_gen_movcond_i64(TCG_COND_NE, dest, zf, zero,
-                                frn, frm);
+            tcg_gen_movcond_i64(TCG_COND_NE, dest, zf, zero, frn, frm);
             tmp = tcg_temp_new_i64();
             tcg_gen_xor_i64(tmp, vf, nf);
-            tcg_gen_movcond_i64(TCG_COND_GE, dest, tmp, zero,
-                                dest, frm);
+            tcg_gen_movcond_i64(TCG_COND_GE, dest, tmp, zero, dest, frm);
             tcg_temp_free_i64(tmp);
             break;
         }
@@ -367,13 +383,11 @@ static bool trans_VSEL(DisasContext *s, arg_VSEL *a)
         tcg_temp_free_i64(zf);
         tcg_temp_free_i64(nf);
         tcg_temp_free_i64(vf);
-
-        tcg_temp_free_i64(zero);
     } else {
         TCGv_i32 frn, frm, dest;
         TCGv_i32 tmp, zero;
 
-        zero = tcg_const_i32(0);
+        zero = tcg_constant_i32(0);
 
         frn = tcg_temp_new_i32();
         frm = tcg_temp_new_i32();
@@ -382,27 +396,22 @@ static bool trans_VSEL(DisasContext *s, arg_VSEL *a)
         vfp_load_reg32(frm, rm);
         switch (a->cc) {
         case 0: /* eq: Z */
-            tcg_gen_movcond_i32(TCG_COND_EQ, dest, cpu_ZF, zero,
-                                frn, frm);
+            tcg_gen_movcond_i32(TCG_COND_EQ, dest, cpu_ZF, zero, frn, frm);
             break;
         case 1: /* vs: V */
-            tcg_gen_movcond_i32(TCG_COND_LT, dest, cpu_VF, zero,
-                                frn, frm);
+            tcg_gen_movcond_i32(TCG_COND_LT, dest, cpu_VF, zero, frn, frm);
             break;
         case 2: /* ge: N == V -> N ^ V == 0 */
             tmp = tcg_temp_new_i32();
             tcg_gen_xor_i32(tmp, cpu_VF, cpu_NF);
-            tcg_gen_movcond_i32(TCG_COND_GE, dest, tmp, zero,
-                                frn, frm);
+            tcg_gen_movcond_i32(TCG_COND_GE, dest, tmp, zero, frn, frm);
             tcg_temp_free_i32(tmp);
             break;
         case 3: /* gt: !Z && N == V */
-            tcg_gen_movcond_i32(TCG_COND_NE, dest, cpu_ZF, zero,
-                                frn, frm);
+            tcg_gen_movcond_i32(TCG_COND_NE, dest, cpu_ZF, zero, frn, frm);
             tmp = tcg_temp_new_i32();
             tcg_gen_xor_i32(tmp, cpu_VF, cpu_NF);
-            tcg_gen_movcond_i32(TCG_COND_GE, dest, tmp, zero,
-                                dest, frm);
+            tcg_gen_movcond_i32(TCG_COND_GE, dest, tmp, zero, dest, frm);
             tcg_temp_free_i32(tmp);
             break;
         }
@@ -414,8 +423,6 @@ static bool trans_VSEL(DisasContext *s, arg_VSEL *a)
         tcg_temp_free_i32(frn);
         tcg_temp_free_i32(frm);
         tcg_temp_free_i32(dest);
-
-        tcg_temp_free_i32(zero);
     }
 
     return true;
@@ -547,7 +554,7 @@ static bool trans_VCVT(DisasContext *s, arg_VCVT *a)
         fpst = fpstatus_ptr(FPST_FPCR);
     }
 
-    tcg_shift = tcg_const_i32(0);
+    tcg_shift = tcg_constant_i32(0);
 
     tcg_rmode = tcg_const_i32(arm_rmode_to_sf(rounding));
     gen_helper_set_rmode(tcg_rmode, tcg_rmode, fpst);
@@ -594,8 +601,6 @@ static bool trans_VCVT(DisasContext *s, arg_VCVT *a)
 
     gen_helper_set_rmode(tcg_rmode, tcg_rmode, fpst);
     tcg_temp_free_i32(tcg_rmode);
-
-    tcg_temp_free_i32(tcg_shift);
 
     tcg_temp_free_ptr(fpst);
 
@@ -850,15 +855,11 @@ static bool trans_VMSR_VMRS(DisasContext *s, arg_VMSR_VMRS *a)
         case ARM_VFP_MVFR2:
         case ARM_VFP_FPSID:
             if (s->current_el == 1) {
-                TCGv_i32 tcg_reg, tcg_rt;
-
                 gen_set_condexec(s);
                 gen_set_pc_im(s, s->pc_curr);
-                tcg_reg = tcg_const_i32(a->reg);
-                tcg_rt = tcg_const_i32(a->rt);
-                gen_helper_check_hcr_el2_trap(cpu_env, tcg_rt, tcg_reg);
-                tcg_temp_free_i32(tcg_reg);
-                tcg_temp_free_i32(tcg_rt);
+                gen_helper_check_hcr_el2_trap(cpu_env,
+                                              tcg_constant_i32(a->rt),
+                                              tcg_constant_i32(a->reg));
             }
             /* fall through */
         case ARM_VFP_FPEXC:
@@ -2388,8 +2389,6 @@ MAKE_VFM_TRANS_FNS(dp)
 
 static bool trans_VMOV_imm_hp(DisasContext *s, arg_VMOV_imm_sp *a)
 {
-    TCGv_i32 fd;
-
     if (!dc_isar_feature(aa32_fp16_arith, s)) {
         return false;
     }
@@ -2402,9 +2401,7 @@ static bool trans_VMOV_imm_hp(DisasContext *s, arg_VMOV_imm_sp *a)
         return true;
     }
 
-    fd = tcg_const_i32(vfp_expand_imm(MO_16, a->imm));
-    vfp_store_reg32(fd, a->vd);
-    tcg_temp_free_i32(fd);
+    vfp_store_reg32(tcg_constant_i32(vfp_expand_imm(MO_16, a->imm)), a->vd);
     return true;
 }
 
@@ -2440,7 +2437,7 @@ static bool trans_VMOV_imm_sp(DisasContext *s, arg_VMOV_imm_sp *a)
         }
     }
 
-    fd = tcg_const_i32(vfp_expand_imm(MO_32, a->imm));
+    fd = tcg_constant_i32(vfp_expand_imm(MO_32, a->imm));
 
     for (;;) {
         vfp_store_reg32(fd, vd);
@@ -2454,7 +2451,6 @@ static bool trans_VMOV_imm_sp(DisasContext *s, arg_VMOV_imm_sp *a)
         vd = vfp_advance_sreg(vd, delta_d);
     }
 
-    tcg_temp_free_i32(fd);
     return true;
 }
 
@@ -2495,7 +2491,7 @@ static bool trans_VMOV_imm_dp(DisasContext *s, arg_VMOV_imm_dp *a)
         }
     }
 
-    fd = tcg_const_i64(vfp_expand_imm(MO_64, a->imm));
+    fd = tcg_constant_i64(vfp_expand_imm(MO_64, a->imm));
 
     for (;;) {
         vfp_store_reg64(fd, vd);
@@ -2509,7 +2505,6 @@ static bool trans_VMOV_imm_dp(DisasContext *s, arg_VMOV_imm_dp *a)
         vd = vfp_advance_dreg(vd, delta_d);
     }
 
-    tcg_temp_free_i64(fd);
     return true;
 }
 
@@ -3294,7 +3289,7 @@ static bool trans_VCVT_fix_hp(DisasContext *s, arg_VCVT_fix_sp *a)
     vfp_load_reg32(vd, a->vd);
 
     fpst = fpstatus_ptr(FPST_FPCR_F16);
-    shift = tcg_const_i32(frac_bits);
+    shift = tcg_constant_i32(frac_bits);
 
     /* Switch on op:U:sx bits */
     switch (a->opc) {
@@ -3328,7 +3323,6 @@ static bool trans_VCVT_fix_hp(DisasContext *s, arg_VCVT_fix_sp *a)
 
     vfp_store_reg32(vd, a->vd);
     tcg_temp_free_i32(vd);
-    tcg_temp_free_i32(shift);
     tcg_temp_free_ptr(fpst);
     return true;
 }
@@ -3353,7 +3347,7 @@ static bool trans_VCVT_fix_sp(DisasContext *s, arg_VCVT_fix_sp *a)
     vfp_load_reg32(vd, a->vd);
 
     fpst = fpstatus_ptr(FPST_FPCR);
-    shift = tcg_const_i32(frac_bits);
+    shift = tcg_constant_i32(frac_bits);
 
     /* Switch on op:U:sx bits */
     switch (a->opc) {
@@ -3387,7 +3381,6 @@ static bool trans_VCVT_fix_sp(DisasContext *s, arg_VCVT_fix_sp *a)
 
     vfp_store_reg32(vd, a->vd);
     tcg_temp_free_i32(vd);
-    tcg_temp_free_i32(shift);
     tcg_temp_free_ptr(fpst);
     return true;
 }
@@ -3418,7 +3411,7 @@ static bool trans_VCVT_fix_dp(DisasContext *s, arg_VCVT_fix_dp *a)
     vfp_load_reg64(vd, a->vd);
 
     fpst = fpstatus_ptr(FPST_FPCR);
-    shift = tcg_const_i32(frac_bits);
+    shift = tcg_constant_i32(frac_bits);
 
     /* Switch on op:U:sx bits */
     switch (a->opc) {
@@ -3452,7 +3445,6 @@ static bool trans_VCVT_fix_dp(DisasContext *s, arg_VCVT_fix_dp *a)
 
     vfp_store_reg64(vd, a->vd);
     tcg_temp_free_i64(vd);
-    tcg_temp_free_i32(shift);
     tcg_temp_free_ptr(fpst);
     return true;
 }

@@ -15,7 +15,8 @@
 #include <termios.h>
 #endif
 
-#include "qemu-common.h"
+#include "qemu/help-texts.h"
+#include "qemu/cutils.h"
 #include "qapi/error.h"
 #include "qemu-io.h"
 #include "qemu/error-report.h"
@@ -634,7 +635,7 @@ int main(int argc, char **argv)
         exit(1);
     }
     trace_init_file();
-    qemu_set_log(LOG_TRACE);
+    qemu_set_log(LOG_TRACE, &error_fatal);
 
     /* initialize commands */
     qemuio_add_command(&quit_cmd);

@@ -8,7 +8,6 @@
  */
 #include "qemu/osdep.h"
 #include "qapi/error.h"
-#include "qemu-common.h"
 #include "qemu/log.h"
 #include "target/ppc/cpu.h"
 #include "hw/ppc/fdt.h"
@@ -131,9 +130,6 @@ static void pnv_pec_default_phb_realize(PnvPhb4PecState *pec,
     if (!sysbus_realize(SYS_BUS_DEVICE(phb), errp)) {
         return;
     }
-
-    /* Add a single Root port if running with defaults */
-    pnv_phb_attach_root_port(PCI_HOST_BRIDGE(phb), pecc->rp_model);
 }
 
 static void pnv_pec_realize(DeviceState *dev, Error **errp)
@@ -216,11 +212,11 @@ static int pnv_pec_dt_xscom(PnvXScomInterface *dev, void *fdt,
 }
 
 static Property pnv_pec_properties[] = {
-        DEFINE_PROP_UINT32("index", PnvPhb4PecState, index, 0),
-        DEFINE_PROP_UINT32("chip-id", PnvPhb4PecState, chip_id, 0),
-        DEFINE_PROP_LINK("chip", PnvPhb4PecState, chip, TYPE_PNV_CHIP,
-                         PnvChip *),
-        DEFINE_PROP_END_OF_LIST(),
+    DEFINE_PROP_UINT32("index", PnvPhb4PecState, index, 0),
+    DEFINE_PROP_UINT32("chip-id", PnvPhb4PecState, chip_id, 0),
+    DEFINE_PROP_LINK("chip", PnvPhb4PecState, chip, TYPE_PNV_CHIP,
+                     PnvChip *),
+    DEFINE_PROP_END_OF_LIST(),
 };
 
 static uint32_t pnv_pec_xscom_pci_base(PnvPhb4PecState *pec)

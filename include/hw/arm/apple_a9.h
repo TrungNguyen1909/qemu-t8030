@@ -1,7 +1,7 @@
 #ifndef HW_ARM_APPLE_A9_H
 #define HW_ARM_APPLE_A9_H
 
-#include "qemu-common.h"
+#include "qemu/osdep.h"
 #include "cpu.h"
 #include "exec/hwaddr.h"
 #include "qemu/queue.h"

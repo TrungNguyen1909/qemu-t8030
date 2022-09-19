@@ -29,7 +29,7 @@
 #include "qemu/guest-random.h"
 #include "qapi/error.h"
 #include "qapi/visitor.h"
-#include "qemu-common.h"
+#include "qemu/cutils.h"
 #include "hw/arm/boot.h"
 #include "exec/address-spaces.h"
 #include "hw/misc/unimp.h"

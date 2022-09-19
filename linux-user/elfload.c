@@ -105,7 +105,7 @@ int info_is_fdpic(struct image_info *info)
 #define ELIBBAD 80
 #endif
 
-#ifdef TARGET_WORDS_BIGENDIAN
+#if TARGET_BIG_ENDIAN
 #define ELF_DATA        ELFDATA2MSB
 #else
 #define ELF_DATA        ELFDATA2LSB
@@ -130,19 +130,6 @@ typedef abi_int         target_pid_t;
 
 #ifdef TARGET_I386
 
-#define ELF_PLATFORM get_elf_platform()
-
-static const char *get_elf_platform(void)
-{
-    static char elf_platform[] = "i386";
-    int family = object_property_get_int(OBJECT(thread_cpu), "family", NULL);
-    if (family > 6)
-        family = 6;
-    if (family >= 3)
-        elf_platform[1] = '0' + family;
-    return elf_platform;
-}
-
 #define ELF_HWCAP get_elf_hwcap()
 
 static uint32_t get_elf_hwcap(void)
@@ -157,6 +144,8 @@ static uint32_t get_elf_hwcap(void)
 
 #define ELF_CLASS      ELFCLASS64
 #define ELF_ARCH       EM_X86_64
+
+#define ELF_PLATFORM   "x86_64"
 
 static inline void init_thread(struct target_pt_regs *regs, struct image_info *infop)
 {
@@ -220,6 +209,21 @@ static void elf_core_copy_regs(target_elf_gregset_t *regs, const CPUX86State *en
  */
 #define ELF_CLASS       ELFCLASS32
 #define ELF_ARCH        EM_386
+
+#define ELF_PLATFORM get_elf_platform()
+
+static const char *get_elf_platform(void)
+{
+    static char elf_platform[] = "i386";
+    int family = object_property_get_int(OBJECT(thread_cpu), "family", NULL);
+    if (family > 6) {
+        family = 6;
+    }
+    if (family >= 3) {
+        elf_platform[1] = '0' + family;
+    }
+    return elf_platform;
+}
 
 static inline void init_thread(struct target_pt_regs *regs,
                                struct image_info *infop)
@@ -483,7 +487,7 @@ static const char *get_elf_platform(void)
 {
     CPUARMState *env = thread_cpu->env_ptr;
 
-#ifdef TARGET_WORDS_BIGENDIAN
+#if TARGET_BIG_ENDIAN
 # define END  "b"
 #else
 # define END  "l"
@@ -514,7 +518,7 @@ static const char *get_elf_platform(void)
 
 #define ELF_ARCH        EM_AARCH64
 #define ELF_CLASS       ELFCLASS64
-#ifdef TARGET_WORDS_BIGENDIAN
+#if TARGET_BIG_ENDIAN
 # define ELF_PLATFORM    "aarch64_be"
 #else
 # define ELF_PLATFORM    "aarch64"
@@ -601,6 +605,18 @@ enum {
     ARM_HWCAP2_A64_RNG          = 1 << 16,
     ARM_HWCAP2_A64_BTI          = 1 << 17,
     ARM_HWCAP2_A64_MTE          = 1 << 18,
+    ARM_HWCAP2_A64_ECV          = 1 << 19,
+    ARM_HWCAP2_A64_AFP          = 1 << 20,
+    ARM_HWCAP2_A64_RPRES        = 1 << 21,
+    ARM_HWCAP2_A64_MTE3         = 1 << 22,
+    ARM_HWCAP2_A64_SME          = 1 << 23,
+    ARM_HWCAP2_A64_SME_I16I64   = 1 << 24,
+    ARM_HWCAP2_A64_SME_F64F64   = 1 << 25,
+    ARM_HWCAP2_A64_SME_I8I32    = 1 << 26,
+    ARM_HWCAP2_A64_SME_F16F32   = 1 << 27,
+    ARM_HWCAP2_A64_SME_B16F32   = 1 << 28,
+    ARM_HWCAP2_A64_SME_F32F32   = 1 << 29,
+    ARM_HWCAP2_A64_SME_FA64     = 1 << 30,
 };
 
 #define ELF_HWCAP   get_elf_hwcap()
@@ -670,6 +686,14 @@ static uint32_t get_elf_hwcap2(void)
     GET_FEATURE_ID(aa64_rndr, ARM_HWCAP2_A64_RNG);
     GET_FEATURE_ID(aa64_bti, ARM_HWCAP2_A64_BTI);
     GET_FEATURE_ID(aa64_mte, ARM_HWCAP2_A64_MTE);
+    GET_FEATURE_ID(aa64_sme, (ARM_HWCAP2_A64_SME |
+                              ARM_HWCAP2_A64_SME_F32F32 |
+                              ARM_HWCAP2_A64_SME_B16F32 |
+                              ARM_HWCAP2_A64_SME_F16F32 |
+                              ARM_HWCAP2_A64_SME_I8I32));
+    GET_FEATURE_ID(aa64_sme_f64f64, ARM_HWCAP2_A64_SME_F64F64);
+    GET_FEATURE_ID(aa64_sme_i16i64, ARM_HWCAP2_A64_SME_I16I64);
+    GET_FEATURE_ID(aa64_sme_fa64, ARM_HWCAP2_A64_SME_FA64);
 
     return hwcaps;
 }
@@ -779,6 +803,8 @@ enum {
     QEMU_PPC_FEATURE2_DARN = 0x00200000, /* darn random number insn */
     QEMU_PPC_FEATURE2_SCV = 0x00100000, /* scv syscall */
     QEMU_PPC_FEATURE2_HTM_NO_SUSPEND = 0x00080000, /* TM w/o suspended state */
+    QEMU_PPC_FEATURE2_ARCH_3_1 = 0x00040000, /* ISA 3.1 */
+    QEMU_PPC_FEATURE2_MMA = 0x00020000, /* Matrix-Multiply Assist */
 };
 
 #define ELF_HWCAP get_elf_hwcap()
@@ -836,6 +862,8 @@ static uint32_t get_elf_hwcap2(void)
                   QEMU_PPC_FEATURE2_VEC_CRYPTO);
     GET_FEATURE2(PPC2_ISA300, QEMU_PPC_FEATURE2_ARCH_3_00 |
                  QEMU_PPC_FEATURE2_DARN | QEMU_PPC_FEATURE2_HAS_IEEE128);
+    GET_FEATURE2(PPC2_ISA310, QEMU_PPC_FEATURE2_ARCH_3_1 |
+                 QEMU_PPC_FEATURE2_MMA);
 
 #undef GET_FEATURE
 #undef GET_FEATURE2
@@ -913,6 +941,97 @@ static void elf_core_copy_regs(target_elf_gregset_t *regs, const CPUPPCState *en
 #define ELF_EXEC_PAGESIZE       4096
 
 #endif
+
+#ifdef TARGET_LOONGARCH64
+
+#define ELF_START_MMAP 0x80000000
+
+#define ELF_CLASS   ELFCLASS64
+#define ELF_ARCH    EM_LOONGARCH
+
+#define elf_check_arch(x) ((x) == EM_LOONGARCH)
+
+static inline void init_thread(struct target_pt_regs *regs,
+                               struct image_info *infop)
+{
+    /*Set crmd PG,DA = 1,0 */
+    regs->csr.crmd = 2 << 3;
+    regs->csr.era = infop->entry;
+    regs->regs[3] = infop->start_stack;
+}
+
+/* See linux kernel: arch/loongarch/include/asm/elf.h */
+#define ELF_NREG 45
+typedef target_elf_greg_t target_elf_gregset_t[ELF_NREG];
+
+enum {
+    TARGET_EF_R0 = 0,
+    TARGET_EF_CSR_ERA = TARGET_EF_R0 + 33,
+    TARGET_EF_CSR_BADV = TARGET_EF_R0 + 34,
+};
+
+static void elf_core_copy_regs(target_elf_gregset_t *regs,
+                               const CPULoongArchState *env)
+{
+    int i;
+
+    (*regs)[TARGET_EF_R0] = 0;
+
+    for (i = 1; i < ARRAY_SIZE(env->gpr); i++) {
+        (*regs)[TARGET_EF_R0 + i] = tswapreg(env->gpr[i]);
+    }
+
+    (*regs)[TARGET_EF_CSR_ERA] = tswapreg(env->pc);
+    (*regs)[TARGET_EF_CSR_BADV] = tswapreg(env->CSR_BADV);
+}
+
+#define USE_ELF_CORE_DUMP
+#define ELF_EXEC_PAGESIZE        4096
+
+#define ELF_HWCAP get_elf_hwcap()
+
+/* See arch/loongarch/include/uapi/asm/hwcap.h */
+enum {
+    HWCAP_LOONGARCH_CPUCFG   = (1 << 0),
+    HWCAP_LOONGARCH_LAM      = (1 << 1),
+    HWCAP_LOONGARCH_UAL      = (1 << 2),
+    HWCAP_LOONGARCH_FPU      = (1 << 3),
+    HWCAP_LOONGARCH_LSX      = (1 << 4),
+    HWCAP_LOONGARCH_LASX     = (1 << 5),
+    HWCAP_LOONGARCH_CRC32    = (1 << 6),
+    HWCAP_LOONGARCH_COMPLEX  = (1 << 7),
+    HWCAP_LOONGARCH_CRYPTO   = (1 << 8),
+    HWCAP_LOONGARCH_LVZ      = (1 << 9),
+    HWCAP_LOONGARCH_LBT_X86  = (1 << 10),
+    HWCAP_LOONGARCH_LBT_ARM  = (1 << 11),
+    HWCAP_LOONGARCH_LBT_MIPS = (1 << 12),
+};
+
+static uint32_t get_elf_hwcap(void)
+{
+    LoongArchCPU *cpu = LOONGARCH_CPU(thread_cpu);
+    uint32_t hwcaps = 0;
+
+    hwcaps |= HWCAP_LOONGARCH_CRC32;
+
+    if (FIELD_EX32(cpu->env.cpucfg[1], CPUCFG1, UAL)) {
+        hwcaps |= HWCAP_LOONGARCH_UAL;
+    }
+
+    if (FIELD_EX32(cpu->env.cpucfg[2], CPUCFG2, FP)) {
+        hwcaps |= HWCAP_LOONGARCH_FPU;
+    }
+
+    if (FIELD_EX32(cpu->env.cpucfg[2], CPUCFG2, LAM)) {
+        hwcaps |= HWCAP_LOONGARCH_LAM;
+    }
+
+    return hwcaps;
+}
+
+#define ELF_PLATFORM "loongarch"
+
+#endif /* TARGET_LOONGARCH64 */
 
 #ifdef TARGET_MIPS
 
@@ -1096,7 +1215,6 @@ static void init_thread(struct target_pt_regs *regs, struct image_info *infop)
 {
     regs->ea = infop->entry;
     regs->sp = infop->start_stack;
-    regs->estatus = 0x3;
 }
 
 #define LO_COMMPAGE  TARGET_PAGE_SIZE
@@ -1170,7 +1288,7 @@ static void elf_core_copy_regs(target_elf_gregset_t *regs,
     (*regs)[30] = -1;    /* R_SSTATUS */
     (*regs)[31] = tswapreg(env->regs[R_RA]);
 
-    (*regs)[32] = tswapreg(env->regs[R_PC]);
+    (*regs)[32] = tswapreg(env->pc);
 
     (*regs)[33] = -1; /* R_STATUS */
     (*regs)[34] = tswapreg(env->regs[CR_ESTATUS]);
@@ -1517,8 +1635,8 @@ static inline void init_thread(struct target_pt_regs *regs,
     regs->iaoq[0] = infop->entry;
     regs->iaoq[1] = infop->entry + 4;
     regs->gr[23] = 0;
-    regs->gr[24] = infop->arg_start;
-    regs->gr[25] = (infop->arg_end - infop->arg_start) / sizeof(abi_ulong);
+    regs->gr[24] = infop->argv;
+    regs->gr[25] = infop->argc;
     /* The top-of-stack contains a linkage buffer.  */
     regs->gr[30] = infop->start_stack + 64;
     regs->gr[31] = infop->entry;
@@ -1916,8 +2034,8 @@ static abi_ulong setup_arg_pages(struct linux_binprm *bprm,
         size = STACK_LOWER_LIMIT;
     }
     guard = TARGET_PAGE_SIZE;
-    if (guard < qemu_real_host_page_size) {
-        guard = qemu_real_host_page_size;
+    if (guard < qemu_real_host_page_size()) {
+        guard = qemu_real_host_page_size();
     }
 
     error = target_mmap(0, size + guard, PROT_READ | PROT_WRITE,
@@ -2121,8 +2239,10 @@ static abi_ulong create_elf_tables(abi_ulong p, int argc, int envc,
     u_envp = u_argv + (argc + 1) * n;
     u_auxv = u_envp + (envc + 1) * n;
     info->saved_auxv = u_auxv;
-    info->arg_start = u_argv;
-    info->arg_end = u_argv + argc * n;
+    info->argc = argc;
+    info->envc = envc;
+    info->argv = u_argv;
+    info->envp = u_envp;
 
     /* This is correct because Linux defines
      * elf_addr_t as Elf32_Off / Elf64_Off
@@ -3972,7 +4092,7 @@ static int fill_note_info(struct elf_note_info *info,
         if (cpu == thread_cpu) {
             continue;
         }
-        fill_thread_info(info, (CPUArchState *)cpu->env_ptr);
+        fill_thread_info(info, cpu->env_ptr);
     }
     cpu_list_unlock();
 

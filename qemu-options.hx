@@ -36,7 +36,8 @@ DEF("machine", HAS_ARG, QEMU_OPTION_machine, \
     "                nvdimm=on|off controls NVDIMM support (default=off)\n"
     "                memory-encryption=@var{} memory encryption object to use (default=none)\n"
     "                hmat=on|off controls ACPI HMAT support (default=off)\n"
-    "                memory-backend='backend-id' specifies explicitly provided backend for main RAM (default=none)\n",
+    "                memory-backend='backend-id' specifies explicitly provided backend for main RAM (default=none)\n"
+    "                cxl-fmw.0.targets.0=firsttarget,cxl-fmw.0.targets.1=secondtarget,cxl-fmw.0.size=size[,cxl-fmw.0.interleave-granularity=granularity]\n",
     QEMU_ARCH_ALL)
 SRST
 ``-machine [type=]name[,prop=value[,...]]``
@@ -124,6 +125,38 @@ SRST
             -object memory-backend-ram,id=pc.ram,size=512M,x-use-canonical-path-for-ramblock-id=off
             -machine memory-backend=pc.ram
             -m 512M
+
+    ``cxl-fmw.0.targets.0=firsttarget,cxl-fmw.0.targets.1=secondtarget,cxl-fmw.0.size=size[,cxl-fmw.0.interleave-granularity=granularity]``
+        Define a CXL Fixed Memory Window (CFMW).
+
+        Described in the CXL 2.0 ECN: CEDT CFMWS & QTG _DSM.
+
+        They are regions of Host Physical Addresses (HPA) on a system which
+        may be interleaved across one or more CXL host bridges.  The system
+        software will assign particular devices into these windows and
+        configure the downstream Host-managed Device Memory (HDM) decoders
+        in root ports, switch ports and devices appropriately to meet the
+        interleave requirements before enabling the memory devices.
+
+        ``targets.X=target`` provides the mapping to CXL host bridges
+        which may be identified by the id provied in the -device entry.
+        Multiple entries are needed to specify all the targets when
+        the fixed memory window represents interleaved memory. X is the
+        target index from 0.
+
+        ``size=size`` sets the size of the CFMW. This must be a multiple of
+        256MiB. The region will be aligned to 256MiB but the location is
+        platform and configuration dependent.
+
+        ``interleave-granularity=granularity`` sets the granularity of
+        interleave. Default 256KiB. Only 256KiB, 512KiB, 1024KiB, 2048KiB
+        4096KiB, 8192KiB and 16384KiB granularities supported.
+
+        Example:
+
+        ::
+
+            -machine cxl-fmw.0.targets.0=cxl.0,cxl-fmw.0.targets.1=cxl.1,cxl-fmw.0.size=128G,cxl-fmw.0.interleave-granularity=512k
 ERST
 
 DEF("M", HAS_ARG, QEMU_OPTION_M,
@@ -661,6 +694,30 @@ SRST
     (deprecated) environment variables.
 ERST
 
+DEF("audio", HAS_ARG, QEMU_OPTION_audio,
+    "-audio [driver=]driver,model=value[,prop[=value][,...]]\n"
+    "                specifies the audio backend and device to use;\n"
+    "                apart from 'model', options are the same as for -audiodev.\n"
+    "                use '-audio model=help' to show possible devices.\n",
+    QEMU_ARCH_ALL)
+SRST
+``-audio [driver=]driver,model=value[,prop[=value][,...]]``
+    This option is a shortcut for configuring both the guest audio
+    hardware and the host audio backend in one go.
+    The host backend options are the same as with the corresponding
+    ``-audiodev`` options below. The guest hardware model can be set with
+    ``model=modelname``. Use ``model=help`` to list the available device
+    types.
+
+    The following two example do exactly the same, to show how ``-audio``
+    can be used to shorten the command line length:
+
+    .. parsed-literal::
+
+        |qemu_system| -audiodev pa,id=pa -device sb16,audiodev=pa
+        |qemu_system| -audio pa,model=sb16
+ERST
+
 DEF("audiodev", HAS_ARG, QEMU_OPTION_audiodev,
     "-audiodev [driver=]driver,id=id[,prop[=value][,...]]\n"
     "                specifies the audio backend to use\n"
@@ -892,33 +949,6 @@ SRST
         ``qemu.wav``.
 ERST
 
-DEF("soundhw", HAS_ARG, QEMU_OPTION_soundhw,
-    "-soundhw c1,... enable audio support\n"
-    "                and only specified sound cards (comma separated list)\n"
-    "                use '-soundhw help' to get the list of supported cards\n"
-    "                use '-soundhw all' to enable all of them\n", QEMU_ARCH_ALL)
-SRST
-``-soundhw card1[,card2,...] or -soundhw all``
-    Enable audio and selected sound hardware. Use 'help' to print all
-    available sound hardware. For example:
-
-    .. parsed-literal::
-
-        |qemu_system_x86| -soundhw sb16,adlib disk.img
-        |qemu_system_x86| -soundhw es1370 disk.img
-        |qemu_system_x86| -soundhw ac97 disk.img
-        |qemu_system_x86| -soundhw hda disk.img
-        |qemu_system_x86| -soundhw all disk.img
-        |qemu_system_x86| -soundhw help
-
-    Note that Linux's i810\_audio OSS kernel (for AC97) module might
-    require manually specifying clocking.
-
-    ::
-
-        modprobe i810_audio clocking=48000
-ERST
-
 DEF("device", HAS_ARG, QEMU_OPTION_device,
     "-device driver[,prop[=value][,...]]\n"
     "                add device (based on driver)\n"
@@ -1074,6 +1104,19 @@ ERST
 DEFHEADING()
 
 DEFHEADING(Block device options:)
+
+SRST
+The QEMU block device handling options have a long history and
+have gone through several iterations as the feature set and complexity
+of the block layer have grown. Many online guides to QEMU often
+reference older and deprecated options, which can lead to confusion.
+
+The recommended modern way to describe disks is to use a combination of
+``-device`` to specify the hardware device and ``-blockdev`` to
+describe the backend. The device defines what the guest sees and the
+backend describes how QEMU handles the data.
+
+ERST
 
 DEF("fda", HAS_ARG, QEMU_OPTION_fda,
     "-fda/-fdb file  use 'file' as floppy disk 0/1 image\n", QEMU_ARCH_ALL)
@@ -1555,13 +1598,6 @@ SRST
     Use file as SecureDigital card image.
 ERST
 
-DEF("pflash", HAS_ARG, QEMU_OPTION_pflash,
-    "-pflash file    use 'file' as a parallel flash image\n", QEMU_ARCH_ALL)
-SRST
-``-pflash file``
-    Use file as a parallel flash image.
-ERST
-
 DEF("snapshot", 0, QEMU_OPTION_snapshot,
     "-snapshot       write to temporary files instead of disk image files\n",
     QEMU_ARCH_ALL)
@@ -1903,12 +1939,12 @@ DEF("display", HAS_ARG, QEMU_OPTION_display,
     "-display spice-app[,gl=on|off]\n"
 #endif
 #if defined(CONFIG_SDL)
-    "-display sdl[,alt_grab=on|off][,ctrl_grab=on|off][,gl=on|core|es|off]\n"
-    "            [,grab-mod=<mod>][,show-cursor=on|off][,window-close=on|off]\n"
+    "-display sdl[,gl=on|core|es|off][,grab-mod=<mod>][,show-cursor=on|off]\n"
+    "            [,window-close=on|off]\n"
 #endif
 #if defined(CONFIG_GTK)
     "-display gtk[,full-screen=on|off][,gl=on|off][,grab-on-hover=on|off]\n"
-    "            [,show-cursor=on|off][,window-close=on|off]\n"
+    "            [,show-tabs=on|off][,show-cursor=on|off][,window-close=on|off]\n"
 #endif
 #if defined(CONFIG_VNC)
     "-display vnc=<display>[,<optargs>]\n"
@@ -1946,9 +1982,8 @@ DEF("display", HAS_ARG, QEMU_OPTION_display,
     , QEMU_ARCH_ALL)
 SRST
 ``-display type``
-    Select type of display to use. This option is a replacement for the
-    old style -sdl/-curses/... options. Use ``-display help`` to list
-    the available display types. Valid values for type are
+    Select type of display to use. Use ``-display help`` to list the available
+    display types. Valid values for type are
 
     ``spice-app[,gl=on|off]``
         Start QEMU as a Spice server and launch the default Spice client
@@ -1977,12 +2012,6 @@ SRST
         the mouse grabbing in conjunction with the "g" key. ``<mods>`` can be
         either ``lshift-lctrl-lalt`` or ``rctrl``.
 
-        ``alt_grab=on|off`` : Use Control+Alt+Shift-g to toggle mouse grabbing.
-        This parameter is deprecated - use ``grab-mod`` instead.
-
-        ``ctrl_grab=on|off`` : Use Right-Control-g to toggle mouse grabbing.
-        This parameter is deprecated - use ``grab-mod`` instead.
-
         ``gl=on|off|core|es`` : Use OpenGL for displaying
 
         ``show-cursor=on|off`` :  Force showing the mouse cursor
@@ -1999,6 +2028,10 @@ SRST
         ``gl=on|off`` : Use OpenGL for displaying
 
         ``grab-on-hover=on|off`` : Grab keyboard input on mouse hover
+
+        ``show-tabs=on|off`` : Display the tab bar for switching between the
+                               various graphical interfaces (e.g. VGA and
+                               virtual console character devices) by default.
 
         ``show-cursor=on|off`` :  Force showing the mouse cursor
 
@@ -2054,47 +2087,6 @@ SRST
     the monitor (unless redirected elsewhere explicitly). Therefore, you
     can still use QEMU to debug a Linux kernel with a serial console.
     Use C-a h for help on switching between the console and monitor.
-ERST
-
-DEF("curses", 0, QEMU_OPTION_curses,
-    "-curses         shorthand for -display curses\n",
-    QEMU_ARCH_ALL)
-SRST
-``-curses``
-    Normally, if QEMU is compiled with graphical window support, it
-    displays output such as guest graphics, guest console, and the QEMU
-    monitor in a window. With this option, QEMU can display the VGA
-    output when in text mode using a curses/ncurses interface. Nothing
-    is displayed in graphical mode.
-ERST
-
-DEF("alt-grab", 0, QEMU_OPTION_alt_grab,
-    "-alt-grab       use Ctrl-Alt-Shift to grab mouse (instead of Ctrl-Alt)\n",
-    QEMU_ARCH_ALL)
-SRST
-``-alt-grab``
-    Use Ctrl-Alt-Shift to grab mouse (instead of Ctrl-Alt). Note that
-    this also affects the special keys (for fullscreen, monitor-mode
-    switching, etc). This option is deprecated - please use
-    ``-display sdl,grab-mod=lshift-lctrl-lalt`` instead.
-ERST
-
-DEF("ctrl-grab", 0, QEMU_OPTION_ctrl_grab,
-    "-ctrl-grab      use Right-Ctrl to grab mouse (instead of Ctrl-Alt)\n",
-    QEMU_ARCH_ALL)
-SRST
-``-ctrl-grab``
-    Use Right-Ctrl to grab mouse (instead of Ctrl-Alt). Note that this
-    also affects the special keys (for fullscreen, monitor-mode
-    switching, etc). This option is deprecated - please use
-    ``-display sdl,grab-mod=rctrl`` instead.
-ERST
-
-DEF("sdl", 0, QEMU_OPTION_sdl,
-    "-sdl            shorthand for -display sdl\n", QEMU_ARCH_ALL)
-SRST
-``-sdl``
-    Enable SDL.
 ERST
 
 #ifdef CONFIG_SPICE
@@ -2761,6 +2753,25 @@ DEF("netdev", HAS_ARG, QEMU_OPTION_netdev,
     "-netdev vhost-vdpa,id=str,vhostdev=/path/to/dev\n"
     "                configure a vhost-vdpa network,Establish a vhost-vdpa netdev\n"
 #endif
+#ifdef CONFIG_VMNET
+    "-netdev vmnet-host,id=str[,isolated=on|off][,net-uuid=uuid]\n"
+    "         [,start-address=addr,end-address=addr,subnet-mask=mask]\n"
+    "                configure a vmnet network backend in host mode with ID 'str',\n"
+    "                isolate this interface from others with 'isolated',\n"
+    "                configure the address range and choose a subnet mask,\n"
+    "                specify network UUID 'uuid' to disable DHCP and interact with\n"
+    "                vmnet-host interfaces within this isolated network\n"
+    "-netdev vmnet-shared,id=str[,isolated=on|off][,nat66-prefix=addr]\n"
+    "         [,start-address=addr,end-address=addr,subnet-mask=mask]\n"
+    "                configure a vmnet network backend in shared mode with ID 'str',\n"
+    "                configure the address range and choose a subnet mask,\n"
+    "                set IPv6 ULA prefix (of length 64) to use for internal network,\n"
+    "                isolate this interface from others with 'isolated'\n"
+    "-netdev vmnet-bridged,id=str,ifname=name[,isolated=on|off]\n"
+    "                configure a vmnet network backend in bridged mode with ID 'str',\n"
+    "                use 'ifname=name' to select a physical network interface to be bridged,\n"
+    "                isolate this interface from others with 'isolated'\n"
+#endif
     "-netdev hubport,id=str,hubid=n[,netdev=nd]\n"
     "                configure a hub port on the hub with ID 'n'\n", QEMU_ARCH_ALL)
 DEF("nic", HAS_ARG, QEMU_OPTION_nic,
@@ -2779,6 +2790,9 @@ DEF("nic", HAS_ARG, QEMU_OPTION_nic,
 #endif
 #ifdef CONFIG_POSIX
     "vhost-user|"
+#endif
+#ifdef CONFIG_VMNET
+    "vmnet-host|vmnet-shared|vmnet-bridged|"
 #endif
     "socket][,option][,...][mac=macaddr]\n"
     "                initialize an on-board / default host NIC (using MAC address\n"
@@ -2801,6 +2815,9 @@ DEF("net", HAS_ARG, QEMU_OPTION_net,
 #endif
 #ifdef CONFIG_NETMAP
     "netmap|"
+#endif
+#ifdef CONFIG_VMNET
+    "vmnet-host|vmnet-shared|vmnet-bridged|"
 #endif
     "socket][,option][,option][,...]\n"
     "                old way to initialize a host network interface\n"
@@ -3673,12 +3690,67 @@ DEFHEADING()
 
 #endif
 
-DEFHEADING(Linux/Multiboot boot specific:)
+DEFHEADING(Boot Image or Kernel specific:)
 SRST
-When using these options, you can use a given Linux or Multiboot kernel
-without installing it in the disk image. It can be useful for easier
-testing of various kernels.
+There are broadly 4 ways you can boot a system with QEMU.
 
+ - specify a firmware and let it control finding a kernel
+ - specify a firmware and pass a hint to the kernel to boot
+ - direct kernel image boot
+ - manually load files into the guest's address space
+
+The third method is useful for quickly testing kernels but as there is
+no firmware to pass configuration information to the kernel the
+hardware must either be probeable, the kernel built for the exact
+configuration or passed some configuration data (e.g. a DTB blob)
+which tells the kernel what drivers it needs. This exact details are
+often hardware specific.
+
+The final method is the most generic way of loading images into the
+guest address space and used mostly for ``bare metal`` type
+development where the reset vectors of the processor are taken into
+account.
+
+ERST
+
+SRST
+
+For x86 machines and some other architectures ``-bios`` will generally
+do the right thing with whatever it is given. For other machines the
+more strict ``-pflash`` option needs an image that is sized for the
+flash device for the given machine type.
+
+Please see the :ref:`system-targets-ref` section of the manual for
+more detailed documentation.
+
+ERST
+
+DEF("bios", HAS_ARG, QEMU_OPTION_bios, \
+    "-bios file      set the filename for the BIOS\n", QEMU_ARCH_ALL)
+SRST
+``-bios file``
+    Set the filename for the BIOS.
+ERST
+
+DEF("pflash", HAS_ARG, QEMU_OPTION_pflash,
+    "-pflash file    use 'file' as a parallel flash image\n", QEMU_ARCH_ALL)
+SRST
+``-pflash file``
+    Use file as a parallel flash image.
+ERST
+
+SRST
+
+The kernel options were designed to work with Linux kernels although
+other things (like hypervisors) can be packaged up as a kernel
+executable image. The exact format of a executable image is usually
+architecture specific.
+
+The way in which the kernel is started (what address it is loaded at,
+what if any information is passed to it via CPU registers, the state
+of the hardware when it is started, and so on) is also architecture
+specific. Typically it follows the specification laid down by the
+Linux kernel for how kernels for that architecture must be started.
 
 ERST
 
@@ -3716,6 +3788,25 @@ SRST
 ``-dtb file``
     Use file as a device tree binary (dtb) image and pass it to the
     kernel on boot.
+ERST
+
+SRST
+
+Finally you can also manually load images directly into the address
+space of the guest. This is most useful for developers who already
+know the layout of their guest and take care to ensure something sane
+will happen when the reset vector executes.
+
+The generic loader can be invoked by using the loader device:
+
+``-device loader,addr=<addr>,data=<data>,data-len=<data-len>[,data-be=<data-be>][,cpu-num=<cpu-num>]``
+
+there is also the guest loader which operates in a similar way but
+tweaks the DTB so a hypervisor loaded via ``-kernel`` can find where
+the guest image is:
+
+``-device guest-loader,addr=<addr>[,kernel=<path>,[bootargs=<arguments>]][,initrd=<path>]``
+
 ERST
 
 DEFHEADING()
@@ -4168,15 +4259,10 @@ SRST
     To list all the data directories, use ``-L help``.
 ERST
 
-DEF("bios", HAS_ARG, QEMU_OPTION_bios, \
-    "-bios file      set the filename for the BIOS\n", QEMU_ARCH_ALL)
-SRST
-``-bios file``
-    Set the filename for the BIOS.
-ERST
-
 DEF("enable-kvm", 0, QEMU_OPTION_enable_kvm, \
-    "-enable-kvm     enable KVM full virtualization support\n", QEMU_ARCH_ALL)
+    "-enable-kvm     enable KVM full virtualization support\n",
+    QEMU_ARCH_ARM | QEMU_ARCH_I386 | QEMU_ARCH_MIPS | QEMU_ARCH_PPC |
+    QEMU_ARCH_RISCV | QEMU_ARCH_S390X)
 SRST
 ``-enable-kvm``
     Enable KVM full virtualization support. This option is only
@@ -4184,16 +4270,17 @@ SRST
 ERST
 
 DEF("xen-domid", HAS_ARG, QEMU_OPTION_xen_domid,
-    "-xen-domid id   specify xen guest domain id\n", QEMU_ARCH_ALL)
+    "-xen-domid id   specify xen guest domain id\n",
+    QEMU_ARCH_ARM | QEMU_ARCH_I386)
 DEF("xen-attach", 0, QEMU_OPTION_xen_attach,
     "-xen-attach     attach to existing xen domain\n"
     "                libxl will use this when starting QEMU\n",
-    QEMU_ARCH_ALL)
+    QEMU_ARCH_ARM | QEMU_ARCH_I386)
 DEF("xen-domid-restrict", 0, QEMU_OPTION_xen_domid_restrict,
     "-xen-domid-restrict     restrict set of available xen operations\n"
     "                        to specified domain id. (Does not affect\n"
     "                        xenpv machine type).\n",
-    QEMU_ARCH_ALL)
+    QEMU_ARCH_ARM | QEMU_ARCH_I386)
 SRST
 ``-xen-domid id``
     Specify xen guest domain id (XEN only).
@@ -4225,7 +4312,7 @@ DEF("action", HAS_ARG, QEMU_OPTION_action,
     "                   action when guest reboots [default=reset]\n"
     "-action shutdown=poweroff|pause\n"
     "                   action when guest shuts down [default=poweroff]\n"
-    "-action panic=pause|shutdown|none\n"
+    "-action panic=pause|shutdown|exit-failure|none\n"
     "                   action when guest panics [default=shutdown]\n"
     "-action watchdog=reset|shutdown|poweroff|inject-nmi|pause|debug|none\n"
     "                   action when watchdog fires [default=reset]\n",
@@ -4622,17 +4709,13 @@ SRST
 ERST
 
 DEF("readconfig", HAS_ARG, QEMU_OPTION_readconfig,
-    "-readconfig <file>\n", QEMU_ARCH_ALL)
+    "-readconfig <file>\n"
+    "                read config file\n", QEMU_ARCH_ALL)
 SRST
 ``-readconfig file``
     Read device configuration from file. This approach is useful when
     you want to spawn QEMU process with many command line options but
     you don't want to exceed the command line character limit.
-ERST
-DEF("writeconfig", HAS_ARG, QEMU_OPTION_writeconfig,
-    "-writeconfig <file>\n"
-    "                read/write config file (deprecated)\n", QEMU_ARCH_ALL)
-SRST
 ERST
 
 DEF("no-user-config", 0, QEMU_OPTION_nouserconfig,
@@ -4672,16 +4755,6 @@ ERST
 HXCOMM Internal use
 DEF("qtest", HAS_ARG, QEMU_OPTION_qtest, "", QEMU_ARCH_ALL)
 DEF("qtest-log", HAS_ARG, QEMU_OPTION_qtest_log, "", QEMU_ARCH_ALL)
-
-#ifdef __linux__
-DEF("enable-fips", 0, QEMU_OPTION_enablefips,
-    "-enable-fips    enable FIPS 140-2 compliance\n",
-    QEMU_ARCH_ALL)
-#endif
-SRST
-``-enable-fips``
-    Enable FIPS 140-2 compliance mode.
-ERST
 
 DEF("msg", HAS_ARG, QEMU_OPTION_msg,
     "-msg [timestamp[=on|off]][,guest-name=[on|off]]\n"

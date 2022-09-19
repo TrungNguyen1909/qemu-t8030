@@ -15,7 +15,7 @@
 #include "trace.h"
 #include "dev-tcp-remote.h"
 #include "tcp-usb.h"
-#include "qemu-common.h"
+#include "qemu/cutils.h"
 #include "sysemu/iothread.h"
 
 //#define DEBUG_DEV_TCP_REMOTE

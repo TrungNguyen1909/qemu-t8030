@@ -761,7 +761,7 @@ static void do_cpu_reset(void *opaque)
                         env->cp15.scr_el3 |= SCR_ATA;
                     }
                     if (cpu_isar_feature(aa64_sve, cpu)) {
-                        env->cp15.cptr_el[3] |= CPTR_EZ;
+                        env->cp15.cptr_el[3] |= R_CPTR_EL3_EZ_MASK;
                     }
                     /* AArch64 kernels never boot in secure mode */
                     assert(!info->secure_boot);
@@ -881,7 +881,7 @@ static int do_arm_linux_init(Object *obj, void *opaque)
     return 0;
 }
 
-static int64_t arm_load_elf(struct arm_boot_info *info, uint64_t *pentry,
+static ssize_t arm_load_elf(struct arm_boot_info *info, uint64_t *pentry,
                             uint64_t *lowaddr, uint64_t *highaddr,
                             int elf_machine, AddressSpace *as)
 {
@@ -892,7 +892,7 @@ static int64_t arm_load_elf(struct arm_boot_info *info, uint64_t *pentry,
     } elf_header;
     int data_swab = 0;
     bool big_endian;
-    int64_t ret = -1;
+    ssize_t ret = -1;
     Error *err = NULL;
 
 
@@ -1014,7 +1014,7 @@ static void arm_setup_direct_kernel_boot(ARMCPU *cpu,
     /* Set up for a direct boot of a kernel image file. */
     CPUState *cs;
     AddressSpace *as = arm_boot_address_space(cpu, info);
-    int kernel_size;
+    ssize_t kernel_size;
     int initrd_size;
     int is_linux = 0;
     uint64_t elf_entry;
@@ -1093,7 +1093,7 @@ static void arm_setup_direct_kernel_boot(ARMCPU *cpu,
 
     if (kernel_size > info->ram_size) {
         error_report("kernel '%s' is too large to fit in RAM "
-                     "(kernel size %d, RAM size %" PRId64 ")",
+                     "(kernel size %zd, RAM size %" PRId64 ")",
                      info->kernel_filename, kernel_size, info->ram_size);
         exit(1);
     }

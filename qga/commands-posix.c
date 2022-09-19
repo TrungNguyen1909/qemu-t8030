@@ -16,7 +16,6 @@
 #include <sys/utsname.h>
 #include <sys/wait.h>
 #include <dirent.h>
-#include "qemu-common.h"
 #include "guest-agent-core.h"
 #include "qga-qapi-commands.h"
 #include "qapi/error.h"
@@ -27,28 +26,18 @@
 #include "qemu/base64.h"
 #include "qemu/cutils.h"
 #include "commands-common.h"
+#include "block/nvme.h"
+#include "cutils.h"
 
 #ifdef HAVE_UTMPX
 #include <utmpx.h>
 #endif
 
-#ifndef CONFIG_HAS_ENVIRON
-#ifdef __APPLE__
-#include <crt_externs.h>
-#define environ (*_NSGetEnviron())
-#else
-extern char **environ;
-#endif
-#endif
-
 #if defined(__linux__)
 #include <mntent.h>
 #include <linux/fs.h>
-#include <ifaddrs.h>
-#include <arpa/inet.h>
-#include <sys/socket.h>
-#include <net/if.h>
 #include <sys/statvfs.h>
+#include <linux/nvme_ioctl.h>
 
 #ifdef CONFIG_LIBUDEV
 #include <libudev.h>
@@ -59,6 +48,17 @@ extern char **environ;
 #endif
 #ifdef FITRIM
 #define CONFIG_FSTRIM
+#endif
+#endif
+
+#ifdef HAVE_GETIFADDRS
+#include <arpa/inet.h>
+#include <sys/socket.h>
+#include <net/if.h>
+#include <sys/types.h>
+#include <ifaddrs.h>
+#ifdef CONFIG_SOLARIS
+#include <sys/sockio.h>
 #endif
 #endif
 
@@ -88,13 +88,23 @@ void qmp_guest_shutdown(bool has_mode, const char *mode, Error **errp)
     pid_t pid;
     int status;
 
+#ifdef CONFIG_SOLARIS
+    const char *powerdown_flag = "-i5";
+    const char *halt_flag = "-i0";
+    const char *reboot_flag = "-i6";
+#else
+    const char *powerdown_flag = "-P";
+    const char *halt_flag = "-H";
+    const char *reboot_flag = "-r";
+#endif
+
     slog("guest-shutdown called, mode: %s", mode);
     if (!has_mode || strcmp(mode, "powerdown") == 0) {
-        shutdown_flag = "-P";
+        shutdown_flag = powerdown_flag;
     } else if (strcmp(mode, "halt") == 0) {
-        shutdown_flag = "-H";
+        shutdown_flag = halt_flag;
     } else if (strcmp(mode, "reboot") == 0) {
-        shutdown_flag = "-r";
+        shutdown_flag = reboot_flag;
     } else {
         error_setg(errp,
                    "mode is invalid (valid values are: halt|powerdown|reboot");
@@ -109,8 +119,13 @@ void qmp_guest_shutdown(bool has_mode, const char *mode, Error **errp)
         reopen_fd_to_null(1);
         reopen_fd_to_null(2);
 
-        execle("/sbin/shutdown", "shutdown", "-h", shutdown_flag, "+0",
-               "hypervisor initiated shutdown", (char *)NULL, environ);
+#ifdef CONFIG_SOLARIS
+        execl("/sbin/shutdown", "shutdown", shutdown_flag, "-g0", "-y",
+              "hypervisor initiated shutdown", (char *)NULL);
+#else
+        execl("/sbin/shutdown", "shutdown", "-h", shutdown_flag, "+0",
+               "hypervisor initiated shutdown", (char *)NULL);
+#endif
         _exit(EXIT_FAILURE);
     } else if (pid < 0) {
         error_setg_errno(errp, errno, "failed to create child process");
@@ -134,20 +149,6 @@ void qmp_guest_shutdown(bool has_mode, const char *mode, Error **errp)
     }
 
     /* succeeded */
-}
-
-int64_t qmp_guest_get_time(Error **errp)
-{
-   int ret;
-   qemu_timeval tq;
-
-   ret = qemu_gettimeofday(&tq);
-   if (ret < 0) {
-       error_setg_errno(errp, errno, "Failed to get time");
-       return -1;
-   }
-
-   return tq.tv_sec * 1000000000LL + tq.tv_usec * 1000;
 }
 
 void qmp_guest_set_time(bool has_time, int64_t time_ns, Error **errp)
@@ -207,8 +208,7 @@ void qmp_guest_set_time(bool has_time, int64_t time_ns, Error **errp)
 
         /* Use '/sbin/hwclock -w' to set RTC from the system time,
          * or '/sbin/hwclock -s' to set the system time from RTC. */
-        execle(hwclock_path, "hwclock", has_time ? "-w" : "-s",
-               NULL, environ);
+        execl(hwclock_path, "hwclock", has_time ? "-w" : "-s", NULL);
         _exit(EXIT_FAILURE);
     } else if (pid < 0) {
         error_setg_errno(errp, errno, "failed to create child process");
@@ -340,73 +340,71 @@ find_open_flag(const char *mode_str, Error **errp)
 static FILE *
 safe_open_or_create(const char *path, const char *mode, Error **errp)
 {
-    Error *local_err = NULL;
     int oflag;
+    int fd = -1;
+    FILE *f = NULL;
 
-    oflag = find_open_flag(mode, &local_err);
-    if (local_err == NULL) {
-        int fd;
-
-        /* If the caller wants / allows creation of a new file, we implement it
-         * with a two step process: open() + (open() / fchmod()).
-         *
-         * First we insist on creating the file exclusively as a new file. If
-         * that succeeds, we're free to set any file-mode bits on it. (The
-         * motivation is that we want to set those file-mode bits independently
-         * of the current umask.)
-         *
-         * If the exclusive creation fails because the file already exists
-         * (EEXIST is not possible for any other reason), we just attempt to
-         * open the file, but in this case we won't be allowed to change the
-         * file-mode bits on the preexistent file.
-         *
-         * The pathname should never disappear between the two open()s in
-         * practice. If it happens, then someone very likely tried to race us.
-         * In this case just go ahead and report the ENOENT from the second
-         * open() to the caller.
-         *
-         * If the caller wants to open a preexistent file, then the first
-         * open() is decisive and its third argument is ignored, and the second
-         * open() and the fchmod() are never called.
-         */
-        fd = open(path, oflag | ((oflag & O_CREAT) ? O_EXCL : 0), 0);
-        if (fd == -1 && errno == EEXIST) {
-            oflag &= ~(unsigned)O_CREAT;
-            fd = open(path, oflag);
-        }
-
-        if (fd == -1) {
-            error_setg_errno(&local_err, errno, "failed to open file '%s' "
-                             "(mode: '%s')", path, mode);
-        } else {
-            qemu_set_cloexec(fd);
-
-            if ((oflag & O_CREAT) && fchmod(fd, DEFAULT_NEW_FILE_MODE) == -1) {
-                error_setg_errno(&local_err, errno, "failed to set permission "
-                                 "0%03o on new file '%s' (mode: '%s')",
-                                 (unsigned)DEFAULT_NEW_FILE_MODE, path, mode);
-            } else {
-                FILE *f;
-
-                f = fdopen(fd, mode);
-                if (f == NULL) {
-                    error_setg_errno(&local_err, errno, "failed to associate "
-                                     "stdio stream with file descriptor %d, "
-                                     "file '%s' (mode: '%s')", fd, path, mode);
-                } else {
-                    return f;
-                }
-            }
-
-            close(fd);
-            if (oflag & O_CREAT) {
-                unlink(path);
-            }
-        }
+    oflag = find_open_flag(mode, errp);
+    if (oflag < 0) {
+        goto end;
     }
 
-    error_propagate(errp, local_err);
-    return NULL;
+    /* If the caller wants / allows creation of a new file, we implement it
+     * with a two step process: open() + (open() / fchmod()).
+     *
+     * First we insist on creating the file exclusively as a new file. If
+     * that succeeds, we're free to set any file-mode bits on it. (The
+     * motivation is that we want to set those file-mode bits independently
+     * of the current umask.)
+     *
+     * If the exclusive creation fails because the file already exists
+     * (EEXIST is not possible for any other reason), we just attempt to
+     * open the file, but in this case we won't be allowed to change the
+     * file-mode bits on the preexistent file.
+     *
+     * The pathname should never disappear between the two open()s in
+     * practice. If it happens, then someone very likely tried to race us.
+     * In this case just go ahead and report the ENOENT from the second
+     * open() to the caller.
+     *
+     * If the caller wants to open a preexistent file, then the first
+     * open() is decisive and its third argument is ignored, and the second
+     * open() and the fchmod() are never called.
+     */
+    fd = qga_open_cloexec(path, oflag | ((oflag & O_CREAT) ? O_EXCL : 0), 0);
+    if (fd == -1 && errno == EEXIST) {
+        oflag &= ~(unsigned)O_CREAT;
+        fd = qga_open_cloexec(path, oflag, 0);
+    }
+    if (fd == -1) {
+        error_setg_errno(errp, errno,
+                         "failed to open file '%s' (mode: '%s')",
+                         path, mode);
+        goto end;
+    }
+
+    if ((oflag & O_CREAT) && fchmod(fd, DEFAULT_NEW_FILE_MODE) == -1) {
+        error_setg_errno(errp, errno, "failed to set permission "
+                         "0%03o on new file '%s' (mode: '%s')",
+                         (unsigned)DEFAULT_NEW_FILE_MODE, path, mode);
+        goto end;
+    }
+
+    f = fdopen(fd, mode);
+    if (f == NULL) {
+        error_setg_errno(errp, errno, "failed to associate stdio stream with "
+                         "file descriptor %d, file '%s' (mode: '%s')",
+                         fd, path, mode);
+    }
+
+end:
+    if (f == NULL && fd != -1) {
+        close(fd);
+        if (oflag & O_CREAT) {
+            unlink(path);
+        }
+    }
+    return f;
 }
 
 int64_t qmp_guest_file_open(const char *path, bool has_mode, const char *mode,
@@ -429,7 +427,11 @@ int64_t qmp_guest_file_open(const char *path, bool has_mode, const char *mode,
     /* set fd non-blocking to avoid common use cases (like reading from a
      * named pipe) from hanging the agent
      */
-    qemu_set_nonblock(fileno(fh));
+    if (!g_unix_set_fd_nonblocking(fileno(fh), true, NULL)) {
+        fclose(fh);
+        error_setg_errno(errp, errno, "Failed to set FD nonblocking");
+        return -1;
+    }
 
     handle = guest_file_handle_add(fh, errp);
     if (handle < 0) {
@@ -671,7 +673,7 @@ static int dev_major_minor(const char *devpath,
 /*
  * Walk the mount table and build a list of local file systems
  */
-static void build_fs_mount_list_from_mtab(FsMountList *mounts, Error **errp)
+static bool build_fs_mount_list_from_mtab(FsMountList *mounts, Error **errp)
 {
     struct mntent *ment;
     FsMount *mount;
@@ -682,7 +684,7 @@ static void build_fs_mount_list_from_mtab(FsMountList *mounts, Error **errp)
     fp = setmntent(mtab, "r");
     if (!fp) {
         error_setg(errp, "failed to open mtab file: '%s'", mtab);
-        return;
+        return false;
     }
 
     while ((ment = getmntent(fp))) {
@@ -712,6 +714,7 @@ static void build_fs_mount_list_from_mtab(FsMountList *mounts, Error **errp)
     }
 
     endmntent(fp);
+    return true;
 }
 
 static void decode_mntname(char *name, int len)
@@ -736,7 +739,7 @@ static void decode_mntname(char *name, int len)
     }
 }
 
-static void build_fs_mount_list(FsMountList *mounts, Error **errp)
+static bool build_fs_mount_list(FsMountList *mounts, Error **errp)
 {
     FsMount *mount;
     char const *mountinfo = "/proc/self/mountinfo";
@@ -749,8 +752,7 @@ static void build_fs_mount_list(FsMountList *mounts, Error **errp)
 
     fp = fopen(mountinfo, "r");
     if (!fp) {
-        build_fs_mount_list_from_mtab(mounts, errp);
-        return;
+        return build_fs_mount_list_from_mtab(mounts, errp);
     }
 
     while (getline(&line, &n, fp) != -1) {
@@ -792,6 +794,7 @@ static void build_fs_mount_list(FsMountList *mounts, Error **errp)
     free(line);
 
     fclose(fp);
+    return true;
 }
 #endif
 
@@ -889,7 +892,8 @@ static bool build_guest_fsinfo_for_pci_dev(char const *syspath,
         if (driver && (g_str_equal(driver, "ata_piix") ||
                        g_str_equal(driver, "sym53c8xx") ||
                        g_str_equal(driver, "virtio-pci") ||
-                       g_str_equal(driver, "ahci"))) {
+                       g_str_equal(driver, "ahci") ||
+                       g_str_equal(driver, "nvme"))) {
             break;
         }
 
@@ -984,6 +988,8 @@ static bool build_guest_fsinfo_for_pci_dev(char const *syspath,
             g_debug("no host for '%s' (driver '%s')", syspath, driver);
             goto cleanup;
         }
+    } else if (strcmp(driver, "nvme") == 0) {
+        disk->bus_type = GUEST_DISK_BUS_TYPE_NVME;
     } else {
         g_debug("unknown driver '%s' (sysfs path '%s')", driver, syspath);
         goto cleanup;
@@ -1201,7 +1207,15 @@ static void build_guest_fsinfo_for_device(char const *devpath,
 
     syspath = realpath(devpath, NULL);
     if (!syspath) {
-        error_setg_errno(errp, errno, "realpath(\"%s\")", devpath);
+        if (errno != ENOENT) {
+            error_setg_errno(errp, errno, "realpath(\"%s\")", devpath);
+            return;
+        }
+
+        /* ENOENT: This devpath may not exist because of container config */
+        if (!fs->name) {
+            fs->name = g_path_get_basename(devpath);
+        }
         return;
     }
 
@@ -1387,6 +1401,76 @@ static GuestDiskInfoList *get_disk_partitions(
     return ret;
 }
 
+static void get_nvme_smart(GuestDiskInfo *disk)
+{
+    int fd;
+    GuestNVMeSmart *smart;
+    NvmeSmartLog log = {0};
+    struct nvme_admin_cmd cmd = {
+        .opcode = NVME_ADM_CMD_GET_LOG_PAGE,
+        .nsid = NVME_NSID_BROADCAST,
+        .addr = (uintptr_t)&log,
+        .data_len = sizeof(log),
+        .cdw10 = NVME_LOG_SMART_INFO | (1 << 15) /* RAE bit */
+                 | (((sizeof(log) >> 2) - 1) << 16)
+    };
+
+    fd = qga_open_cloexec(disk->name, O_RDONLY, 0);
+    if (fd == -1) {
+        g_debug("Failed to open device: %s: %s", disk->name, g_strerror(errno));
+        return;
+    }
+
+    if (ioctl(fd, NVME_IOCTL_ADMIN_CMD, &cmd)) {
+        g_debug("Failed to get smart: %s: %s", disk->name, g_strerror(errno));
+        close(fd);
+        return;
+    }
+
+    disk->has_smart = true;
+    disk->smart = g_new0(GuestDiskSmart, 1);
+    disk->smart->type = GUEST_DISK_BUS_TYPE_NVME;
+
+    smart = &disk->smart->u.nvme;
+    smart->critical_warning = log.critical_warning;
+    smart->temperature = lduw_le_p(&log.temperature); /* unaligned field */
+    smart->available_spare = log.available_spare;
+    smart->available_spare_threshold = log.available_spare_threshold;
+    smart->percentage_used = log.percentage_used;
+    smart->data_units_read_lo = le64_to_cpu(log.data_units_read[0]);
+    smart->data_units_read_hi = le64_to_cpu(log.data_units_read[1]);
+    smart->data_units_written_lo = le64_to_cpu(log.data_units_written[0]);
+    smart->data_units_written_hi = le64_to_cpu(log.data_units_written[1]);
+    smart->host_read_commands_lo = le64_to_cpu(log.host_read_commands[0]);
+    smart->host_read_commands_hi = le64_to_cpu(log.host_read_commands[1]);
+    smart->host_write_commands_lo = le64_to_cpu(log.host_write_commands[0]);
+    smart->host_write_commands_hi = le64_to_cpu(log.host_write_commands[1]);
+    smart->controller_busy_time_lo = le64_to_cpu(log.controller_busy_time[0]);
+    smart->controller_busy_time_hi = le64_to_cpu(log.controller_busy_time[1]);
+    smart->power_cycles_lo = le64_to_cpu(log.power_cycles[0]);
+    smart->power_cycles_hi = le64_to_cpu(log.power_cycles[1]);
+    smart->power_on_hours_lo = le64_to_cpu(log.power_on_hours[0]);
+    smart->power_on_hours_hi = le64_to_cpu(log.power_on_hours[1]);
+    smart->unsafe_shutdowns_lo = le64_to_cpu(log.unsafe_shutdowns[0]);
+    smart->unsafe_shutdowns_hi = le64_to_cpu(log.unsafe_shutdowns[1]);
+    smart->media_errors_lo = le64_to_cpu(log.media_errors[0]);
+    smart->media_errors_hi = le64_to_cpu(log.media_errors[1]);
+    smart->number_of_error_log_entries_lo =
+        le64_to_cpu(log.number_of_error_log_entries[0]);
+    smart->number_of_error_log_entries_hi =
+        le64_to_cpu(log.number_of_error_log_entries[1]);
+
+    close(fd);
+}
+
+static void get_disk_smart(GuestDiskInfo *disk)
+{
+    if (disk->has_address
+        && (disk->address->bus_type == GUEST_DISK_BUS_TYPE_NVME)) {
+        get_nvme_smart(disk);
+    }
+}
+
 GuestDiskInfoList *qmp_guest_get_disks(Error **errp)
 {
     GuestDiskInfoList *ret = NULL;
@@ -1460,6 +1544,7 @@ GuestDiskInfoList *qmp_guest_get_disks(Error **errp)
         }
 
         get_disk_deps(disk_dir, disk);
+        get_disk_smart(disk);
         ret = get_disk_partitions(ret, de->d_name, disk_dir, dev_name);
     }
 
@@ -1516,8 +1601,7 @@ GuestFilesystemInfoList *qmp_guest_get_fsinfo(Error **errp)
     Error *local_err = NULL;
 
     QTAILQ_INIT(&mounts);
-    build_fs_mount_list(&mounts, &local_err);
-    if (local_err) {
+    if (!build_fs_mount_list(&mounts, &local_err)) {
         error_propagate(errp, local_err);
         return NULL;
     }
@@ -1574,7 +1658,7 @@ static void execute_fsfreeze_hook(FsfreezeHookArg arg, Error **errp)
         reopen_fd_to_null(1);
         reopen_fd_to_null(2);
 
-        execle(hook, hook, arg_str, NULL, environ);
+        execl(hook, hook, arg_str, NULL);
         _exit(EXIT_FAILURE);
     } else if (pid < 0) {
         error_setg_errno(errp, errno, "failed to create child process");
@@ -1640,8 +1724,7 @@ int64_t qmp_guest_fsfreeze_freeze_list(bool has_mountpoints,
     }
 
     QTAILQ_INIT(&mounts);
-    build_fs_mount_list(&mounts, &local_err);
-    if (local_err) {
+    if (!build_fs_mount_list(&mounts, &local_err)) {
         error_propagate(errp, local_err);
         return -1;
     }
@@ -1663,7 +1746,7 @@ int64_t qmp_guest_fsfreeze_freeze_list(bool has_mountpoints,
             }
         }
 
-        fd = qemu_open_old(mount->dirname, O_RDONLY);
+        fd = qga_open_cloexec(mount->dirname, O_RDONLY, 0);
         if (fd == -1) {
             error_setg_errno(errp, errno, "failed to open %s", mount->dirname);
             goto error;
@@ -1722,15 +1805,14 @@ int64_t qmp_guest_fsfreeze_thaw(Error **errp)
     Error *local_err = NULL;
 
     QTAILQ_INIT(&mounts);
-    build_fs_mount_list(&mounts, &local_err);
-    if (local_err) {
+    if (!build_fs_mount_list(&mounts, &local_err)) {
         error_propagate(errp, local_err);
         return 0;
     }
 
     QTAILQ_FOREACH(mount, &mounts, next) {
         logged = false;
-        fd = qemu_open_old(mount->dirname, O_RDONLY);
+        fd = qga_open_cloexec(mount->dirname, O_RDONLY, 0);
         if (fd == -1) {
             continue;
         }
@@ -1796,15 +1878,12 @@ qmp_guest_fstrim(bool has_minimum, int64_t minimum, Error **errp)
     FsMountList mounts;
     struct FsMount *mount;
     int fd;
-    Error *local_err = NULL;
     struct fstrim_range r;
 
     slog("guest-fstrim called");
 
     QTAILQ_INIT(&mounts);
-    build_fs_mount_list(&mounts, &local_err);
-    if (local_err) {
-        error_propagate(errp, local_err);
+    if (!build_fs_mount_list(&mounts, errp)) {
         return NULL;
     }
 
@@ -1816,7 +1895,7 @@ qmp_guest_fstrim(bool has_minimum, int64_t minimum, Error **errp)
 
         QAPI_LIST_PREPEND(response->paths, result);
 
-        fd = qemu_open_old(mount->dirname, O_RDONLY);
+        fd = qga_open_cloexec(mount->dirname, O_RDONLY, 0);
         if (fd == -1) {
             result->error = g_strdup_printf("failed to open: %s",
                                             strerror(errno));
@@ -1888,7 +1967,7 @@ static int run_process_child(const char *command[], Error **errp)
     spawn_flag = G_SPAWN_SEARCH_PATH | G_SPAWN_STDOUT_TO_DEV_NULL |
                  G_SPAWN_STDERR_TO_DEV_NULL;
 
-    success =  g_spawn_sync(NULL, (char **)command, environ, spawn_flag,
+    success =  g_spawn_sync(NULL, (char **)command, NULL, spawn_flag,
                             NULL, NULL, NULL, NULL,
                             &exit_status, &g_err);
 
@@ -2154,223 +2233,6 @@ void qmp_guest_suspend_hybrid(Error **errp)
     guest_suspend(SUSPEND_MODE_HYBRID, errp);
 }
 
-static GuestNetworkInterface *
-guest_find_interface(GuestNetworkInterfaceList *head,
-                     const char *name)
-{
-    for (; head; head = head->next) {
-        if (strcmp(head->value->name, name) == 0) {
-            return head->value;
-        }
-    }
-
-    return NULL;
-}
-
-static int guest_get_network_stats(const char *name,
-                       GuestNetworkInterfaceStat *stats)
-{
-    int name_len;
-    char const *devinfo = "/proc/net/dev";
-    FILE *fp;
-    char *line = NULL, *colon;
-    size_t n = 0;
-    fp = fopen(devinfo, "r");
-    if (!fp) {
-        return -1;
-    }
-    name_len = strlen(name);
-    while (getline(&line, &n, fp) != -1) {
-        long long dummy;
-        long long rx_bytes;
-        long long rx_packets;
-        long long rx_errs;
-        long long rx_dropped;
-        long long tx_bytes;
-        long long tx_packets;
-        long long tx_errs;
-        long long tx_dropped;
-        char *trim_line;
-        trim_line = g_strchug(line);
-        if (trim_line[0] == '\0') {
-            continue;
-        }
-        colon = strchr(trim_line, ':');
-        if (!colon) {
-            continue;
-        }
-        if (colon - name_len  == trim_line &&
-           strncmp(trim_line, name, name_len) == 0) {
-            if (sscanf(colon + 1,
-                "%lld %lld %lld %lld %lld %lld %lld %lld %lld %lld %lld %lld %lld %lld %lld %lld",
-                  &rx_bytes, &rx_packets, &rx_errs, &rx_dropped,
-                  &dummy, &dummy, &dummy, &dummy,
-                  &tx_bytes, &tx_packets, &tx_errs, &tx_dropped,
-                  &dummy, &dummy, &dummy, &dummy) != 16) {
-                continue;
-            }
-            stats->rx_bytes = rx_bytes;
-            stats->rx_packets = rx_packets;
-            stats->rx_errs = rx_errs;
-            stats->rx_dropped = rx_dropped;
-            stats->tx_bytes = tx_bytes;
-            stats->tx_packets = tx_packets;
-            stats->tx_errs = tx_errs;
-            stats->tx_dropped = tx_dropped;
-            fclose(fp);
-            g_free(line);
-            return 0;
-        }
-    }
-    fclose(fp);
-    g_free(line);
-    g_debug("/proc/net/dev: Interface '%s' not found", name);
-    return -1;
-}
-
-/*
- * Build information about guest interfaces
- */
-GuestNetworkInterfaceList *qmp_guest_network_get_interfaces(Error **errp)
-{
-    GuestNetworkInterfaceList *head = NULL, **tail = &head;
-    struct ifaddrs *ifap, *ifa;
-
-    if (getifaddrs(&ifap) < 0) {
-        error_setg_errno(errp, errno, "getifaddrs failed");
-        goto error;
-    }
-
-    for (ifa = ifap; ifa; ifa = ifa->ifa_next) {
-        GuestNetworkInterface *info;
-        GuestIpAddressList **address_tail;
-        GuestIpAddress *address_item = NULL;
-        GuestNetworkInterfaceStat *interface_stat = NULL;
-        char addr4[INET_ADDRSTRLEN];
-        char addr6[INET6_ADDRSTRLEN];
-        int sock;
-        struct ifreq ifr;
-        unsigned char *mac_addr;
-        void *p;
-
-        g_debug("Processing %s interface", ifa->ifa_name);
-
-        info = guest_find_interface(head, ifa->ifa_name);
-
-        if (!info) {
-            info = g_malloc0(sizeof(*info));
-            info->name = g_strdup(ifa->ifa_name);
-
-            QAPI_LIST_APPEND(tail, info);
-        }
-
-        if (!info->has_hardware_address && ifa->ifa_flags & SIOCGIFHWADDR) {
-            /* we haven't obtained HW address yet */
-            sock = socket(PF_INET, SOCK_STREAM, 0);
-            if (sock == -1) {
-                error_setg_errno(errp, errno, "failed to create socket");
-                goto error;
-            }
-
-            memset(&ifr, 0, sizeof(ifr));
-            pstrcpy(ifr.ifr_name, IF_NAMESIZE, info->name);
-            if (ioctl(sock, SIOCGIFHWADDR, &ifr) == -1) {
-                error_setg_errno(errp, errno,
-                                 "failed to get MAC address of %s",
-                                 ifa->ifa_name);
-                close(sock);
-                goto error;
-            }
-
-            close(sock);
-            mac_addr = (unsigned char *) &ifr.ifr_hwaddr.sa_data;
-
-            info->hardware_address =
-                g_strdup_printf("%02x:%02x:%02x:%02x:%02x:%02x",
-                                (int) mac_addr[0], (int) mac_addr[1],
-                                (int) mac_addr[2], (int) mac_addr[3],
-                                (int) mac_addr[4], (int) mac_addr[5]);
-
-            info->has_hardware_address = true;
-        }
-
-        if (ifa->ifa_addr &&
-            ifa->ifa_addr->sa_family == AF_INET) {
-            /* interface with IPv4 address */
-            p = &((struct sockaddr_in *)ifa->ifa_addr)->sin_addr;
-            if (!inet_ntop(AF_INET, p, addr4, sizeof(addr4))) {
-                error_setg_errno(errp, errno, "inet_ntop failed");
-                goto error;
-            }
-
-            address_item = g_malloc0(sizeof(*address_item));
-            address_item->ip_address = g_strdup(addr4);
-            address_item->ip_address_type = GUEST_IP_ADDRESS_TYPE_IPV4;
-
-            if (ifa->ifa_netmask) {
-                /* Count the number of set bits in netmask.
-                 * This is safe as '1' and '0' cannot be shuffled in netmask. */
-                p = &((struct sockaddr_in *)ifa->ifa_netmask)->sin_addr;
-                address_item->prefix = ctpop32(((uint32_t *) p)[0]);
-            }
-        } else if (ifa->ifa_addr &&
-                   ifa->ifa_addr->sa_family == AF_INET6) {
-            /* interface with IPv6 address */
-            p = &((struct sockaddr_in6 *)ifa->ifa_addr)->sin6_addr;
-            if (!inet_ntop(AF_INET6, p, addr6, sizeof(addr6))) {
-                error_setg_errno(errp, errno, "inet_ntop failed");
-                goto error;
-            }
-
-            address_item = g_malloc0(sizeof(*address_item));
-            address_item->ip_address = g_strdup(addr6);
-            address_item->ip_address_type = GUEST_IP_ADDRESS_TYPE_IPV6;
-
-            if (ifa->ifa_netmask) {
-                /* Count the number of set bits in netmask.
-                 * This is safe as '1' and '0' cannot be shuffled in netmask. */
-                p = &((struct sockaddr_in6 *)ifa->ifa_netmask)->sin6_addr;
-                address_item->prefix =
-                    ctpop32(((uint32_t *) p)[0]) +
-                    ctpop32(((uint32_t *) p)[1]) +
-                    ctpop32(((uint32_t *) p)[2]) +
-                    ctpop32(((uint32_t *) p)[3]);
-            }
-        }
-
-        if (!address_item) {
-            continue;
-        }
-
-        address_tail = &info->ip_addresses;
-        while (*address_tail) {
-            address_tail = &(*address_tail)->next;
-        }
-        QAPI_LIST_APPEND(address_tail, address_item);
-
-        info->has_ip_addresses = true;
-
-        if (!info->has_statistics) {
-            interface_stat = g_malloc0(sizeof(*interface_stat));
-            if (guest_get_network_stats(info->name, interface_stat) == -1) {
-                info->has_statistics = false;
-                g_free(interface_stat);
-            } else {
-                info->statistics = interface_stat;
-                info->has_statistics = true;
-            }
-        }
-    }
-
-    freeifaddrs(ifap);
-    return head;
-
-error:
-    freeifaddrs(ifap);
-    qapi_free_GuestNetworkInterfaceList(head);
-    return NULL;
-}
-
 /* Transfer online/offline status between @vcpu and the guest system.
  *
  * On input either @errp or *@errp must be NULL.
@@ -2554,7 +2416,7 @@ void qmp_guest_set_user_password(const char *username,
         goto out;
     }
 
-    if (pipe(datafd) < 0) {
+    if (!g_unix_open_pipe(datafd, FD_CLOEXEC, NULL)) {
         error_setg(errp, "cannot create pipe FDs");
         goto out;
     }
@@ -2569,9 +2431,9 @@ void qmp_guest_set_user_password(const char *username,
         reopen_fd_to_null(2);
 
         if (crypted) {
-            execle(passwd_path, "chpasswd", "-e", NULL, environ);
+            execl(passwd_path, "chpasswd", "-e", NULL);
         } else {
-            execle(passwd_path, "chpasswd", NULL, environ);
+            execl(passwd_path, "chpasswd", NULL);
         }
         _exit(EXIT_FAILURE);
     } else if (pid < 0) {
@@ -2923,6 +2785,206 @@ GuestMemoryBlockInfo *qmp_guest_get_memory_block_info(Error **errp)
     return info;
 }
 
+#define MAX_NAME_LEN 128
+static GuestDiskStatsInfoList *guest_get_diskstats(Error **errp)
+{
+#ifdef CONFIG_LINUX
+    GuestDiskStatsInfoList *head = NULL, **tail = &head;
+    const char *diskstats = "/proc/diskstats";
+    FILE *fp;
+    size_t n;
+    char *line = NULL;
+
+    fp = fopen(diskstats, "r");
+    if (fp  == NULL) {
+        error_setg_errno(errp, errno, "open(\"%s\")", diskstats);
+        return NULL;
+    }
+
+    while (getline(&line, &n, fp) != -1) {
+        g_autofree GuestDiskStatsInfo *diskstatinfo = NULL;
+        g_autofree GuestDiskStats *diskstat = NULL;
+        char dev_name[MAX_NAME_LEN];
+        unsigned int ios_pgr, tot_ticks, rq_ticks, wr_ticks, dc_ticks, fl_ticks;
+        unsigned long rd_ios, rd_merges_or_rd_sec, rd_ticks_or_wr_sec, wr_ios;
+        unsigned long wr_merges, rd_sec_or_wr_ios, wr_sec;
+        unsigned long dc_ios, dc_merges, dc_sec, fl_ios;
+        unsigned int major, minor;
+        int i;
+
+        i = sscanf(line, "%u %u %s %lu %lu %lu"
+                   "%lu %lu %lu %lu %u %u %u %u"
+                   "%lu %lu %lu %u %lu %u",
+                   &major, &minor, dev_name,
+                   &rd_ios, &rd_merges_or_rd_sec, &rd_sec_or_wr_ios,
+                   &rd_ticks_or_wr_sec, &wr_ios, &wr_merges, &wr_sec,
+                   &wr_ticks, &ios_pgr, &tot_ticks, &rq_ticks,
+                   &dc_ios, &dc_merges, &dc_sec, &dc_ticks,
+                   &fl_ios, &fl_ticks);
+
+        if (i < 7) {
+            continue;
+        }
+
+        diskstatinfo = g_new0(GuestDiskStatsInfo, 1);
+        diskstatinfo->name = g_strdup(dev_name);
+        diskstatinfo->major = major;
+        diskstatinfo->minor = minor;
+
+        diskstat = g_new0(GuestDiskStats, 1);
+        if (i == 7) {
+            diskstat->has_read_ios = true;
+            diskstat->read_ios = rd_ios;
+            diskstat->has_read_sectors = true;
+            diskstat->read_sectors = rd_merges_or_rd_sec;
+            diskstat->has_write_ios = true;
+            diskstat->write_ios = rd_sec_or_wr_ios;
+            diskstat->has_write_sectors = true;
+            diskstat->write_sectors = rd_ticks_or_wr_sec;
+        }
+        if (i >= 14) {
+            diskstat->has_read_ios = true;
+            diskstat->read_ios = rd_ios;
+            diskstat->has_read_sectors = true;
+            diskstat->read_sectors = rd_sec_or_wr_ios;
+            diskstat->has_read_merges = true;
+            diskstat->read_merges = rd_merges_or_rd_sec;
+            diskstat->has_read_ticks = true;
+            diskstat->read_ticks = rd_ticks_or_wr_sec;
+            diskstat->has_write_ios = true;
+            diskstat->write_ios = wr_ios;
+            diskstat->has_write_sectors = true;
+            diskstat->write_sectors = wr_sec;
+            diskstat->has_write_merges = true;
+            diskstat->write_merges = wr_merges;
+            diskstat->has_write_ticks = true;
+            diskstat->write_ticks = wr_ticks;
+            diskstat->has_ios_pgr = true;
+            diskstat->ios_pgr = ios_pgr;
+            diskstat->has_total_ticks = true;
+            diskstat->total_ticks = tot_ticks;
+            diskstat->has_weight_ticks = true;
+            diskstat->weight_ticks = rq_ticks;
+        }
+        if (i >= 18) {
+            diskstat->has_discard_ios = true;
+            diskstat->discard_ios = dc_ios;
+            diskstat->has_discard_merges = true;
+            diskstat->discard_merges = dc_merges;
+            diskstat->has_discard_sectors = true;
+            diskstat->discard_sectors = dc_sec;
+            diskstat->has_discard_ticks = true;
+            diskstat->discard_ticks = dc_ticks;
+        }
+        if (i >= 20) {
+            diskstat->has_flush_ios = true;
+            diskstat->flush_ios = fl_ios;
+            diskstat->has_flush_ticks = true;
+            diskstat->flush_ticks = fl_ticks;
+        }
+
+        diskstatinfo->stats = g_steal_pointer(&diskstat);
+        QAPI_LIST_APPEND(tail, diskstatinfo);
+        diskstatinfo = NULL;
+    }
+    free(line);
+    fclose(fp);
+    return head;
+#else
+    g_debug("disk stats reporting available only for Linux");
+    return NULL;
+#endif
+}
+
+GuestDiskStatsInfoList *qmp_guest_get_diskstats(Error **errp)
+{
+    return guest_get_diskstats(errp);
+}
+
+GuestCpuStatsList *qmp_guest_get_cpustats(Error **errp)
+{
+    GuestCpuStatsList *head = NULL, **tail = &head;
+    const char *cpustats = "/proc/stat";
+    int clk_tck = sysconf(_SC_CLK_TCK);
+    FILE *fp;
+    size_t n;
+    char *line = NULL;
+
+    fp = fopen(cpustats, "r");
+    if (fp  == NULL) {
+        error_setg_errno(errp, errno, "open(\"%s\")", cpustats);
+        return NULL;
+    }
+
+    while (getline(&line, &n, fp) != -1) {
+        GuestCpuStats *cpustat = NULL;
+        GuestLinuxCpuStats *linuxcpustat;
+        int i;
+        unsigned long user, system, idle, iowait, irq, softirq, steal, guest;
+        unsigned long nice, guest_nice;
+        char name[64];
+
+        i = sscanf(line, "%s %lu %lu %lu %lu %lu %lu %lu %lu %lu %lu",
+                   name, &user, &nice, &system, &idle, &iowait, &irq, &softirq,
+                   &steal, &guest, &guest_nice);
+
+        /* drop "cpu 1 2 3 ...", get "cpuX 1 2 3 ..." only */
+        if ((i == EOF) || strncmp(name, "cpu", 3) || (name[3] == '\0')) {
+            continue;
+        }
+
+        if (i < 5) {
+            slog("Parsing cpu stat from %s failed, see \"man proc\"", cpustats);
+            break;
+        }
+
+        cpustat = g_new0(GuestCpuStats, 1);
+        cpustat->type = GUEST_CPU_STATS_TYPE_LINUX;
+
+        linuxcpustat = &cpustat->u.q_linux;
+        linuxcpustat->cpu = atoi(&name[3]);
+        linuxcpustat->user = user * 1000 / clk_tck;
+        linuxcpustat->nice = nice * 1000 / clk_tck;
+        linuxcpustat->system = system * 1000 / clk_tck;
+        linuxcpustat->idle = idle * 1000 / clk_tck;
+
+        if (i > 5) {
+            linuxcpustat->has_iowait = true;
+            linuxcpustat->iowait = iowait * 1000 / clk_tck;
+        }
+
+        if (i > 6) {
+            linuxcpustat->has_irq = true;
+            linuxcpustat->irq = irq * 1000 / clk_tck;
+            linuxcpustat->has_softirq = true;
+            linuxcpustat->softirq = softirq * 1000 / clk_tck;
+        }
+
+        if (i > 8) {
+            linuxcpustat->has_steal = true;
+            linuxcpustat->steal = steal * 1000 / clk_tck;
+        }
+
+        if (i > 9) {
+            linuxcpustat->has_guest = true;
+            linuxcpustat->guest = guest * 1000 / clk_tck;
+        }
+
+        if (i > 10) {
+            linuxcpustat->has_guest = true;
+            linuxcpustat->guest = guest * 1000 / clk_tck;
+            linuxcpustat->has_guestnice = true;
+            linuxcpustat->guestnice = guest_nice * 1000 / clk_tck;
+        }
+
+        QAPI_LIST_APPEND(tail, cpustat);
+    }
+
+    free(line);
+    fclose(fp);
+    return head;
+}
+
 #else /* defined(__linux__) */
 
 void qmp_guest_suspend_disk(Error **errp)
@@ -2938,12 +3000,6 @@ void qmp_guest_suspend_ram(Error **errp)
 void qmp_guest_suspend_hybrid(Error **errp)
 {
     error_setg(errp, QERR_UNSUPPORTED);
-}
-
-GuestNetworkInterfaceList *qmp_guest_network_get_interfaces(Error **errp)
-{
-    error_setg(errp, QERR_UNSUPPORTED);
-    return NULL;
 }
 
 GuestLogicalProcessorList *qmp_guest_get_vcpus(Error **errp)
@@ -2986,6 +3042,252 @@ GuestMemoryBlockInfo *qmp_guest_get_memory_block_info(Error **errp)
 }
 
 #endif
+
+#ifdef HAVE_GETIFADDRS
+static GuestNetworkInterface *
+guest_find_interface(GuestNetworkInterfaceList *head,
+                     const char *name)
+{
+    for (; head; head = head->next) {
+        if (strcmp(head->value->name, name) == 0) {
+            return head->value;
+        }
+    }
+
+    return NULL;
+}
+
+static int guest_get_network_stats(const char *name,
+                       GuestNetworkInterfaceStat *stats)
+{
+#ifdef CONFIG_LINUX
+    int name_len;
+    char const *devinfo = "/proc/net/dev";
+    FILE *fp;
+    char *line = NULL, *colon;
+    size_t n = 0;
+    fp = fopen(devinfo, "r");
+    if (!fp) {
+        g_debug("failed to open network stats %s: %s", devinfo,
+                g_strerror(errno));
+        return -1;
+    }
+    name_len = strlen(name);
+    while (getline(&line, &n, fp) != -1) {
+        long long dummy;
+        long long rx_bytes;
+        long long rx_packets;
+        long long rx_errs;
+        long long rx_dropped;
+        long long tx_bytes;
+        long long tx_packets;
+        long long tx_errs;
+        long long tx_dropped;
+        char *trim_line;
+        trim_line = g_strchug(line);
+        if (trim_line[0] == '\0') {
+            continue;
+        }
+        colon = strchr(trim_line, ':');
+        if (!colon) {
+            continue;
+        }
+        if (colon - name_len  == trim_line &&
+           strncmp(trim_line, name, name_len) == 0) {
+            if (sscanf(colon + 1,
+                "%lld %lld %lld %lld %lld %lld %lld %lld %lld %lld %lld %lld %lld %lld %lld %lld",
+                  &rx_bytes, &rx_packets, &rx_errs, &rx_dropped,
+                  &dummy, &dummy, &dummy, &dummy,
+                  &tx_bytes, &tx_packets, &tx_errs, &tx_dropped,
+                  &dummy, &dummy, &dummy, &dummy) != 16) {
+                continue;
+            }
+            stats->rx_bytes = rx_bytes;
+            stats->rx_packets = rx_packets;
+            stats->rx_errs = rx_errs;
+            stats->rx_dropped = rx_dropped;
+            stats->tx_bytes = tx_bytes;
+            stats->tx_packets = tx_packets;
+            stats->tx_errs = tx_errs;
+            stats->tx_dropped = tx_dropped;
+            fclose(fp);
+            g_free(line);
+            return 0;
+        }
+    }
+    fclose(fp);
+    g_free(line);
+    g_debug("/proc/net/dev: Interface '%s' not found", name);
+#else /* !CONFIG_LINUX */
+    g_debug("Network stats reporting available only for Linux");
+#endif /* !CONFIG_LINUX */
+    return -1;
+}
+
+/*
+ * Build information about guest interfaces
+ */
+GuestNetworkInterfaceList *qmp_guest_network_get_interfaces(Error **errp)
+{
+    GuestNetworkInterfaceList *head = NULL, **tail = &head;
+    struct ifaddrs *ifap, *ifa;
+
+    if (getifaddrs(&ifap) < 0) {
+        error_setg_errno(errp, errno, "getifaddrs failed");
+        goto error;
+    }
+
+    for (ifa = ifap; ifa; ifa = ifa->ifa_next) {
+        GuestNetworkInterface *info;
+        GuestIpAddressList **address_tail;
+        GuestIpAddress *address_item = NULL;
+        GuestNetworkInterfaceStat *interface_stat = NULL;
+        char addr4[INET_ADDRSTRLEN];
+        char addr6[INET6_ADDRSTRLEN];
+        int sock;
+        struct ifreq ifr;
+        unsigned char *mac_addr;
+        void *p;
+
+        g_debug("Processing %s interface", ifa->ifa_name);
+
+        info = guest_find_interface(head, ifa->ifa_name);
+
+        if (!info) {
+            info = g_malloc0(sizeof(*info));
+            info->name = g_strdup(ifa->ifa_name);
+
+            QAPI_LIST_APPEND(tail, info);
+        }
+
+        if (!info->has_hardware_address) {
+            /* we haven't obtained HW address yet */
+            sock = socket(PF_INET, SOCK_STREAM, 0);
+            if (sock == -1) {
+                error_setg_errno(errp, errno, "failed to create socket");
+                goto error;
+            }
+
+            memset(&ifr, 0, sizeof(ifr));
+            pstrcpy(ifr.ifr_name, IF_NAMESIZE, info->name);
+            if (ioctl(sock, SIOCGIFHWADDR, &ifr) == -1) {
+                /*
+                 * We can't get the hw addr of this interface, but that's not a
+                 * fatal error. Don't set info->hardware_address, but keep
+                 * going.
+                 */
+                if (errno == EADDRNOTAVAIL) {
+                    /* The interface doesn't have a hw addr (e.g. loopback). */
+                    g_debug("failed to get MAC address of %s: %s",
+                            ifa->ifa_name, strerror(errno));
+                } else{
+                    g_warning("failed to get MAC address of %s: %s",
+                              ifa->ifa_name, strerror(errno));
+                }
+
+            } else {
+#ifdef CONFIG_SOLARIS
+                mac_addr = (unsigned char *) &ifr.ifr_addr.sa_data;
+#else
+                mac_addr = (unsigned char *) &ifr.ifr_hwaddr.sa_data;
+#endif
+                info->hardware_address =
+                    g_strdup_printf("%02x:%02x:%02x:%02x:%02x:%02x",
+                                    (int) mac_addr[0], (int) mac_addr[1],
+                                    (int) mac_addr[2], (int) mac_addr[3],
+                                    (int) mac_addr[4], (int) mac_addr[5]);
+
+                info->has_hardware_address = true;
+            }
+            close(sock);
+        }
+
+        if (ifa->ifa_addr &&
+            ifa->ifa_addr->sa_family == AF_INET) {
+            /* interface with IPv4 address */
+            p = &((struct sockaddr_in *)ifa->ifa_addr)->sin_addr;
+            if (!inet_ntop(AF_INET, p, addr4, sizeof(addr4))) {
+                error_setg_errno(errp, errno, "inet_ntop failed");
+                goto error;
+            }
+
+            address_item = g_malloc0(sizeof(*address_item));
+            address_item->ip_address = g_strdup(addr4);
+            address_item->ip_address_type = GUEST_IP_ADDRESS_TYPE_IPV4;
+
+            if (ifa->ifa_netmask) {
+                /* Count the number of set bits in netmask.
+                 * This is safe as '1' and '0' cannot be shuffled in netmask. */
+                p = &((struct sockaddr_in *)ifa->ifa_netmask)->sin_addr;
+                address_item->prefix = ctpop32(((uint32_t *) p)[0]);
+            }
+        } else if (ifa->ifa_addr &&
+                   ifa->ifa_addr->sa_family == AF_INET6) {
+            /* interface with IPv6 address */
+            p = &((struct sockaddr_in6 *)ifa->ifa_addr)->sin6_addr;
+            if (!inet_ntop(AF_INET6, p, addr6, sizeof(addr6))) {
+                error_setg_errno(errp, errno, "inet_ntop failed");
+                goto error;
+            }
+
+            address_item = g_malloc0(sizeof(*address_item));
+            address_item->ip_address = g_strdup(addr6);
+            address_item->ip_address_type = GUEST_IP_ADDRESS_TYPE_IPV6;
+
+            if (ifa->ifa_netmask) {
+                /* Count the number of set bits in netmask.
+                 * This is safe as '1' and '0' cannot be shuffled in netmask. */
+                p = &((struct sockaddr_in6 *)ifa->ifa_netmask)->sin6_addr;
+                address_item->prefix =
+                    ctpop32(((uint32_t *) p)[0]) +
+                    ctpop32(((uint32_t *) p)[1]) +
+                    ctpop32(((uint32_t *) p)[2]) +
+                    ctpop32(((uint32_t *) p)[3]);
+            }
+        }
+
+        if (!address_item) {
+            continue;
+        }
+
+        address_tail = &info->ip_addresses;
+        while (*address_tail) {
+            address_tail = &(*address_tail)->next;
+        }
+        QAPI_LIST_APPEND(address_tail, address_item);
+
+        info->has_ip_addresses = true;
+
+        if (!info->has_statistics) {
+            interface_stat = g_malloc0(sizeof(*interface_stat));
+            if (guest_get_network_stats(info->name, interface_stat) == -1) {
+                info->has_statistics = false;
+                g_free(interface_stat);
+            } else {
+                info->statistics = interface_stat;
+                info->has_statistics = true;
+            }
+        }
+    }
+
+    freeifaddrs(ifap);
+    return head;
+
+error:
+    freeifaddrs(ifap);
+    qapi_free_GuestNetworkInterfaceList(head);
+    return NULL;
+}
+
+#else
+
+GuestNetworkInterfaceList *qmp_guest_network_get_interfaces(Error **errp)
+{
+    error_setg(errp, QERR_UNSUPPORTED);
+    return NULL;
+}
+
+#endif /* HAVE_GETIFADDRS */
 
 #if !defined(CONFIG_FSFREEZE)
 
@@ -3031,6 +3333,18 @@ GuestDiskInfoList *qmp_guest_get_disks(Error **errp)
     return NULL;
 }
 
+GuestDiskStatsInfoList *qmp_guest_get_diskstats(Error **errp)
+{
+    error_setg(errp, QERR_UNSUPPORTED);
+    return NULL;
+}
+
+GuestCpuStatsList *qmp_guest_get_cpustats(Error **errp)
+{
+    error_setg(errp, QERR_UNSUPPORTED);
+    return NULL;
+}
+
 #endif /* CONFIG_FSFREEZE */
 
 #if !defined(CONFIG_FSTRIM)
@@ -3049,8 +3363,7 @@ GList *ga_command_blacklist_init(GList *blacklist)
     {
         const char *list[] = {
             "guest-suspend-disk", "guest-suspend-ram",
-            "guest-suspend-hybrid", "guest-network-get-interfaces",
-            "guest-get-vcpus", "guest-set-vcpus",
+            "guest-suspend-hybrid", "guest-get-vcpus", "guest-set-vcpus",
             "guest-get-memory-blocks", "guest-set-memory-blocks",
             "guest-get-memory-block-size", "guest-get-memory-block-info",
             NULL};
@@ -3060,6 +3373,11 @@ GList *ga_command_blacklist_init(GList *blacklist)
             blacklist = g_list_append(blacklist, g_strdup(*p++));
         }
     }
+#endif
+
+#if !defined(HAVE_GETIFADDRS)
+    blacklist = g_list_append(blacklist,
+                              g_strdup("guest-network-get-interfaces"));
 #endif
 
 #if !defined(CONFIG_FSFREEZE)
@@ -3302,4 +3620,39 @@ GuestDeviceInfoList *qmp_guest_get_devices(Error **errp)
     error_setg(errp, QERR_UNSUPPORTED);
 
     return NULL;
+}
+
+#ifndef HOST_NAME_MAX
+# ifdef _POSIX_HOST_NAME_MAX
+#  define HOST_NAME_MAX _POSIX_HOST_NAME_MAX
+# else
+#  define HOST_NAME_MAX 255
+# endif
+#endif
+
+char *qga_get_host_name(Error **errp)
+{
+    long len = -1;
+    g_autofree char *hostname = NULL;
+
+#ifdef _SC_HOST_NAME_MAX
+    len = sysconf(_SC_HOST_NAME_MAX);
+#endif /* _SC_HOST_NAME_MAX */
+
+    if (len < 0) {
+        len = HOST_NAME_MAX;
+    }
+
+    /* Unfortunately, gethostname() below does not guarantee a
+     * NULL terminated string. Therefore, allocate one byte more
+     * to be sure. */
+    hostname = g_new0(char, len + 1);
+
+    if (gethostname(hostname, len) < 0) {
+        error_setg_errno(errp, errno,
+                         "cannot get hostname");
+        return NULL;
+    }
+
+    return g_steal_pointer(&hostname);
 }

@@ -9,6 +9,7 @@
 #include "hw/arm/xnu_dtb.h"
 #include "hw/arm/apple_a13.h"
 #include "hw/arm/apple_a13_gxf.h"
+#include "target/arm/cpregs.h"
 #include "arm-powerctl.h"
 #include "sysemu/reset.h"
 #include "qemu/main-loop.h"
@@ -547,7 +548,6 @@ static const ARMCPRegInfo apple_a13_cp_reginfo_tcg[] = {
         .readfn = apple_a13_ipi_read_cr,
         .writefn = apple_a13_ipi_write_cr
     },
-    REGINFO_SENTINEL,
 };
 
 static void apple_a13_add_cpregs(AppleA13State *tcpu)

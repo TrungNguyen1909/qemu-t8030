@@ -187,7 +187,7 @@ struct CPUClass {
 typedef union IcountDecr {
     uint32_t u32;
     struct {
-#ifdef HOST_WORDS_BIGENDIAN
+#if HOST_BIG_ENDIAN
         uint16_t high;
         uint16_t low;
 #else
@@ -417,6 +417,12 @@ struct CPUState {
      * autoconverge
      */
     bool throttle_thread_scheduled;
+
+    /*
+     * Sleep throttle_us_per_full microseconds once dirty ring is full
+     * if dirty page rate limit is enabled.
+     */
+    int64_t throttle_us_per_full;
 
     bool ignore_memory_transaction_failures;
 
@@ -1015,7 +1021,7 @@ int cpu_watchpoint_address_matches(CPUState *cpu, vaddr addr, vaddr len);
  */
 AddressSpace *cpu_get_address_space(CPUState *cpu, int asidx);
 
-void QEMU_NORETURN cpu_abort(CPUState *cpu, const char *fmt, ...)
+G_NORETURN void cpu_abort(CPUState *cpu, const char *fmt, ...)
     G_GNUC_PRINTF(2, 3);
 
 /* $(top_srcdir)/cpu.c */
@@ -1028,12 +1034,14 @@ void cpu_exec_unrealizefn(CPUState *cpu);
  * target_words_bigendian:
  * Returns true if the (default) endianness of the target is big endian,
  * false otherwise. Note that in target-specific code, you can use
- * TARGET_WORDS_BIGENDIAN directly instead. On the other hand, common
+ * TARGET_BIG_ENDIAN directly instead. On the other hand, common
  * code should normally never need to know about the endianness of the
  * target, so please do *not* use this function unless you know very well
  * what you are doing!
  */
 bool target_words_bigendian(void);
+
+void page_size_init(void);
 
 #ifdef NEED_CPU_H
 

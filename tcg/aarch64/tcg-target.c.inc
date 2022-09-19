@@ -1261,7 +1261,7 @@ static inline void tcg_out_shl(TCGContext *s, TCGType ext,
 {
     int bits = ext ? 64 : 32;
     int max = bits - 1;
-    tcg_out_ubfm(s, ext, rd, rn, bits - (m & max), max - (m & max));
+    tcg_out_ubfm(s, ext, rd, rn, (bits - m) & max, (max - m) & max);
 }
 
 static inline void tcg_out_shr(TCGContext *s, TCGType ext,
@@ -1557,7 +1557,7 @@ static void tcg_out_adr(TCGContext *s, TCGReg rd, const void *target)
  */
 static void * const qemu_ld_helpers[MO_SIZE + 1] = {
     [MO_8]  = helper_ret_ldub_mmu,
-#ifdef HOST_WORDS_BIGENDIAN
+#if HOST_BIG_ENDIAN
     [MO_16] = helper_be_lduw_mmu,
     [MO_32] = helper_be_ldul_mmu,
     [MO_64] = helper_be_ldq_mmu,
@@ -1574,7 +1574,7 @@ static void * const qemu_ld_helpers[MO_SIZE + 1] = {
  */
 static void * const qemu_st_helpers[MO_SIZE + 1] = {
     [MO_8]  = helper_ret_stb_mmu,
-#ifdef HOST_WORDS_BIGENDIAN
+#if HOST_BIG_ENDIAN
     [MO_16] = helper_be_stw_mmu,
     [MO_32] = helper_be_stl_mmu,
     [MO_64] = helper_be_stq_mmu,

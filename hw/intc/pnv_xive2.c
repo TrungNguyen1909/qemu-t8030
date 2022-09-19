@@ -76,26 +76,6 @@ static const XiveVstInfo vst_infos[] = {
                   (xive)->chip->chip_id, ## __VA_ARGS__);
 
 /*
- * QEMU version of the GETFIELD/SETFIELD macros
- *
- * TODO: It might be better to use the existing extract64() and
- * deposit64() but this means that all the register definitions will
- * change and become incompatible with the ones found in skiboot.
- *
- * Keep it as it is for now until we find a common ground.
- */
-static inline uint64_t GETFIELD(uint64_t mask, uint64_t word)
-{
-    return (word & mask) >> ctz64(mask);
-}
-
-static inline uint64_t SETFIELD(uint64_t mask, uint64_t word,
-                                uint64_t value)
-{
-    return (word & ~mask) | ((value << ctz64(mask)) & mask);
-}
-
-/*
  * TODO: Document block id override
  */
 static uint32_t pnv_xive2_block_id(PnvXive2 *xive)
@@ -1295,7 +1275,6 @@ static void pnv_xive2_ic_tctxt_write(void *opaque, hwaddr offset,
                                      uint64_t val, unsigned size)
 {
     PnvXive2 *xive = PNV_XIVE2(opaque);
-    uint32_t reg = offset >> 3;
 
     switch (offset) {
     /*
@@ -1322,8 +1301,6 @@ static void pnv_xive2_ic_tctxt_write(void *opaque, hwaddr offset,
         xive2_error(xive, "TCTXT: invalid write @%"HWADDR_PRIx, offset);
         return;
     }
-
-    xive->pc_regs[reg] = val;
 }
 
 static const MemoryRegionOps pnv_xive2_ic_tctxt_ops = {
@@ -1577,6 +1554,12 @@ static const MemoryRegionOps pnv_xive2_ic_sync_ops = {
  * When the TM direct pages of the IC controller are accessed, the
  * target HW thread is deduced from the page offset.
  */
+static uint32_t pnv_xive2_ic_tm_get_pir(PnvXive2 *xive, hwaddr offset)
+{
+    /* On P10, the node ID shift in the PIR register is 8 bits */
+    return xive->chip->chip_id << 8 | offset >> xive->ic_shift;
+}
+
 static XiveTCTX *pnv_xive2_get_indirect_tctx(PnvXive2 *xive, uint32_t pir)
 {
     PnvChip *chip = xive->chip;
@@ -1599,10 +1582,12 @@ static uint64_t pnv_xive2_ic_tm_indirect_read(void *opaque, hwaddr offset,
                                               unsigned size)
 {
     PnvXive2 *xive = PNV_XIVE2(opaque);
-    uint32_t pir = offset >> xive->ic_shift;
-    XiveTCTX *tctx = pnv_xive2_get_indirect_tctx(xive, pir);
+    uint32_t pir;
+    XiveTCTX *tctx;
     uint64_t val = -1;
 
+    pir = pnv_xive2_ic_tm_get_pir(xive, offset);
+    tctx = pnv_xive2_get_indirect_tctx(xive, pir);
     if (tctx) {
         val = xive_tctx_tm_read(NULL, tctx, offset, size);
     }
@@ -1614,9 +1599,11 @@ static void pnv_xive2_ic_tm_indirect_write(void *opaque, hwaddr offset,
                                            uint64_t val, unsigned size)
 {
     PnvXive2 *xive = PNV_XIVE2(opaque);
-    uint32_t pir = offset >> xive->ic_shift;
-    XiveTCTX *tctx = pnv_xive2_get_indirect_tctx(xive, pir);
+    uint32_t pir;
+    XiveTCTX *tctx;
 
+    pir = pnv_xive2_ic_tm_get_pir(xive, offset);
+    tctx = pnv_xive2_get_indirect_tctx(xive, pir);
     if (tctx) {
         xive_tctx_tm_write(NULL, tctx, offset, val, size);
     }

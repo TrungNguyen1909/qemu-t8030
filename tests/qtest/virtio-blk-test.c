@@ -33,7 +33,7 @@ typedef struct QVirtioBlkReq {
 } QVirtioBlkReq;
 
 
-#ifdef HOST_WORDS_BIGENDIAN
+#if HOST_BIG_ENDIAN
 const bool host_is_big_endian = true;
 #else
 const bool host_is_big_endian; /* false */
@@ -700,6 +700,11 @@ static void pci_hotplug(void *obj, void *data, QGuestAllocator *t_alloc)
     QVirtioPCIDevice *dev1 = obj;
     QVirtioPCIDevice *dev;
     QTestState *qts = dev1->pdev->bus->qts;
+
+    if (dev1->pdev->bus->not_hotpluggable) {
+        g_test_skip("pci bus does not support hotplug");
+        return;
+    }
 
     /* plug secondary disk */
     qtest_qmp_device_add(qts, "virtio-blk-pci", "drv1",

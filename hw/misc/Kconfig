@@ -176,4 +176,7 @@ config APPLE_SPMI_PMU
     depends on APPLE_SOC
     depends on SPMI
 
+config LASI
+    bool
+
 source macio/Kconfig

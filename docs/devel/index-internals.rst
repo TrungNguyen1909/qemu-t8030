@@ -5,7 +5,6 @@ Details about QEMU's various subsystems including how to add features to them.
 
 .. toctree::
    :maxdepth: 2
-   :includehidden:
 
    qom
    atomics
@@ -19,3 +18,4 @@ Details about QEMU's various subsystems including how to add features to them.
    tracing
    vfio-migration
    writing-monitor-commands
+   virtio-backends

@@ -32,7 +32,6 @@
 
 #include "qemu/osdep.h"
 #include <windows.h>
-#include "qemu-common.h"
 #include "qapi/error.h"
 #include "qemu/main-loop.h"
 #include "trace.h"
@@ -40,9 +39,6 @@
 #include "qemu/cutils.h"
 #include "qemu/error-report.h"
 #include <malloc.h>
-
-/* this must come after including "trace.h" */
-#include <shlobj.h>
 
 static int get_allocation_granularity(void)
 {
@@ -185,14 +181,14 @@ static int socket_error(void)
     }
 }
 
-void qemu_set_block(int fd)
+void qemu_socket_set_block(int fd)
 {
     unsigned long opt = 0;
     WSAEventSelect(fd, NULL, 0);
     ioctlsocket(fd, FIONBIO, &opt);
 }
 
-int qemu_try_set_nonblock(int fd)
+int qemu_socket_try_set_nonblock(int fd)
 {
     unsigned long opt = 1;
     if (ioctlsocket(fd, FIONBIO, &opt) != NO_ERROR) {
@@ -201,9 +197,9 @@ int qemu_try_set_nonblock(int fd)
     return 0;
 }
 
-void qemu_set_nonblock(int fd)
+void qemu_socket_set_nonblock(int fd)
 {
-    (void)qemu_try_set_nonblock(fd);
+    (void)qemu_socket_try_set_nonblock(fd);
 }
 
 int socket_set_fast_reuse(int fd)
@@ -230,46 +226,19 @@ void qemu_set_cloexec(int fd)
 {
 }
 
-/* Offset between 1/1/1601 and 1/1/1970 in 100 nanosec units */
-#define _W32_FT_OFFSET (116444736000000000ULL)
-
-int qemu_gettimeofday(qemu_timeval *tp)
-{
-  union {
-    unsigned long long ns100; /*time since 1 Jan 1601 in 100ns units */
-    FILETIME ft;
-  }  _now;
-
-  if(tp) {
-      GetSystemTimeAsFileTime (&_now.ft);
-      tp->tv_usec=(long)((_now.ns100 / 10ULL) % 1000000ULL );
-      tp->tv_sec= (long)((_now.ns100 - _W32_FT_OFFSET) / 10000000ULL);
-  }
-  /* Always return 0 as per Open Group Base Specifications Issue 6.
-     Do not set errno on error.  */
-  return 0;
-}
-
 int qemu_get_thread_id(void)
 {
     return GetCurrentThreadId();
 }
 
 char *
-qemu_get_local_state_pathname(const char *relative_pathname)
+qemu_get_local_state_dir(void)
 {
-    HRESULT result;
-    char base_path[MAX_PATH+1] = "";
+    const char * const *data_dirs = g_get_system_data_dirs();
 
-    result = SHGetFolderPath(NULL, CSIDL_COMMON_APPDATA, NULL,
-                             /* SHGFP_TYPE_CURRENT */ 0, base_path);
-    if (result != S_OK) {
-        /* misconfigured environment */
-        g_critical("CSIDL_COMMON_APPDATA unavailable: %ld", (long)result);
-        abort();
-    }
-    return g_strdup_printf("%s" G_DIR_SEPARATOR_S "%s", base_path,
-                           relative_pathname);
+    g_assert(data_dirs && data_dirs[0]);
+
+    return g_strdup(data_dirs[0]);
 }
 
 void qemu_set_tty_echo(int fd, bool echo)
@@ -291,42 +260,6 @@ void qemu_set_tty_echo(int fd, bool echo)
     }
 }
 
-static const char *exec_dir;
-
-void qemu_init_exec_dir(const char *argv0)
-{
-
-    char *p;
-    char buf[MAX_PATH];
-    DWORD len;
-
-    if (exec_dir) {
-        return;
-    }
-
-    len = GetModuleFileName(NULL, buf, sizeof(buf) - 1);
-    if (len == 0) {
-        return;
-    }
-
-    buf[len] = 0;
-    p = buf + len - 1;
-    while (p != buf && *p != '\\') {
-        p--;
-    }
-    *p = 0;
-    if (access(buf, R_OK) == 0) {
-        exec_dir = g_strdup(buf);
-    } else {
-        exec_dir = CONFIG_BINDIR;
-    }
-}
-
-const char *qemu_get_exec_dir(void)
-{
-    return exec_dir;
-}
-
 int getpagesize(void)
 {
     SYSTEM_INFO system_info;
@@ -339,7 +272,7 @@ void os_mem_prealloc(int fd, char *area, size_t memory, int smp_cpus,
                      Error **errp)
 {
     int i;
-    size_t pagesize = qemu_real_host_page_size;
+    size_t pagesize = qemu_real_host_page_size();
 
     memory = (memory + pagesize - 1) & -pagesize;
     for (i = 0; i < memory / pagesize; i++) {
@@ -594,19 +527,6 @@ bool qemu_write_pidfile(const char *filename, Error **errp)
     return true;
 }
 
-char *qemu_get_host_name(Error **errp)
-{
-    wchar_t tmp[MAX_COMPUTERNAME_LENGTH + 1];
-    DWORD size = G_N_ELEMENTS(tmp);
-
-    if (GetComputerNameW(tmp, &size) == 0) {
-        error_setg_win32(errp, GetLastError(), "failed close handle");
-        return NULL;
-    }
-
-    return g_utf16_to_utf8(tmp, size, NULL, NULL, NULL);
-}
-
 size_t qemu_get_host_physmem(void)
 {
     MEMORYSTATUSEX statex;
@@ -616,4 +536,14 @@ size_t qemu_get_host_physmem(void)
         return statex.ullTotalPhys;
     }
     return 0;
+}
+
+int qemu_msync(void *addr, size_t length, int fd)
+{
+    /**
+     * Perform the sync based on the file descriptor
+     * The sync range will most probably be wider than the one
+     * requested - but it will still get the job done
+     */
+    return qemu_fdatasync(fd);
 }

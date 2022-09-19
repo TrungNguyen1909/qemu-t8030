@@ -13,7 +13,6 @@
 
 #include "qemu/osdep.h"
 
-#include "qemu-common.h"
 #include "qapi/error.h"
 #include "qapi/qapi-visit-introspect.h"
 #include "qapi/qobject-input-visitor.h"
@@ -448,9 +447,8 @@ static void test_visitor_in_list(TestInputVisitorData *data,
     g_assert(head != NULL);
 
     for (i = 0, item = head; item; item = item->next, i++) {
-        char string[12];
+        g_autofree char *string = g_strdup_printf("string%d", i);
 
-        snprintf(string, sizeof(string), "string%d", i);
         g_assert_cmpstr(item->value->string, ==, string);
         g_assert_cmpint(item->value->integer, ==, 42 + i);
     }
@@ -776,6 +774,7 @@ static void test_visitor_in_alternate_number(TestInputVisitorData *data,
     AltEnumNum *aen;
     AltNumEnum *ans;
     AltEnumInt *asi;
+    AltListInt *ali;
 
     /* Parsing an int */
 
@@ -802,6 +801,12 @@ static void test_visitor_in_alternate_number(TestInputVisitorData *data,
     g_assert_cmpint(asi->u.i, ==, 42);
     qapi_free_AltEnumInt(asi);
 
+    v = visitor_input_test_init(data, "42");
+    visit_type_AltListInt(v, NULL, &ali, &error_abort);
+    g_assert_cmpint(ali->type, ==, QTYPE_QNUM);
+    g_assert_cmpint(ali->u.i, ==, 42);
+    qapi_free_AltListInt(ali);
+
     /* Parsing a double */
 
     v = visitor_input_test_init(data, "42.5");
@@ -825,6 +830,37 @@ static void test_visitor_in_alternate_number(TestInputVisitorData *data,
     visit_type_AltEnumInt(v, NULL, &asi, &err);
     error_free_or_abort(&err);
     qapi_free_AltEnumInt(asi);
+}
+
+static void test_visitor_in_alternate_list(TestInputVisitorData *data,
+                                 const void *unused)
+{
+    intList *item;
+    Visitor *v;
+    AltListInt *ali;
+    int i;
+
+    v = visitor_input_test_init(data, "[ 42, 43, 44 ]");
+    visit_type_AltListInt(v, NULL, &ali, &error_abort);
+    g_assert(ali != NULL);
+
+    g_assert_cmpint(ali->type, ==, QTYPE_QLIST);
+    for (i = 0, item = ali->u.l; item; item = item->next, i++) {
+        g_assert_cmpint(item->value, ==, 42 + i);
+    }
+
+    qapi_free_AltListInt(ali);
+    ali = NULL;
+
+    /* An empty list is valid */
+    v = visitor_input_test_init(data, "[]");
+    visit_type_AltListInt(v, NULL, &ali, &error_abort);
+    g_assert(ali != NULL);
+
+    g_assert_cmpint(ali->type, ==, QTYPE_QLIST);
+    g_assert(!ali->u.l);
+    qapi_free_AltListInt(ali);
+    ali = NULL;
 }
 
 static void input_visitor_test_add(const char *testpath,
@@ -1188,6 +1224,8 @@ int main(int argc, char **argv)
                            NULL, test_visitor_in_wrong_type);
     input_visitor_test_add("/visitor/input/alternate-number",
                            NULL, test_visitor_in_alternate_number);
+    input_visitor_test_add("/visitor/input/alternate-list",
+                           NULL, test_visitor_in_alternate_list);
     input_visitor_test_add("/visitor/input/fail/struct",
                            NULL, test_visitor_in_fail_struct);
     input_visitor_test_add("/visitor/input/fail/struct-nested",

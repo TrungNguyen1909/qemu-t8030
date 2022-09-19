@@ -10,6 +10,7 @@
 #include "hw/or-irq.h"
 #include "hw/arm/xnu_dtb.h"
 #include "hw/arm/apple_a9.h"
+#include "target/arm/cpregs.h"
 #include "arm-powerctl.h"
 #include "sysemu/reset.h"
 
@@ -83,7 +84,6 @@ static const ARMCPRegInfo a9_cp_reginfo_tcg[] = {
     A9_CPREG_DEF(FED_ERR_STS, 3, 4, 15, 0, 0, PL1_RW, 0),
     A9_CPREG_DEF(CYC_CFG, 3, 5, 15, 4, 0, PL1_RW, 0),
     A9_CPREG_DEF(MMU_ERR_STS, 3, 6, 15, 0, 0, PL1_RW, 0),
-    REGINFO_SENTINEL,
 };
 
 static void a9_add_cpregs(AppleA9State *tcpu)

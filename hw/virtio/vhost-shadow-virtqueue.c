@@ -122,22 +122,41 @@ static bool vhost_svq_translate_addr(const VhostShadowVirtqueue *svq,
     return true;
 }
 
-static void vhost_vring_write_descs(VhostShadowVirtqueue *svq, hwaddr *sg,
-                                    const struct iovec *iovec, size_t num,
-                                    bool more_descs, bool write)
+/**
+ * Write descriptors to SVQ vring
+ *
+ * @svq: The shadow virtqueue
+ * @sg: Cache for hwaddr
+ * @iovec: The iovec from the guest
+ * @num: iovec length
+ * @more_descs: True if more descriptors come in the chain
+ * @write: True if they are writeable descriptors
+ *
+ * Return true if success, false otherwise and print error.
+ */
+static bool vhost_svq_vring_write_descs(VhostShadowVirtqueue *svq, hwaddr *sg,
+                                        const struct iovec *iovec, size_t num,
+                                        bool more_descs, bool write)
 {
     uint16_t i = svq->free_head, last = svq->free_head;
     unsigned n;
     uint16_t flags = write ? cpu_to_le16(VRING_DESC_F_WRITE) : 0;
     vring_desc_t *descs = svq->vring.desc;
+    bool ok;
 
     if (num == 0) {
-        return;
+        return true;
+    }
+
+    ok = vhost_svq_translate_addr(svq, sg, iovec, num);
+    if (unlikely(!ok)) {
+        return false;
     }
 
     for (n = 0; n < num; n++) {
         if (more_descs || (n + 1 < num)) {
             descs[i].flags = flags | cpu_to_le16(VRING_DESC_F_NEXT);
+            descs[i].next = cpu_to_le16(svq->desc_next[i]);
         } else {
             descs[i].flags = flags;
         }
@@ -145,43 +164,42 @@ static void vhost_vring_write_descs(VhostShadowVirtqueue *svq, hwaddr *sg,
         descs[i].len = cpu_to_le32(iovec[n].iov_len);
 
         last = i;
-        i = cpu_to_le16(descs[i].next);
+        i = cpu_to_le16(svq->desc_next[i]);
     }
 
-    svq->free_head = le16_to_cpu(descs[last].next);
+    svq->free_head = le16_to_cpu(svq->desc_next[last]);
+    return true;
 }
 
 static bool vhost_svq_add_split(VhostShadowVirtqueue *svq,
-                                VirtQueueElement *elem, unsigned *head)
+                                const struct iovec *out_sg, size_t out_num,
+                                const struct iovec *in_sg, size_t in_num,
+                                unsigned *head)
 {
     unsigned avail_idx;
     vring_avail_t *avail = svq->vring.avail;
     bool ok;
-    g_autofree hwaddr *sgs = g_new(hwaddr, MAX(elem->out_num, elem->in_num));
+    g_autofree hwaddr *sgs = g_new(hwaddr, MAX(out_num, in_num));
 
     *head = svq->free_head;
 
     /* We need some descriptors here */
-    if (unlikely(!elem->out_num && !elem->in_num)) {
+    if (unlikely(!out_num && !in_num)) {
         qemu_log_mask(LOG_GUEST_ERROR,
                       "Guest provided element with no descriptors");
         return false;
     }
 
-    ok = vhost_svq_translate_addr(svq, sgs, elem->out_sg, elem->out_num);
-    if (unlikely(!ok)) {
-        return false;
-    }
-    vhost_vring_write_descs(svq, sgs, elem->out_sg, elem->out_num,
-                            elem->in_num > 0, false);
-
-
-    ok = vhost_svq_translate_addr(svq, sgs, elem->in_sg, elem->in_num);
+    ok = vhost_svq_vring_write_descs(svq, sgs, out_sg, out_num, in_num > 0,
+                                     false);
     if (unlikely(!ok)) {
         return false;
     }
 
-    vhost_vring_write_descs(svq, sgs, elem->in_sg, elem->in_num, false, true);
+    ok = vhost_svq_vring_write_descs(svq, sgs, in_sg, in_num, false, true);
+    if (unlikely(!ok)) {
+        return false;
+    }
 
     /*
      * Put the entry in the available array (but don't update avail->idx until
@@ -198,18 +216,6 @@ static bool vhost_svq_add_split(VhostShadowVirtqueue *svq,
     return true;
 }
 
-static bool vhost_svq_add(VhostShadowVirtqueue *svq, VirtQueueElement *elem)
-{
-    unsigned qemu_head;
-    bool ok = vhost_svq_add_split(svq, elem, &qemu_head);
-    if (unlikely(!ok)) {
-        return false;
-    }
-
-    svq->ring_id_maps[qemu_head] = elem;
-    return true;
-}
-
 static void vhost_svq_kick(VhostShadowVirtqueue *svq)
 {
     /*
@@ -222,6 +228,46 @@ static void vhost_svq_kick(VhostShadowVirtqueue *svq)
     }
 
     event_notifier_set(&svq->hdev_kick);
+}
+
+/**
+ * Add an element to a SVQ.
+ *
+ * The caller must check that there is enough slots for the new element. It
+ * takes ownership of the element: In case of failure not ENOSPC, it is free.
+ *
+ * Return -EINVAL if element is invalid, -ENOSPC if dev queue is full
+ */
+int vhost_svq_add(VhostShadowVirtqueue *svq, const struct iovec *out_sg,
+                  size_t out_num, const struct iovec *in_sg, size_t in_num,
+                  VirtQueueElement *elem)
+{
+    unsigned qemu_head;
+    unsigned ndescs = in_num + out_num;
+    bool ok;
+
+    if (unlikely(ndescs > vhost_svq_available_slots(svq))) {
+        return -ENOSPC;
+    }
+
+    ok = vhost_svq_add_split(svq, out_sg, out_num, in_sg, in_num, &qemu_head);
+    if (unlikely(!ok)) {
+        g_free(elem);
+        return -EINVAL;
+    }
+
+    svq->desc_state[qemu_head].elem = elem;
+    svq->desc_state[qemu_head].ndescs = ndescs;
+    vhost_svq_kick(svq);
+    return 0;
+}
+
+/* Convenience wrapper to add a guest's element to SVQ */
+static int vhost_svq_add_element(VhostShadowVirtqueue *svq,
+                                 VirtQueueElement *elem)
+{
+    return vhost_svq_add(svq, elem->out_sg, elem->out_num, elem->in_sg,
+                         elem->in_num, elem);
 }
 
 /**
@@ -248,7 +294,7 @@ static void vhost_handle_guest_kick(VhostShadowVirtqueue *svq)
 
         while (true) {
             VirtQueueElement *elem;
-            bool ok;
+            int r;
 
             if (svq->next_guest_avail_elem) {
                 elem = g_steal_pointer(&svq->next_guest_avail_elem);
@@ -260,28 +306,30 @@ static void vhost_handle_guest_kick(VhostShadowVirtqueue *svq)
                 break;
             }
 
-            if (elem->out_num + elem->in_num > vhost_svq_available_slots(svq)) {
-                /*
-                 * This condition is possible since a contiguous buffer in GPA
-                 * does not imply a contiguous buffer in qemu's VA
-                 * scatter-gather segments. If that happens, the buffer exposed
-                 * to the device needs to be a chain of descriptors at this
-                 * moment.
-                 *
-                 * SVQ cannot hold more available buffers if we are here:
-                 * queue the current guest descriptor and ignore further kicks
-                 * until some elements are used.
-                 */
-                svq->next_guest_avail_elem = elem;
-                return;
+            if (svq->ops) {
+                r = svq->ops->avail_handler(svq, elem, svq->ops_opaque);
+            } else {
+                r = vhost_svq_add_element(svq, elem);
             }
+            if (unlikely(r != 0)) {
+                if (r == -ENOSPC) {
+                    /*
+                     * This condition is possible since a contiguous buffer in
+                     * GPA does not imply a contiguous buffer in qemu's VA
+                     * scatter-gather segments. If that happens, the buffer
+                     * exposed to the device needs to be a chain of descriptors
+                     * at this moment.
+                     *
+                     * SVQ cannot hold more available buffers if we are here:
+                     * queue the current guest descriptor and ignore kicks
+                     * until some elements are used.
+                     */
+                    svq->next_guest_avail_elem = elem;
+                }
 
-            ok = vhost_svq_add(svq, elem);
-            if (unlikely(!ok)) {
-                /* VQ is broken, just return and ignore any other kicks */
+                /* VQ is full or broken, just return and ignore kicks */
                 return;
             }
-            vhost_svq_kick(svq);
         }
 
         virtio_queue_set_notification(svq->vq, true);
@@ -302,11 +350,12 @@ static void vhost_handle_guest_kick_notifier(EventNotifier *n)
 
 static bool vhost_svq_more_used(VhostShadowVirtqueue *svq)
 {
+    uint16_t *used_idx = &svq->vring.used->idx;
     if (svq->last_used_idx != svq->shadow_used_idx) {
         return true;
     }
 
-    svq->shadow_used_idx = cpu_to_le16(svq->vring.used->idx);
+    svq->shadow_used_idx = cpu_to_le16(*(volatile uint16_t *)used_idx);
 
     return svq->last_used_idx != svq->shadow_used_idx;
 }
@@ -333,13 +382,22 @@ static void vhost_svq_disable_notification(VhostShadowVirtqueue *svq)
     svq->vring.avail->flags |= cpu_to_le16(VRING_AVAIL_F_NO_INTERRUPT);
 }
 
+static uint16_t vhost_svq_last_desc_of_chain(const VhostShadowVirtqueue *svq,
+                                             uint16_t num, uint16_t i)
+{
+    for (uint16_t j = 0; j < (num - 1); ++j) {
+        i = le16_to_cpu(svq->desc_next[i]);
+    }
+
+    return i;
+}
+
 static VirtQueueElement *vhost_svq_get_buf(VhostShadowVirtqueue *svq,
                                            uint32_t *len)
 {
-    vring_desc_t *descs = svq->vring.desc;
     const vring_used_t *used = svq->vring.used;
     vring_used_elem_t used_elem;
-    uint16_t last_used;
+    uint16_t last_used, last_used_chain, num;
 
     if (!vhost_svq_more_used(svq)) {
         return NULL;
@@ -358,18 +416,36 @@ static VirtQueueElement *vhost_svq_get_buf(VhostShadowVirtqueue *svq,
         return NULL;
     }
 
-    if (unlikely(!svq->ring_id_maps[used_elem.id])) {
+    if (unlikely(!svq->desc_state[used_elem.id].elem)) {
         qemu_log_mask(LOG_GUEST_ERROR,
             "Device %s says index %u is used, but it was not available",
             svq->vdev->name, used_elem.id);
         return NULL;
     }
 
-    descs[used_elem.id].next = svq->free_head;
+    num = svq->desc_state[used_elem.id].ndescs;
+    last_used_chain = vhost_svq_last_desc_of_chain(svq, num, used_elem.id);
+    svq->desc_next[last_used_chain] = svq->free_head;
     svq->free_head = used_elem.id;
 
     *len = used_elem.len;
-    return g_steal_pointer(&svq->ring_id_maps[used_elem.id]);
+    return g_steal_pointer(&svq->desc_state[used_elem.id].elem);
+}
+
+/**
+ * Push an element to SVQ, returning it to the guest.
+ */
+void vhost_svq_push_elem(VhostShadowVirtqueue *svq,
+                         const VirtQueueElement *elem, uint32_t len)
+{
+    virtqueue_push(svq->vq, elem, len);
+    if (svq->next_guest_avail_elem) {
+        /*
+         * Avail ring was full when vhost_svq_flush was called, so it's a
+         * good moment to make more descriptors available if possible.
+         */
+        vhost_handle_guest_kick(svq);
+    }
 }
 
 static void vhost_svq_flush(VhostShadowVirtqueue *svq,
@@ -411,6 +487,33 @@ static void vhost_svq_flush(VhostShadowVirtqueue *svq,
             vhost_handle_guest_kick(svq);
         }
     } while (!vhost_svq_enable_notification(svq));
+}
+
+/**
+ * Poll the SVQ for one device used buffer.
+ *
+ * This function race with main event loop SVQ polling, so extra
+ * synchronization is needed.
+ *
+ * Return the length written by the device.
+ */
+size_t vhost_svq_poll(VhostShadowVirtqueue *svq)
+{
+    int64_t start_us = g_get_monotonic_time();
+    do {
+        uint32_t len;
+        VirtQueueElement *elem = vhost_svq_get_buf(svq, &len);
+        if (elem) {
+            return len;
+        }
+
+        if (unlikely(g_get_monotonic_time() - start_us > 10e6)) {
+            return 0;
+        }
+
+        /* Make sure we read new used_idx */
+        smp_rmb();
+    } while (true);
 }
 
 /**
@@ -471,14 +574,14 @@ size_t vhost_svq_driver_area_size(const VhostShadowVirtqueue *svq)
     size_t avail_size = offsetof(vring_avail_t, ring) +
                                              sizeof(uint16_t) * svq->vring.num;
 
-    return ROUND_UP(desc_size + avail_size, qemu_real_host_page_size);
+    return ROUND_UP(desc_size + avail_size, qemu_real_host_page_size());
 }
 
 size_t vhost_svq_device_area_size(const VhostShadowVirtqueue *svq)
 {
     size_t used_size = offsetof(vring_used_t, ring) +
                                     sizeof(vring_used_elem_t) * svq->vring.num;
-    return ROUND_UP(used_size, qemu_real_host_page_size);
+    return ROUND_UP(used_size, qemu_real_host_page_size());
 }
 
 /**
@@ -533,15 +636,16 @@ void vhost_svq_start(VhostShadowVirtqueue *svq, VirtIODevice *vdev,
     svq->vring.num = virtio_queue_get_num(vdev, virtio_get_queue_index(vq));
     driver_size = vhost_svq_driver_area_size(svq);
     device_size = vhost_svq_device_area_size(svq);
-    svq->vring.desc = qemu_memalign(qemu_real_host_page_size, driver_size);
+    svq->vring.desc = qemu_memalign(qemu_real_host_page_size(), driver_size);
     desc_size = sizeof(vring_desc_t) * svq->vring.num;
     svq->vring.avail = (void *)((char *)svq->vring.desc + desc_size);
     memset(svq->vring.desc, 0, driver_size);
-    svq->vring.used = qemu_memalign(qemu_real_host_page_size, device_size);
+    svq->vring.used = qemu_memalign(qemu_real_host_page_size(), device_size);
     memset(svq->vring.used, 0, device_size);
-    svq->ring_id_maps = g_new0(VirtQueueElement *, svq->vring.num);
+    svq->desc_state = g_new0(SVQDescState, svq->vring.num);
+    svq->desc_next = g_new0(uint16_t, svq->vring.num);
     for (unsigned i = 0; i < svq->vring.num - 1; i++) {
-        svq->vring.desc[i].next = cpu_to_le16(i + 1);
+        svq->desc_next[i] = cpu_to_le16(i + 1);
     }
 }
 
@@ -563,7 +667,7 @@ void vhost_svq_stop(VhostShadowVirtqueue *svq)
 
     for (unsigned i = 0; i < svq->vring.num; ++i) {
         g_autofree VirtQueueElement *elem = NULL;
-        elem = g_steal_pointer(&svq->ring_id_maps[i]);
+        elem = g_steal_pointer(&svq->desc_state[i].elem);
         if (elem) {
             virtqueue_detach_element(svq->vq, elem, 0);
         }
@@ -574,7 +678,8 @@ void vhost_svq_stop(VhostShadowVirtqueue *svq)
         virtqueue_detach_element(svq->vq, next_avail_elem, 0);
     }
     svq->vq = NULL;
-    g_free(svq->ring_id_maps);
+    g_free(svq->desc_next);
+    g_free(svq->desc_state);
     qemu_vfree(svq->vring.desc);
     qemu_vfree(svq->vring.used);
 }
@@ -584,12 +689,16 @@ void vhost_svq_stop(VhostShadowVirtqueue *svq)
  * shadow methods and file descriptors.
  *
  * @iova_tree: Tree to perform descriptors translations
+ * @ops: SVQ owner callbacks
+ * @ops_opaque: ops opaque pointer
  *
  * Returns the new virtqueue or NULL.
  *
  * In case of error, reason is reported through error_report.
  */
-VhostShadowVirtqueue *vhost_svq_new(VhostIOVATree *iova_tree)
+VhostShadowVirtqueue *vhost_svq_new(VhostIOVATree *iova_tree,
+                                    const VhostShadowVirtqueueOps *ops,
+                                    void *ops_opaque)
 {
     g_autofree VhostShadowVirtqueue *svq = g_new0(VhostShadowVirtqueue, 1);
     int r;
@@ -611,6 +720,8 @@ VhostShadowVirtqueue *vhost_svq_new(VhostIOVATree *iova_tree)
     event_notifier_init_fd(&svq->svq_kick, VHOST_FILE_UNBIND);
     event_notifier_set_handler(&svq->hdev_call, vhost_svq_handle_call);
     svq->iova_tree = iova_tree;
+    svq->ops = ops;
+    svq->ops_opaque = ops_opaque;
     return g_steal_pointer(&svq);
 
 err_init_hdev_call:

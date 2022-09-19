@@ -3,9 +3,9 @@
  *
  * Copyright 2007 IBM Corporation.
  * Authors:
- *	Jerone Young <jyoung5@us.ibm.com>
- *	Christian Ehrhardt <ehrhardt@linux.vnet.ibm.com>
- *	Hollis Blanchard <hollisb@us.ibm.com>
+ *  Jerone Young <jyoung5@us.ibm.com>
+ *  Christian Ehrhardt <ehrhardt@linux.vnet.ibm.com>
+ *  Hollis Blanchard <hollisb@us.ibm.com>
  *
  * This work is licensed under the GNU GPL license version 2 or later.
  *
@@ -14,7 +14,6 @@
 #include "qemu/osdep.h"
 #include "qemu/units.h"
 #include "qemu/error-report.h"
-#include "qemu-common.h"
 #include "qemu/datadir.h"
 #include "qemu/error-report.h"
 #include "net/net.h"
@@ -201,9 +200,9 @@ static void bamboo_init(MachineState *machine)
     sysbus_realize_and_unref(uicsbd, &error_fatal);
 
     sysbus_connect_irq(uicsbd, PPCUIC_OUTPUT_INT,
-                       ((qemu_irq *)env->irq_inputs)[PPC40x_INPUT_INT]);
+                       qdev_get_gpio_in(DEVICE(cpu), PPC40x_INPUT_INT));
     sysbus_connect_irq(uicsbd, PPCUIC_OUTPUT_CINT,
-                       ((qemu_irq *)env->irq_inputs)[PPC40x_INPUT_CINT]);
+                       qdev_get_gpio_in(DEVICE(cpu), PPC40x_INPUT_CINT));
 
     /* SDRAM controller */
     memset(ram_bases, 0, sizeof(ram_bases));

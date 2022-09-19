@@ -23,7 +23,6 @@
  */
 
 #include "qemu/osdep.h"
-#include "qemu-common.h"
 
 #include "net/net.h"
 #include "clients.h"
@@ -524,7 +523,7 @@ void qemu_set_vnet_hdr_len(NetClientState *nc, int len)
 
 int qemu_set_vnet_le(NetClientState *nc, bool is_le)
 {
-#ifdef HOST_WORDS_BIGENDIAN
+#if HOST_BIG_ENDIAN
     if (!nc || !nc->info->set_vnet_le) {
         return -ENOSYS;
     }
@@ -537,7 +536,7 @@ int qemu_set_vnet_le(NetClientState *nc, bool is_le)
 
 int qemu_set_vnet_be(NetClientState *nc, bool is_be)
 {
-#ifdef HOST_WORDS_BIGENDIAN
+#if HOST_BIG_ENDIAN
     return 0;
 #else
     if (!nc || !nc->info->set_vnet_be) {
@@ -1021,6 +1020,11 @@ static int (* const net_client_init_fun[NET_CLIENT_DRIVER__MAX])(
 #ifdef CONFIG_L2TPV3
         [NET_CLIENT_DRIVER_L2TPV3]    = net_init_l2tpv3,
 #endif
+#ifdef CONFIG_VMNET
+        [NET_CLIENT_DRIVER_VMNET_HOST] = net_init_vmnet_host,
+        [NET_CLIENT_DRIVER_VMNET_SHARED] = net_init_vmnet_shared,
+        [NET_CLIENT_DRIVER_VMNET_BRIDGED] = net_init_vmnet_bridged,
+#endif /* CONFIG_VMNET */
 };
 
 
@@ -1106,6 +1110,11 @@ void show_netdevs(void)
 #endif
 #ifdef CONFIG_VHOST_VDPA
         "vhost-vdpa",
+#endif
+#ifdef CONFIG_VMNET
+        "vmnet-host",
+        "vmnet-shared",
+        "vmnet-bridged",
 #endif
     };
 

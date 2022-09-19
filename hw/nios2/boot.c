@@ -30,11 +30,11 @@
 
 #include "qemu/osdep.h"
 #include "qemu/units.h"
-#include "qemu-common.h"
 #include "qemu/datadir.h"
 #include "qemu/option.h"
 #include "qemu/config-file.h"
 #include "qemu/error-report.h"
+#include "qemu/guest-random.h"
 #include "sysemu/device_tree.h"
 #include "sysemu/reset.h"
 #include "hw/boards.h"
@@ -84,6 +84,7 @@ static int nios2_load_dtb(struct nios2_boot_info bi, const uint32_t ramsize,
     int fdt_size;
     void *fdt = NULL;
     int r;
+    uint8_t rng_seed[32];
 
     if (dtb_filename) {
         fdt = load_device_tree(dtb_filename, &fdt_size);
@@ -91,6 +92,9 @@ static int nios2_load_dtb(struct nios2_boot_info bi, const uint32_t ramsize,
     if (!fdt) {
         return 0;
     }
+
+    qemu_guest_getrandom_nofail(rng_seed, sizeof(rng_seed));
+    qemu_fdt_setprop(fdt, "/chosen", "rng-seed", rng_seed, sizeof(rng_seed));
 
     if (kernel_cmdline) {
         r = qemu_fdt_setprop_string(fdt, "/chosen", "bootargs",
@@ -140,7 +144,7 @@ void nios2_load_kernel(Nios2CPU *cpu, hwaddr ddr_base,
         uint64_t entry, high;
         int big_endian = 0;
 
-#ifdef TARGET_WORDS_BIGENDIAN
+#if TARGET_BIG_ENDIAN
         big_endian = 1;
 #endif
 

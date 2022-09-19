@@ -8,7 +8,6 @@
  */
 
 #include "qemu/osdep.h"
-#include "qemu-common.h"
 #include "qemu/units.h"
 #include "qapi/error.h"
 #include "hw/hw.h"
@@ -156,7 +155,7 @@ static void pegasos2_init(MachineState *machine)
 
     /* Marvell Discovery II system controller */
     pm->mv = DEVICE(sysbus_create_simple(TYPE_MV64361, -1,
-                             ((qemu_irq *)env->irq_inputs)[PPC6xx_INPUT_INT]));
+                          qdev_get_gpio_in(DEVICE(pm->cpu), PPC6xx_INPUT_INT)));
     pci_bus = mv64361_get_pci_bus(pm->mv, 1);
 
     /* VIA VT8231 South Bridge (multifunction PCI device) */
@@ -462,7 +461,7 @@ static void pegasos2_hypercall(PPCVirtualHypervisor *vhyp, PowerPCCPU *cpu)
     /* The TCG path should also be holding the BQL at this point */
     g_assert(qemu_mutex_iothread_locked());
 
-    if (msr_pr) {
+    if (FIELD_EX64(env->msr, MSR, PR)) {
         qemu_log_mask(LOG_GUEST_ERROR, "Hypercall made with MSR[PR]=1\n");
         env->gpr[3] = H_PRIVILEGE;
     } else if (env->gpr[3] == KVMPPC_H_RTAS) {

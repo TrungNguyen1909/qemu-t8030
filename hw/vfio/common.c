@@ -40,6 +40,7 @@
 #include "trace.h"
 #include "qapi/error.h"
 #include "migration/migration.h"
+#include "sysemu/tpm.h"
 
 VFIOGroupList vfio_group_list =
     QLIST_HEAD_INITIALIZER(vfio_group_list);
@@ -354,7 +355,7 @@ static bool vfio_devices_all_dirty_tracking(VFIOContainer *container)
             }
 
             if ((vbasedev->pre_copy_dirty_page_tracking == ON_OFF_AUTO_OFF)
-                && (migration->device_state & VFIO_DEVICE_STATE_RUNNING)) {
+                && (migration->device_state & VFIO_DEVICE_STATE_V1_RUNNING)) {
                 return false;
             }
         }
@@ -380,8 +381,8 @@ static bool vfio_devices_all_running_and_saving(VFIOContainer *container)
                 return false;
             }
 
-            if ((migration->device_state & VFIO_DEVICE_STATE_SAVING) &&
-                (migration->device_state & VFIO_DEVICE_STATE_RUNNING)) {
+            if ((migration->device_state & VFIO_DEVICE_STATE_V1_SAVING) &&
+                (migration->device_state & VFIO_DEVICE_STATE_V1_RUNNING)) {
                 continue;
             } else {
                 return false;
@@ -397,7 +398,7 @@ static int vfio_dma_unmap_bitmap(VFIOContainer *container,
 {
     struct vfio_iommu_type1_dma_unmap *unmap;
     struct vfio_bitmap *bitmap;
-    uint64_t pages = REAL_HOST_PAGE_ALIGN(size) / qemu_real_host_page_size;
+    uint64_t pages = REAL_HOST_PAGE_ALIGN(size) / qemu_real_host_page_size();
     int ret;
 
     unmap = g_malloc0(sizeof(*unmap) + sizeof(*bitmap));
@@ -414,7 +415,7 @@ static int vfio_dma_unmap_bitmap(VFIOContainer *container,
      * to qemu_real_host_page_size.
      */
 
-    bitmap->pgsize = qemu_real_host_page_size;
+    bitmap->pgsize = qemu_real_host_page_size();
     bitmap->size = ROUND_UP(pages, sizeof(__u64) * BITS_PER_BYTE) /
                    BITS_PER_BYTE;
 
@@ -861,6 +862,22 @@ static void vfio_unregister_ram_discard_listener(VFIOContainer *container,
     g_free(vrdl);
 }
 
+static bool vfio_known_safe_misalignment(MemoryRegionSection *section)
+{
+    MemoryRegion *mr = section->mr;
+
+    if (!TPM_IS_CRB(mr->owner)) {
+        return false;
+    }
+
+    /* this is a known safe misaligned region, just trace for debug purpose */
+    trace_vfio_known_safe_misalignment(memory_region_name(mr),
+                                       section->offset_within_address_space,
+                                       section->offset_within_region,
+                                       qemu_real_host_page_size());
+    return true;
+}
+
 static void vfio_listener_region_add(MemoryListener *listener,
                                      MemoryRegionSection *section)
 {
@@ -882,16 +899,24 @@ static void vfio_listener_region_add(MemoryListener *listener,
     }
 
     if (unlikely((section->offset_within_address_space &
-                  ~qemu_real_host_page_mask) !=
-                 (section->offset_within_region & ~qemu_real_host_page_mask))) {
-        error_report("%s received unaligned region", __func__);
+                  ~qemu_real_host_page_mask()) !=
+                 (section->offset_within_region & ~qemu_real_host_page_mask()))) {
+        if (!vfio_known_safe_misalignment(section)) {
+            error_report("%s received unaligned region %s iova=0x%"PRIx64
+                         " offset_within_region=0x%"PRIx64
+                         " qemu_real_host_page_size=0x%"PRIxPTR,
+                         __func__, memory_region_name(section->mr),
+                         section->offset_within_address_space,
+                         section->offset_within_region,
+                         qemu_real_host_page_size());
+        }
         return;
     }
 
     iova = REAL_HOST_PAGE_ALIGN(section->offset_within_address_space);
     llend = int128_make64(section->offset_within_address_space);
     llend = int128_add(llend, section->size);
-    llend = int128_and(llend, int128_exts64(qemu_real_host_page_mask));
+    llend = int128_and(llend, int128_exts64(qemu_real_host_page_mask()));
 
     if (int128_ge(int128_make64(iova), llend)) {
         if (memory_region_is_ram_device(section->mr)) {
@@ -899,7 +924,7 @@ static void vfio_listener_region_add(MemoryListener *listener,
                 memory_region_name(section->mr),
                 section->offset_within_address_space,
                 int128_getlo(section->size),
-                qemu_real_host_page_size);
+                qemu_real_host_page_size());
         }
         return;
     }
@@ -992,7 +1017,7 @@ static void vfio_listener_region_add(MemoryListener *listener,
          * device emulation the VFIO iommu handles to use).
          */
         giommu = g_malloc0(sizeof(*giommu));
-        giommu->iommu = iommu_mr;
+        giommu->iommu_mr = iommu_mr;
         giommu->iommu_offset = section->offset_within_address_space -
                                section->offset_within_region;
         giommu->container = container;
@@ -1007,7 +1032,7 @@ static void vfio_listener_region_add(MemoryListener *listener,
                             int128_get64(llend),
                             iommu_idx);
 
-        ret = memory_region_iommu_set_page_size_mask(giommu->iommu,
+        ret = memory_region_iommu_set_page_size_mask(giommu->iommu_mr,
                                                      container->pgsizes,
                                                      &err);
         if (ret) {
@@ -1022,7 +1047,7 @@ static void vfio_listener_region_add(MemoryListener *listener,
             goto fail;
         }
         QLIST_INSERT_HEAD(&container->giommu_list, giommu, giommu_next);
-        memory_region_iommu_replay(giommu->iommu, &giommu->n);
+        memory_region_iommu_replay(giommu->iommu_mr, &giommu->n);
 
         return;
     }
@@ -1118,9 +1143,17 @@ static void vfio_listener_region_del(MemoryListener *listener,
     }
 
     if (unlikely((section->offset_within_address_space &
-                  ~qemu_real_host_page_mask) !=
-                 (section->offset_within_region & ~qemu_real_host_page_mask))) {
-        error_report("%s received unaligned region", __func__);
+                  ~qemu_real_host_page_mask()) !=
+                 (section->offset_within_region & ~qemu_real_host_page_mask()))) {
+        if (!vfio_known_safe_misalignment(section)) {
+            error_report("%s received unaligned region %s iova=0x%"PRIx64
+                         " offset_within_region=0x%"PRIx64
+                         " qemu_real_host_page_size=0x%"PRIxPTR,
+                         __func__, memory_region_name(section->mr),
+                         section->offset_within_address_space,
+                         section->offset_within_region,
+                         qemu_real_host_page_size());
+        }
         return;
     }
 
@@ -1128,7 +1161,7 @@ static void vfio_listener_region_del(MemoryListener *listener,
         VFIOGuestIOMMU *giommu;
 
         QLIST_FOREACH(giommu, &container->giommu_list, giommu_next) {
-            if (MEMORY_REGION(giommu->iommu) == section->mr &&
+            if (MEMORY_REGION(giommu->iommu_mr) == section->mr &&
                 giommu->n.start == section->offset_within_region) {
                 memory_region_unregister_iommu_notifier(section->mr,
                                                         &giommu->n);
@@ -1150,7 +1183,7 @@ static void vfio_listener_region_del(MemoryListener *listener,
     iova = REAL_HOST_PAGE_ALIGN(section->offset_within_address_space);
     llend = int128_make64(section->offset_within_address_space);
     llend = int128_add(llend, section->size);
-    llend = int128_and(llend, int128_exts64(qemu_real_host_page_mask));
+    llend = int128_and(llend, int128_exts64(qemu_real_host_page_mask()));
 
     if (int128_ge(int128_make64(iova), llend)) {
         return;
@@ -1272,9 +1305,9 @@ static int vfio_get_dirty_bitmap(VFIOContainer *container, uint64_t iova,
      * qemu_real_host_page_size to mark those dirty. Hence set bitmap's pgsize
      * to qemu_real_host_page_size.
      */
-    range->bitmap.pgsize = qemu_real_host_page_size;
+    range->bitmap.pgsize = qemu_real_host_page_size();
 
-    pages = REAL_HOST_PAGE_ALIGN(range->size) / qemu_real_host_page_size;
+    pages = REAL_HOST_PAGE_ALIGN(range->size) / qemu_real_host_page_size();
     range->bitmap.size = ROUND_UP(pages, sizeof(__u64) * BITS_PER_BYTE) /
                                          BITS_PER_BYTE;
     range->bitmap.data = g_try_malloc0(range->bitmap.size);
@@ -1393,11 +1426,11 @@ static int vfio_sync_dirty_bitmap(VFIOContainer *container,
         VFIOGuestIOMMU *giommu;
 
         QLIST_FOREACH(giommu, &container->giommu_list, giommu_next) {
-            if (MEMORY_REGION(giommu->iommu) == section->mr &&
+            if (MEMORY_REGION(giommu->iommu_mr) == section->mr &&
                 giommu->n.start == section->offset_within_region) {
                 Int128 llend;
                 vfio_giommu_dirty_notifier gdn = { .giommu = giommu };
-                int idx = memory_region_iommu_attrs_to_index(giommu->iommu,
+                int idx = memory_region_iommu_attrs_to_index(giommu->iommu_mr,
                                                        MEMTXATTRS_UNSPECIFIED);
 
                 llend = int128_add(int128_make64(section->offset_within_region),
@@ -1410,7 +1443,7 @@ static int vfio_sync_dirty_bitmap(VFIOContainer *container,
                                     section->offset_within_region,
                                     int128_get64(llend),
                                     idx);
-                memory_region_iommu_replay(giommu->iommu, &gdn.n);
+                memory_region_iommu_replay(giommu->iommu_mr, &gdn.n);
                 break;
             }
         }
@@ -1544,11 +1577,10 @@ static int vfio_setup_region_sparse_mmaps(VFIORegion *region,
     region->mmaps = g_new0(VFIOMmap, sparse->nr_areas);
 
     for (i = 0, j = 0; i < sparse->nr_areas; i++) {
-        trace_vfio_region_sparse_mmap_entry(i, sparse->areas[i].offset,
-                                            sparse->areas[i].offset +
-                                            sparse->areas[i].size);
-
         if (sparse->areas[i].size) {
+            trace_vfio_region_sparse_mmap_entry(i, sparse->areas[i].offset,
+                                            sparse->areas[i].offset +
+                                            sparse->areas[i].size - 1);
             region->mmaps[j].offset = sparse->areas[i].offset;
             region->mmaps[j].size = sparse->areas[i].size;
             j++;
@@ -1970,7 +2002,7 @@ static void vfio_get_iommu_info_migration(VFIOContainer *container,
      * cpu_physical_memory_set_dirty_lebitmap() supports pages in bitmap of
      * qemu_real_host_page_size to mark those dirty.
      */
-    if (cap_mig->pgsize_bitmap & qemu_real_host_page_size) {
+    if (cap_mig->pgsize_bitmap & qemu_real_host_page_size()) {
         container->dirty_pages_supported = true;
         container->max_dirty_bitmap_size = cap_mig->max_dirty_bitmap_size;
         container->dirty_pgsizes = cap_mig->pgsize_bitmap;
@@ -2246,7 +2278,7 @@ static void vfio_disconnect_container(VFIOGroup *group)
 
         QLIST_FOREACH_SAFE(giommu, &container->giommu_list, giommu_next, tmp) {
             memory_region_unregister_iommu_notifier(
-                    MEMORY_REGION(giommu->iommu), &giommu->n);
+                    MEMORY_REGION(giommu->iommu_mr), &giommu->n);
             QLIST_REMOVE(giommu, giommu_next);
             g_free(giommu);
         }

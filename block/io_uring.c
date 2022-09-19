@@ -10,14 +10,15 @@
  */
 #include "qemu/osdep.h"
 #include <liburing.h>
-#include "qemu-common.h"
 #include "block/aio.h"
+#include "qemu/error-report.h"
 #include "qemu/queue.h"
 #include "block/block.h"
 #include "block/raw-aio.h"
 #include "qemu/coroutine.h"
 #include "qapi/error.h"
 #include "trace.h"
+
 
 /* io_uring ring size */
 #define MAX_ENTRIES 128
@@ -73,12 +74,8 @@ static void luring_resubmit(LuringState *s, LuringAIOCB *luringcb)
 /**
  * luring_resubmit_short_read:
  *
- * Before Linux commit 9d93a3f5a0c ("io_uring: punt short reads to async
- * context") a buffered I/O request with the start of the file range in the
- * page cache could result in a short read.  Applications need to resubmit the
- * remaining read request.
- *
- * This is a slow path but recent kernels never take it.
+ * Short reads are rare but may occur. The remaining read request needs to be
+ * resubmitted.
  */
 static void luring_resubmit_short_read(LuringState *s, LuringAIOCB *luringcb,
                                        int nread)
@@ -89,7 +86,7 @@ static void luring_resubmit_short_read(LuringState *s, LuringAIOCB *luringcb,
     trace_luring_resubmit_short_read(s, luringcb, nread);
 
     /* Update read position */
-    luringcb->total_read = nread;
+    luringcb->total_read += nread;
     remaining = luringcb->qiov->size - luringcb->total_read;
 
     /* Shorten qiov */
@@ -103,7 +100,7 @@ static void luring_resubmit_short_read(LuringState *s, LuringAIOCB *luringcb,
                       remaining);
 
     /* Update sqe */
-    luringcb->sqeq.off = nread;
+    luringcb->sqeq.off += nread;
     luringcb->sqeq.addr = (__u64)(uintptr_t)luringcb->resubmit_qiov.iov;
     luringcb->sqeq.len = luringcb->resubmit_qiov.niov;
 
@@ -435,8 +432,17 @@ LuringState *luring_init(Error **errp)
     }
 
     ioq_init(&s->io_q);
-    return s;
+#ifdef CONFIG_LIBURING_REGISTER_RING_FD
+    if (io_uring_register_ring_fd(&s->ring) < 0) {
+        /*
+         * Only warn about this error: we will fallback to the non-optimized
+         * io_uring operations.
+         */
+        warn_report("failed to register linux io_uring ring file descriptor");
+    }
+#endif
 
+    return s;
 }
 
 void luring_cleanup(LuringState *s)

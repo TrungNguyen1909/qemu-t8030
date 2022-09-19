@@ -34,6 +34,18 @@
 #include "exec/poison.h"
 #endif
 
+/*
+ * HOST_WORDS_BIGENDIAN was replaced with HOST_BIG_ENDIAN. Prevent it from
+ * creeping back in.
+ */
+#pragma GCC poison HOST_WORDS_BIGENDIAN
+
+/*
+ * TARGET_WORDS_BIGENDIAN was replaced with TARGET_BIG_ENDIAN. Prevent it from
+ * creeping back in.
+ */
+#pragma GCC poison TARGET_WORDS_BIGENDIAN
+
 #include "qemu/compiler.h"
 
 /* Older versions of C++ don't get definitions of various macros from
@@ -63,7 +75,7 @@ QEMU_EXTERN_C int daemon(int, int);
 #ifdef _WIN32
 /* as defined in sdkddkver.h */
 #ifndef _WIN32_WINNT
-#define _WIN32_WINNT 0x0600 /* Vista */
+#define _WIN32_WINNT 0x0601 /* Windows 7 API (should be in sync with glib) */
 #endif
 /* reduces the number of implicitly included headers */
 #ifndef WIN32_LEAN_AND_MEAN
@@ -157,6 +169,23 @@ extern "C" {
 #define assert(x)  g_assert(x)
 #endif
 
+/**
+ * qemu_build_not_reached()
+ *
+ * The compiler, during optimization, is expected to prove that a call
+ * to this function cannot be reached and remove it.  If the compiler
+ * supports QEMU_ERROR, this will be reported at compile time; otherwise
+ * this will be reported at link time due to the missing symbol.
+ */
+extern G_NORETURN
+void QEMU_ERROR("code path is reachable")
+    qemu_build_not_reached_always(void);
+#if defined(__OPTIMIZE__) && !defined(__NO_INLINE__)
+#define qemu_build_not_reached()  qemu_build_not_reached_always()
+#else
+#define qemu_build_not_reached()  g_assert_not_reached()
+#endif
+
 /*
  * According to waitpid man page:
  * WCOREDUMP
@@ -213,6 +242,8 @@ extern "C" {
 #if !defined(ESHUTDOWN)
 #define ESHUTDOWN 4099
 #endif
+
+#define TFR(expr) do { if ((expr) != -1) break; } while (errno == EINTR)
 
 /* time_t may be either 32 or 64 bits depending on the host OS, and
  * can be either signed or unsigned, so we can't just hardcode a
@@ -419,9 +450,9 @@ extern int madvise(char *, size_t, int);
    /* Use 1 MiB (segment size) alignment so gmap can be used by KVM. */
 #  define QEMU_VMALLOC_ALIGN (256 * 4096)
 #elif defined(__linux__) && defined(__sparc__)
-#  define QEMU_VMALLOC_ALIGN MAX(qemu_real_host_page_size, SHMLBA)
+#  define QEMU_VMALLOC_ALIGN MAX(qemu_real_host_page_size(), SHMLBA)
 #else
-#  define QEMU_VMALLOC_ALIGN qemu_real_host_page_size
+#  define QEMU_VMALLOC_ALIGN qemu_real_host_page_size()
 #endif
 
 #ifdef CONFIG_POSIX
@@ -513,29 +544,18 @@ static inline void qemu_timersub(const struct timeval *val1,
 #define qemu_timersub timersub
 #endif
 
+ssize_t qemu_write_full(int fd, const void *buf, size_t count)
+    G_GNUC_WARN_UNUSED_RESULT;
+
 void qemu_set_cloexec(int fd);
 
-void fips_set_state(bool requested);
-bool fips_get_state(void);
-
-/* Return a dynamically allocated pathname denoting a file or directory that is
- * appropriate for storing local state.
- *
- * @relative_pathname need not start with a directory separator; one will be
- * added automatically.
+/* Return a dynamically allocated directory path that is appropriate for storing
+ * local state.
  *
  * The caller is responsible for releasing the value returned with g_free()
  * after use.
  */
-char *qemu_get_local_state_pathname(const char *relative_pathname);
-
-/* Find program directory, and save it for later usage with
- * qemu_get_exec_dir().
- * Try OS specific API first, if not working, parse from argv0. */
-void qemu_init_exec_dir(const char *argv0);
-
-/* Get the saved exec dir.  */
-const char *qemu_get_exec_dir(void);
+char *qemu_get_local_state_dir(void);
 
 /**
  * qemu_getauxval:
@@ -578,8 +598,15 @@ pid_t qemu_fork(Error **errp);
 /* Using intptr_t ensures that qemu_*_page_mask is sign-extended even
  * when intptr_t is 32-bit and we are aligning a long long.
  */
-extern uintptr_t qemu_real_host_page_size;
-extern intptr_t qemu_real_host_page_mask;
+static inline uintptr_t qemu_real_host_page_size(void)
+{
+    return getpagesize();
+}
+
+static inline intptr_t qemu_real_host_page_mask(void)
+{
+    return -(intptr_t)qemu_real_host_page_size();
+}
 
 /*
  * After using getopt or getopt_long, if you need to parse another set
@@ -596,15 +623,20 @@ static inline void qemu_reset_optind(void)
 #endif
 }
 
+int qemu_fdatasync(int fd);
+
 /**
- * qemu_get_host_name:
- * @errp: Error object
+ * Sync changes made to the memory mapped file back to the backing
+ * storage. For POSIX compliant systems this will fallback
+ * to regular msync call. Otherwise it will trigger whole file sync
+ * (including the metadata case there is no support to skip that otherwise)
  *
- * Operating system agnostic way of querying host name.
- *
- * Returns allocated hostname (caller should free), NULL on failure.
+ * @addr   - start of the memory area to be synced
+ * @length - length of the are to be synced
+ * @fd     - file descriptor for the file to be synced
+ *           (mandatory only for POSIX non-compliant systems)
  */
-char *qemu_get_host_name(Error **errp);
+int qemu_msync(void *addr, size_t length, int fd);
 
 /**
  * qemu_get_host_physmem:

@@ -146,6 +146,12 @@ static int vhost_kernel_set_vring_call(struct vhost_dev *dev,
     return vhost_kernel_call(dev, VHOST_SET_VRING_CALL, file);
 }
 
+static int vhost_kernel_set_vring_err(struct vhost_dev *dev,
+                                      struct vhost_vring_file *file)
+{
+    return vhost_kernel_call(dev, VHOST_SET_VRING_ERR, file);
+}
+
 static int vhost_kernel_set_vring_busyloop_timeout(struct vhost_dev *dev,
                                                    struct vhost_vring_state *s)
 {
@@ -203,7 +209,6 @@ static int vhost_kernel_get_vq_index(struct vhost_dev *dev, int idx)
     return idx - dev->vq_index;
 }
 
-#ifdef CONFIG_VHOST_VSOCK
 static int vhost_kernel_vsock_set_guest_cid(struct vhost_dev *dev,
                                             uint64_t guest_cid)
 {
@@ -214,7 +219,6 @@ static int vhost_kernel_vsock_set_running(struct vhost_dev *dev, int start)
 {
     return vhost_kernel_call(dev, VHOST_VSOCK_SET_RUNNING, &start);
 }
-#endif /* CONFIG_VHOST_VSOCK */
 
 static void vhost_kernel_iotlb_read(void *opaque)
 {
@@ -311,6 +315,7 @@ const VhostOps kernel_ops = {
         .vhost_get_vring_base = vhost_kernel_get_vring_base,
         .vhost_set_vring_kick = vhost_kernel_set_vring_kick,
         .vhost_set_vring_call = vhost_kernel_set_vring_call,
+        .vhost_set_vring_err = vhost_kernel_set_vring_err,
         .vhost_set_vring_busyloop_timeout =
                                 vhost_kernel_set_vring_busyloop_timeout,
         .vhost_set_features = vhost_kernel_set_features,
@@ -319,10 +324,8 @@ const VhostOps kernel_ops = {
         .vhost_set_owner = vhost_kernel_set_owner,
         .vhost_reset_device = vhost_kernel_reset_device,
         .vhost_get_vq_index = vhost_kernel_get_vq_index,
-#ifdef CONFIG_VHOST_VSOCK
         .vhost_vsock_set_guest_cid = vhost_kernel_vsock_set_guest_cid,
         .vhost_vsock_set_running = vhost_kernel_vsock_set_running,
-#endif /* CONFIG_VHOST_VSOCK */
         .vhost_set_iotlb_callback = vhost_kernel_set_iotlb_callback,
         .vhost_send_device_iotlb_msg = vhost_kernel_send_device_iotlb_msg,
 };

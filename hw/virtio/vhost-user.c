@@ -51,7 +51,7 @@
 #include "hw/acpi/acpi.h"
 #define VHOST_USER_MAX_RAM_SLOTS ACPI_MAX_RAM_SLOTS
 
-#elif defined(TARGET_PPC) || defined(TARGET_PPC_64)
+#elif defined(TARGET_PPC) || defined(TARGET_PPC64)
 #include "hw/ppc/spapr.h"
 #define VHOST_USER_MAX_RAM_SLOTS SPAPR_MAX_RAM_SLOTS
 
@@ -295,6 +295,8 @@ static int vhost_user_read_header(struct vhost_dev *dev, VhostUserMsg *msg)
         return -EPROTO;
     }
 
+    trace_vhost_user_read(msg->hdr.request, msg->hdr.flags);
+
     return 0;
 }
 
@@ -488,6 +490,8 @@ static int vhost_user_write(struct vhost_dev *dev, VhostUserMsg *msg,
                      " Wrote %d instead of %d.", ret, size);
         return ret < 0 ? -saved_errno : -EIO;
     }
+
+    trace_vhost_user_write(msg->hdr.request, msg->hdr.flags);
 
     return 0;
 }
@@ -751,7 +755,7 @@ static int send_remove_regions(struct vhost_dev *dev,
             vhost_user_fill_msg_region(&region_buffer, shadow_reg, 0);
             msg->payload.mem_reg.region = region_buffer;
 
-            ret = vhost_user_write(dev, msg, &fd, 1);
+            ret = vhost_user_write(dev, msg, NULL, 0);
             if (ret < 0) {
                 return ret;
             }
@@ -1166,18 +1170,20 @@ static int vhost_user_set_vring_num(struct vhost_dev *dev,
 static void vhost_user_host_notifier_free(VhostUserHostNotifier *n)
 {
     assert(n && n->unmap_addr);
-    munmap(n->unmap_addr, qemu_real_host_page_size);
+    munmap(n->unmap_addr, qemu_real_host_page_size());
     n->unmap_addr = NULL;
 }
 
-static void vhost_user_host_notifier_remove(VhostUserState *user,
-                                            VirtIODevice *vdev, int queue_idx)
+/*
+ * clean-up function for notifier, will finally free the structure
+ * under rcu.
+ */
+static void vhost_user_host_notifier_remove(VhostUserHostNotifier *n,
+                                            VirtIODevice *vdev)
 {
-    VhostUserHostNotifier *n = &user->notifier[queue_idx];
-
     if (n->addr) {
         if (vdev) {
-            virtio_queue_set_host_notifier_mr(vdev, queue_idx, &n->mr, false);
+            virtio_queue_set_host_notifier_mr(vdev, n->idx, &n->mr, false);
         }
         assert(!n->unmap_addr);
         n->unmap_addr = n->addr;
@@ -1221,6 +1227,15 @@ static int vhost_user_set_vring_enable(struct vhost_dev *dev, int enable)
     return 0;
 }
 
+static VhostUserHostNotifier *fetch_notifier(VhostUserState *u,
+                                             int idx)
+{
+    if (idx >= u->notifiers->len) {
+        return NULL;
+    }
+    return g_ptr_array_index(u->notifiers, idx);
+}
+
 static int vhost_user_get_vring_base(struct vhost_dev *dev,
                                      struct vhost_vring_state *ring)
 {
@@ -1233,7 +1248,10 @@ static int vhost_user_get_vring_base(struct vhost_dev *dev,
     };
     struct vhost_user *u = dev->opaque;
 
-    vhost_user_host_notifier_remove(u->user, dev->vdev, ring->index);
+    VhostUserHostNotifier *n = fetch_notifier(u->user, ring->index);
+    if (n) {
+        vhost_user_host_notifier_remove(n, dev->vdev);
+    }
 
     ret = vhost_user_write(dev, &msg, NULL, 0);
     if (ret < 0) {
@@ -1295,6 +1313,11 @@ static int vhost_user_set_vring_call(struct vhost_dev *dev,
     return vhost_set_vring_file(dev, VHOST_USER_SET_VRING_CALL, file);
 }
 
+static int vhost_user_set_vring_err(struct vhost_dev *dev,
+                                    struct vhost_vring_file *file)
+{
+    return vhost_set_vring_file(dev, VHOST_USER_SET_VRING_ERR, file);
+}
 
 static int vhost_user_get_u64(struct vhost_dev *dev, int request, uint64_t *u64)
 {
@@ -1498,12 +1521,35 @@ static int vhost_user_slave_handle_config_change(struct vhost_dev *dev)
     return dev->config_ops->vhost_dev_config_notifier(dev);
 }
 
+/*
+ * Fetch or create the notifier for a given idx. Newly created
+ * notifiers are added to the pointer array that tracks them.
+ */
+static VhostUserHostNotifier *fetch_or_create_notifier(VhostUserState *u,
+                                                       int idx)
+{
+    VhostUserHostNotifier *n = NULL;
+    if (idx >= u->notifiers->len) {
+        g_ptr_array_set_size(u->notifiers, idx + 1);
+    }
+
+    n = g_ptr_array_index(u->notifiers, idx);
+    if (!n) {
+        n = g_new0(VhostUserHostNotifier, 1);
+        n->idx = idx;
+        g_ptr_array_insert(u->notifiers, idx, n);
+        trace_vhost_user_create_notifier(idx, n);
+    }
+
+    return n;
+}
+
 static int vhost_user_slave_handle_vring_host_notifier(struct vhost_dev *dev,
                                                        VhostUserVringArea *area,
                                                        int fd)
 {
     int queue_idx = area->u64 & VHOST_USER_VRING_IDX_MASK;
-    size_t page_size = qemu_real_host_page_size;
+    size_t page_size = qemu_real_host_page_size();
     struct vhost_user *u = dev->opaque;
     VhostUserState *user = u->user;
     VirtIODevice *vdev = dev->vdev;
@@ -1517,9 +1563,12 @@ static int vhost_user_slave_handle_vring_host_notifier(struct vhost_dev *dev,
         return -EINVAL;
     }
 
-    n = &user->notifier[queue_idx];
-
-    vhost_user_host_notifier_remove(user, vdev, queue_idx);
+    /*
+     * Fetch notifier and invalidate any old data before setting up
+     * new mapped address.
+     */
+    n = fetch_or_create_notifier(user, queue_idx);
+    vhost_user_host_notifier_remove(n, vdev);
 
     if (area->u64 & VHOST_USER_VRING_NOFD_MASK) {
         return 0;
@@ -1826,7 +1875,7 @@ static int vhost_user_postcopy_advise(struct vhost_dev *dev, Error **errp)
         error_setg(errp, "%s: Failed to get ufd", __func__);
         return -EIO;
     }
-    qemu_set_nonblock(ufd);
+    qemu_socket_set_nonblock(ufd);
 
     /* register ufd with userfault thread */
     u->postcopy_fd.fd = ufd;
@@ -1945,14 +1994,15 @@ static int vhost_user_postcopy_notifier(NotifierWithReturn *notifier,
 static int vhost_user_backend_init(struct vhost_dev *dev, void *opaque,
                                    Error **errp)
 {
-    uint64_t features, protocol_features, ram_slots;
+    uint64_t features, ram_slots;
     struct vhost_user *u;
+    VhostUserState *vus = (VhostUserState *) opaque;
     int err;
 
     assert(dev->vhost_ops->backend_type == VHOST_BACKEND_TYPE_USER);
 
     u = g_new0(struct vhost_user, 1);
-    u->user = opaque;
+    u->user = vus;
     u->dev = dev;
     dev->opaque = u;
 
@@ -1963,6 +2013,10 @@ static int vhost_user_backend_init(struct vhost_dev *dev, void *opaque,
     }
 
     if (virtio_has_feature(features, VHOST_USER_F_PROTOCOL_FEATURES)) {
+        bool supports_f_config = vus->supports_config ||
+            (dev->config_ops && dev->config_ops->vhost_dev_config_notifier);
+        uint64_t protocol_features;
+
         dev->backend_features |= 1ULL << VHOST_USER_F_PROTOCOL_FEATURES;
 
         err = vhost_user_get_u64(dev, VHOST_USER_GET_PROTOCOL_FEATURES,
@@ -1972,19 +2026,32 @@ static int vhost_user_backend_init(struct vhost_dev *dev, void *opaque,
             return -EPROTO;
         }
 
-        dev->protocol_features =
-            protocol_features & VHOST_USER_PROTOCOL_FEATURE_MASK;
+        /*
+         * We will use all the protocol features we support - although
+         * we suppress F_CONFIG if we know QEMUs internal code can not support
+         * it.
+         */
+        protocol_features &= VHOST_USER_PROTOCOL_FEATURE_MASK;
 
-        if (!dev->config_ops || !dev->config_ops->vhost_dev_config_notifier) {
-            /* Don't acknowledge CONFIG feature if device doesn't support it */
-            dev->protocol_features &= ~(1ULL << VHOST_USER_PROTOCOL_F_CONFIG);
-        } else if (!(protocol_features &
-                    (1ULL << VHOST_USER_PROTOCOL_F_CONFIG))) {
-            error_setg(errp, "Device expects VHOST_USER_PROTOCOL_F_CONFIG "
-                       "but backend does not support it.");
-            return -EINVAL;
+        if (supports_f_config) {
+            if (!virtio_has_feature(protocol_features,
+                                    VHOST_USER_PROTOCOL_F_CONFIG)) {
+                error_setg(errp, "vhost-user device expecting "
+                           "VHOST_USER_PROTOCOL_F_CONFIG but the vhost-user backend does "
+                           "not support it.");
+                return -EPROTO;
+            }
+        } else {
+            if (virtio_has_feature(protocol_features,
+                                   VHOST_USER_PROTOCOL_F_CONFIG)) {
+                warn_reportf_err(*errp, "vhost-user backend supports "
+                                 "VHOST_USER_PROTOCOL_F_CONFIG but QEMU does not.");
+                protocol_features &= ~(1ULL << VHOST_USER_PROTOCOL_F_CONFIG);
+            }
         }
 
+        /* final set of protocol features */
+        dev->protocol_features = protocol_features;
         err = vhost_user_set_protocol_features(dev, dev->protocol_features);
         if (err < 0) {
             error_setg_errno(errp, EPROTO, "vhost_backend_init failed");
@@ -2502,6 +2569,20 @@ static int vhost_user_set_inflight_fd(struct vhost_dev *dev,
     return vhost_user_write(dev, &msg, &inflight->fd, 1);
 }
 
+static void vhost_user_state_destroy(gpointer data)
+{
+    VhostUserHostNotifier *n = (VhostUserHostNotifier *) data;
+    if (n) {
+        vhost_user_host_notifier_remove(n, NULL);
+        object_unparent(OBJECT(&n->mr));
+        /*
+         * We can't free until vhost_user_host_notifier_remove has
+         * done it's thing so schedule the free with RCU.
+         */
+        g_free_rcu(n, rcu);
+    }
+}
+
 bool vhost_user_init(VhostUserState *user, CharBackend *chr, Error **errp)
 {
     if (user->chr) {
@@ -2510,23 +2591,18 @@ bool vhost_user_init(VhostUserState *user, CharBackend *chr, Error **errp)
     }
     user->chr = chr;
     user->memory_slots = 0;
+    user->notifiers = g_ptr_array_new_full(VIRTIO_QUEUE_MAX / 4,
+                                           &vhost_user_state_destroy);
     return true;
 }
 
 void vhost_user_cleanup(VhostUserState *user)
 {
-    int i;
-    VhostUserHostNotifier *n;
-
     if (!user->chr) {
         return;
     }
     memory_region_transaction_begin();
-    for (i = 0; i < VIRTIO_QUEUE_MAX; i++) {
-        n = &user->notifier[i];
-        vhost_user_host_notifier_remove(user, NULL, i);
-        object_unparent(OBJECT(&n->mr));
-    }
+    user->notifiers = (GPtrArray *) g_ptr_array_free(user->notifiers, true);
     memory_region_transaction_commit();
     user->chr = NULL;
 }
@@ -2545,6 +2621,7 @@ const VhostOps user_ops = {
         .vhost_get_vring_base = vhost_user_get_vring_base,
         .vhost_set_vring_kick = vhost_user_set_vring_kick,
         .vhost_set_vring_call = vhost_user_set_vring_call,
+        .vhost_set_vring_err = vhost_user_set_vring_err,
         .vhost_set_features = vhost_user_set_features,
         .vhost_get_features = vhost_user_get_features,
         .vhost_set_owner = vhost_user_set_owner,

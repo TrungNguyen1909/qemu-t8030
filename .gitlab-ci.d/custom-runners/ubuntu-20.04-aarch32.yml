@@ -1,6 +1,6 @@
 # All ubuntu-20.04 jobs should run successfully in an environment
 # setup by the scripts/ci/setup/qemu/build-environment.yml task
-# "Install basic packages to build QEMU on Ubuntu 18.04/20.04"
+# "Install basic packages to build QEMU on Ubuntu 20.04"
 
 ubuntu-20.04-aarch32-all:
  needs: []
@@ -19,5 +19,7 @@ ubuntu-20.04-aarch32-all:
  - mkdir build
  - cd build
  - ../configure --cross-prefix=arm-linux-gnueabihf-
- - make --output-sync -j`nproc`
- - make --output-sync -j`nproc` check V=1
+   || { cat config.log meson-logs/meson-log.txt; exit 1; }
+ - make --output-sync -j`nproc --ignore=40`
+ - make --output-sync -j`nproc --ignore=40` check V=1
+   || { cat meson-logs/testlog.txt; exit 1; } ;

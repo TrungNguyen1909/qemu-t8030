@@ -21,6 +21,7 @@
  * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
  * THE SOFTWARE.
  */
+
 #ifndef BLOCK_INT_GLOBAL_STATE_H
 #define BLOCK_INT_GLOBAL_STATE_H
 
@@ -262,7 +263,7 @@ BdrvDirtyBitmap *block_dirty_bitmap_lookup(const char *node,
                                            BlockDriverState **pbs,
                                            Error **errp);
 BdrvDirtyBitmap *block_dirty_bitmap_merge(const char *node, const char *target,
-                                          BlockDirtyBitmapMergeSourceList *bms,
+                                          BlockDirtyBitmapOrStrList *bms,
                                           HBitmap **backup, Error **errp);
 BdrvDirtyBitmap *block_dirty_bitmap_remove(const char *node, const char *name,
                                            bool release,
@@ -326,4 +327,4 @@ static inline void assert_bdrv_graph_writable(BlockDriverState *bs)
     assert(qemu_in_main_thread());
 }
 
-#endif /* BLOCK_INT_GLOBAL_STATE */
+#endif /* BLOCK_INT_GLOBAL_STATE_H */

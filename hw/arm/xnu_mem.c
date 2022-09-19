@@ -22,7 +22,6 @@
 
 #include "qemu/osdep.h"
 #include "qapi/error.h"
-#include "qemu-common.h"
 #include "sysemu/sysemu.h"
 #include "qemu/error-report.h"
 #include "exec/address-spaces.h"

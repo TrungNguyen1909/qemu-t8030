@@ -25,7 +25,8 @@
 #include "qemu/osdep.h"
 #include <getopt.h>
 
-#include "qemu-common.h"
+#include "qemu/help-texts.h"
+#include "qemu/qemu-progress.h"
 #include "qemu-version.h"
 #include "qapi/error.h"
 #include "qapi/qapi-commands-block-core.h"
@@ -99,7 +100,8 @@ static void format_print(void *opaque, const char *name)
     printf(" %s", name);
 }
 
-static void QEMU_NORETURN G_GNUC_PRINTF(1, 2) error_exit(const char *fmt, ...)
+static G_NORETURN G_GNUC_PRINTF(1, 2)
+void error_exit(const char *fmt, ...)
 {
     va_list ap;
 
@@ -111,18 +113,21 @@ static void QEMU_NORETURN G_GNUC_PRINTF(1, 2) error_exit(const char *fmt, ...)
     exit(EXIT_FAILURE);
 }
 
-static void QEMU_NORETURN missing_argument(const char *option)
+static G_NORETURN
+void missing_argument(const char *option)
 {
     error_exit("missing argument for option '%s'", option);
 }
 
-static void QEMU_NORETURN unrecognized_option(const char *option)
+static G_NORETURN
+void unrecognized_option(const char *option)
 {
     error_exit("unrecognized option '%s'", option);
 }
 
 /* Please keep in synch with docs/tools/qemu-img.rst */
-static void QEMU_NORETURN help(void)
+static G_NORETURN
+void help(void)
 {
     const char *help_msg =
            QEMU_IMG_VERSION
@@ -1304,7 +1309,7 @@ static int check_empty_sectors(BlockBackend *blk, int64_t offset,
     int ret = 0;
     int64_t idx;
 
-    ret = blk_pread(blk, offset, buffer, bytes);
+    ret = blk_pread(blk, offset, bytes, buffer, 0);
     if (ret < 0) {
         error_report("Error while reading offset %" PRId64 " of %s: %s",
                      offset, filename, strerror(-ret));
@@ -1521,7 +1526,7 @@ static int img_compare(int argc, char **argv)
                 int64_t pnum;
 
                 chunk = MIN(chunk, IO_BUF_SIZE);
-                ret = blk_pread(blk1, offset, buf1, chunk);
+                ret = blk_pread(blk1, offset, chunk, buf1, 0);
                 if (ret < 0) {
                     error_report("Error while reading offset %" PRId64
                                  " of %s: %s",
@@ -1529,7 +1534,7 @@ static int img_compare(int argc, char **argv)
                     ret = 4;
                     goto out;
                 }
-                ret = blk_pread(blk2, offset, buf2, chunk);
+                ret = blk_pread(blk2, offset, chunk, buf2, 0);
                 if (ret < 0) {
                     error_report("Error while reading offset %" PRId64
                                  " of %s: %s",
@@ -1618,16 +1623,16 @@ static void do_dirty_bitmap_merge(const char *dst_node, const char *dst_name,
                                   const char *src_node, const char *src_name,
                                   Error **errp)
 {
-    BlockDirtyBitmapMergeSource *merge_src;
-    BlockDirtyBitmapMergeSourceList *list = NULL;
+    BlockDirtyBitmapOrStr *merge_src;
+    BlockDirtyBitmapOrStrList *list = NULL;
 
-    merge_src = g_new0(BlockDirtyBitmapMergeSource, 1);
+    merge_src = g_new0(BlockDirtyBitmapOrStr, 1);
     merge_src->type = QTYPE_QDICT;
     merge_src->u.external.node = g_strdup(src_node);
     merge_src->u.external.name = g_strdup(src_name);
     QAPI_LIST_PREPEND(list, merge_src);
     qmp_block_dirty_bitmap_merge(dst_node, dst_name, list, errp);
-    qapi_free_BlockDirtyBitmapMergeSourceList(list);
+    qapi_free_BlockDirtyBitmapOrStrList(list);
 }
 
 enum ImgConvertBlockStatus {
@@ -2109,7 +2114,7 @@ static int convert_do_copy(ImgConvertState *s)
 
     if (s->compressed && !s->ret) {
         /* signal EOF to align */
-        ret = blk_pwrite_compressed(s->target, 0, NULL, 0);
+        ret = blk_pwrite_compressed(s->target, 0, 0, NULL);
         if (ret < 0) {
             return ret;
         }
@@ -3305,11 +3310,11 @@ static int img_snapshot(int argc, char **argv)
     char *filename, *snapshot_name = NULL;
     int c, ret = 0, bdrv_oflags;
     int action = 0;
-    qemu_timeval tv;
     bool quiet = false;
     Error *err = NULL;
     bool image_opts = false;
     bool force_share = false;
+    int64_t rt;
 
     bdrv_oflags = BDRV_O_RDWR;
     /* Parse commandline parameters */
@@ -3406,9 +3411,9 @@ static int img_snapshot(int argc, char **argv)
         memset(&sn, 0, sizeof(sn));
         pstrcpy(sn.name, sizeof(sn.name), snapshot_name);
 
-        qemu_gettimeofday(&tv);
-        sn.date_sec = tv.tv_sec;
-        sn.date_nsec = tv.tv_usec * 1000;
+        rt = g_get_real_time();
+        sn.date_sec = rt / G_USEC_PER_SEC;
+        sn.date_nsec = (rt % G_USEC_PER_SEC) * 1000;
 
         ret = bdrv_snapshot_create(bs, &sn);
         if (ret) {
@@ -3774,7 +3779,7 @@ static int img_rebase(int argc, char **argv)
                     n = old_backing_size - offset;
                 }
 
-                ret = blk_pread(blk_old_backing, offset, buf_old, n);
+                ret = blk_pread(blk_old_backing, offset, n, buf_old, 0);
                 if (ret < 0) {
                     error_report("error while reading from old backing file");
                     goto out;
@@ -3788,7 +3793,7 @@ static int img_rebase(int argc, char **argv)
                     n = new_backing_size - offset;
                 }
 
-                ret = blk_pread(blk_new_backing, offset, buf_new, n);
+                ret = blk_pread(blk_new_backing, offset, n, buf_new, 0);
                 if (ret < 0) {
                     error_report("error while reading from new backing file");
                     goto out;
@@ -3807,8 +3812,8 @@ static int img_rebase(int argc, char **argv)
                     if (buf_old_is_zero) {
                         ret = blk_pwrite_zeroes(blk, offset + written, pnum, 0);
                     } else {
-                        ret = blk_pwrite(blk, offset + written,
-                                         buf_old + written, pnum, 0);
+                        ret = blk_pwrite(blk, offset + written, pnum,
+                                         buf_old + written, 0);
                     }
                     if (ret < 0) {
                         error_report("Error while writing to COW image: %s",
@@ -5115,30 +5120,23 @@ static int img_dd(int argc, char **argv)
     in.buf = g_new(uint8_t, in.bsz);
 
     for (out_pos = 0; in_pos < size; block_count++) {
-        int in_ret, out_ret;
+        int bytes = (in_pos + in.bsz > size) ? size - in_pos : in.bsz;
 
-        if (in_pos + in.bsz > size) {
-            in_ret = blk_pread(blk1, in_pos, in.buf, size - in_pos);
-        } else {
-            in_ret = blk_pread(blk1, in_pos, in.buf, in.bsz);
-        }
-        if (in_ret < 0) {
+        ret = blk_pread(blk1, in_pos, bytes, in.buf, 0);
+        if (ret < 0) {
             error_report("error while reading from input image file: %s",
-                         strerror(-in_ret));
-            ret = -1;
+                         strerror(-ret));
             goto out;
         }
-        in_pos += in_ret;
+        in_pos += bytes;
 
-        out_ret = blk_pwrite(blk2, out_pos, in.buf, in_ret, 0);
-
-        if (out_ret < 0) {
+        ret = blk_pwrite(blk2, out_pos, bytes, in.buf, 0);
+        if (ret < 0) {
             error_report("error while writing to output image file: %s",
-                         strerror(-out_ret));
-            ret = -1;
+                         strerror(-ret));
             goto out;
         }
-        out_pos += out_ret;
+        out_pos += bytes;
     }
 
 out:
@@ -5442,7 +5440,7 @@ int main(int argc, char **argv)
         exit(1);
     }
     trace_init_file();
-    qemu_set_log(LOG_TRACE);
+    qemu_set_log(LOG_TRACE, &error_fatal);
 
     /* find the command */
     for (cmd = img_cmds; cmd->name != NULL; cmd++) {

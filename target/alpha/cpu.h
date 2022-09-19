@@ -22,6 +22,7 @@
 
 #include "cpu-qom.h"
 #include "exec/cpu-defs.h"
+#include "qemu/cpu-float.h"
 
 /* Alpha processors have a weak memory model */
 #define TCG_GUEST_DEFAULT_MO      (0)
@@ -433,8 +434,8 @@ void alpha_translate_init(void);
 #define CPU_RESOLVING_TYPE TYPE_ALPHA_CPU
 
 void alpha_cpu_list(void);
-void QEMU_NORETURN dynamic_excp(CPUAlphaState *, uintptr_t, int, int);
-void QEMU_NORETURN arith_excp(CPUAlphaState *, uintptr_t, int, uint64_t);
+G_NORETURN void dynamic_excp(CPUAlphaState *, uintptr_t, int, int);
+G_NORETURN void arith_excp(CPUAlphaState *, uintptr_t, int, uint64_t);
 
 uint64_t cpu_alpha_load_fpcr (CPUAlphaState *env);
 void cpu_alpha_store_fpcr (CPUAlphaState *env, uint64_t val);
@@ -451,9 +452,9 @@ void alpha_cpu_record_sigbus(CPUState *cs, vaddr address,
 bool alpha_cpu_tlb_fill(CPUState *cs, vaddr address, int size,
                         MMUAccessType access_type, int mmu_idx,
                         bool probe, uintptr_t retaddr);
-void alpha_cpu_do_unaligned_access(CPUState *cpu, vaddr addr,
-                                   MMUAccessType access_type, int mmu_idx,
-                                   uintptr_t retaddr) QEMU_NORETURN;
+G_NORETURN void alpha_cpu_do_unaligned_access(CPUState *cpu, vaddr addr,
+                                              MMUAccessType access_type, int mmu_idx,
+                                              uintptr_t retaddr);
 void alpha_cpu_do_transaction_failed(CPUState *cs, hwaddr physaddr,
                                      vaddr addr, unsigned size,
                                      MMUAccessType access_type,

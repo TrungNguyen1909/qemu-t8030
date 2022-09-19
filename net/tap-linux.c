@@ -24,7 +24,6 @@
  */
 
 #include "qemu/osdep.h"
-#include "qemu-common.h"
 #include "tap_int.h"
 #include "tap-linux.h"
 #include "net/tap.h"
@@ -114,7 +113,7 @@ int tap_open(char *ifname, int ifname_size, int *vnet_hdr,
         return -1;
     }
     pstrcpy(ifname, ifname_size, ifr.ifr_name);
-    fcntl(fd, F_SETFL, O_NONBLOCK);
+    g_unix_set_fd_nonblocking(fd, true, NULL);
     return fd;
 }
 

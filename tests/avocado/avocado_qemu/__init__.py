@@ -21,6 +21,11 @@ import avocado
 from avocado.utils import cloudinit, datadrainer, process, ssh, vmimage
 from avocado.utils.path import find_command
 
+from qemu.machine import QEMUMachine
+from qemu.utils import (get_info_usernet_hostfwd_port, kvm_available,
+                        tcg_available)
+
+
 #: The QEMU build root directory.  It may also be the source directory
 #: if building from the source dir, but it's safer to use BUILD_DIR for
 #: that purpose.  Be aware that if this code is moved outside of a source
@@ -34,12 +39,6 @@ if os.path.islink(os.path.dirname(os.path.dirname(__file__))):
     SOURCE_DIR = os.path.dirname(os.path.dirname(os.readlink(lnk)))
 else:
     SOURCE_DIR = BUILD_DIR
-
-sys.path.append(os.path.join(SOURCE_DIR, 'python'))
-
-from qemu.machine import QEMUMachine
-from qemu.utils import (get_info_usernet_hostfwd_port, kvm_available,
-                        tcg_available)
 
 
 def has_cmd(name, args=None):
@@ -121,14 +120,15 @@ def pick_default_qemu_bin(bin_prefix='qemu-system-', arch=None):
     # qemu binary path does not match arch for powerpc, handle it
     if 'ppc64le' in arch:
         arch = 'ppc64'
-    qemu_bin_relative_path = os.path.join(".", bin_prefix + arch)
-    if is_readable_executable_file(qemu_bin_relative_path):
-        return qemu_bin_relative_path
-
-    qemu_bin_from_bld_dir_path = os.path.join(BUILD_DIR,
-                                              qemu_bin_relative_path)
-    if is_readable_executable_file(qemu_bin_from_bld_dir_path):
-        return qemu_bin_from_bld_dir_path
+    qemu_bin_name = bin_prefix + arch
+    qemu_bin_paths = [
+        os.path.join(".", qemu_bin_name),
+        os.path.join(BUILD_DIR, qemu_bin_name),
+        os.path.join(BUILD_DIR, "build", qemu_bin_name),
+    ]
+    for path in qemu_bin_paths:
+        if is_readable_executable_file(path):
+            return path
     return None
 
 
@@ -227,6 +227,10 @@ def exec_command_and_wait_for_pattern(test, command,
     _console_interaction(test, success_message, failure_message, command + '\r')
 
 class QemuBaseTest(avocado.Test):
+
+    # default timeout for all tests, can be overridden
+    timeout = 900
+
     def _get_unique_tag_val(self, tag_name):
         """
         Gets a tag value, if unique for a key
@@ -512,10 +516,11 @@ class LinuxTest(LinuxSSHMixIn, QemuSystemTest):
     to start with than the more vanilla `QemuSystemTest` class.
     """
 
-    timeout = 900
     distro = None
     username = 'root'
     password = 'password'
+    smp = '2'
+    memory = '1024'
 
     def _set_distro(self):
         distro_name = self.params.get(
@@ -546,8 +551,8 @@ class LinuxTest(LinuxSSHMixIn, QemuSystemTest):
     def setUp(self, ssh_pubkey=None, network_device_type='virtio-net'):
         super().setUp()
         self._set_distro()
-        self.vm.add_args('-smp', '2')
-        self.vm.add_args('-m', '1024')
+        self.vm.add_args('-smp', self.smp)
+        self.vm.add_args('-m', self.memory)
         # The following network device allows for SSH connections
         self.vm.add_args('-netdev', 'user,id=vnet,hostfwd=:127.0.0.1:0-:22',
                          '-device', '%s,netdev=vnet' % network_device_type)

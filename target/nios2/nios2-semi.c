@@ -22,15 +22,9 @@
  */
 
 #include "qemu/osdep.h"
-
 #include "cpu.h"
 #include "exec/gdbstub.h"
-#if defined(CONFIG_USER_ONLY)
-#include "qemu.h"
-#else
-#include "qemu-common.h"
-#include "exec/softmmu-semi.h"
-#endif
+#include "semihosting/softmmu-uaccess.h"
 #include "qemu/log.h"
 
 #define HOSTED_EXIT  0
@@ -47,38 +41,6 @@
 #define HOSTED_GETTIMEOFDAY 11
 #define HOSTED_ISATTY 12
 #define HOSTED_SYSTEM 13
-
-typedef uint32_t gdb_mode_t;
-typedef uint32_t gdb_time_t;
-
-struct nios2_gdb_stat {
-  uint32_t    gdb_st_dev;     /* device */
-  uint32_t    gdb_st_ino;     /* inode */
-  gdb_mode_t  gdb_st_mode;    /* protection */
-  uint32_t    gdb_st_nlink;   /* number of hard links */
-  uint32_t    gdb_st_uid;     /* user ID of owner */
-  uint32_t    gdb_st_gid;     /* group ID of owner */
-  uint32_t    gdb_st_rdev;    /* device type (if inode device) */
-  uint64_t    gdb_st_size;    /* total size, in bytes */
-  uint64_t    gdb_st_blksize; /* blocksize for filesystem I/O */
-  uint64_t    gdb_st_blocks;  /* number of blocks allocated */
-  gdb_time_t  gdb_st_atime;   /* time of last access */
-  gdb_time_t  gdb_st_mtime;   /* time of last modification */
-  gdb_time_t  gdb_st_ctime;   /* time of last change */
-} QEMU_PACKED;
-
-struct gdb_timeval {
-  gdb_time_t tv_sec;  /* second */
-  uint64_t tv_usec;   /* microsecond */
-} QEMU_PACKED;
-
-#define GDB_O_RDONLY   0x0
-#define GDB_O_WRONLY   0x1
-#define GDB_O_RDWR     0x2
-#define GDB_O_APPEND   0x8
-#define GDB_O_CREAT  0x200
-#define GDB_O_TRUNC  0x400
-#define GDB_O_EXCL   0x800
 
 static int translate_openflags(int flags)
 {
@@ -111,9 +73,9 @@ static int translate_openflags(int flags)
 static bool translate_stat(CPUNios2State *env, target_ulong addr,
                            struct stat *s)
 {
-    struct nios2_gdb_stat *p;
+    struct gdb_stat *p;
 
-    p = lock_user(VERIFY_WRITE, addr, sizeof(struct nios2_gdb_stat), 0);
+    p = lock_user(VERIFY_WRITE, addr, sizeof(struct gdb_stat), 0);
 
     if (!p) {
         return false;
@@ -137,14 +99,16 @@ static bool translate_stat(CPUNios2State *env, target_ulong addr,
     p->gdb_st_atime = cpu_to_be32(s->st_atime);
     p->gdb_st_mtime = cpu_to_be32(s->st_mtime);
     p->gdb_st_ctime = cpu_to_be32(s->st_ctime);
-    unlock_user(p, addr, sizeof(struct nios2_gdb_stat));
+    unlock_user(p, addr, sizeof(struct gdb_stat));
     return true;
 }
 
-static void nios2_semi_return_u32(CPUNios2State *env, uint32_t ret,
-                                  uint32_t err)
+static void nios2_semi_u32_cb(CPUState *cs, uint64_t ret, int err)
 {
+    Nios2CPU *cpu = NIOS2_CPU(cs);
+    CPUNios2State *env = &cpu->env;
     target_ulong args = env->regs[R_ARG1];
+
     if (put_user_u32(ret, args) ||
         put_user_u32(err, args + 4)) {
         /*
@@ -157,35 +121,18 @@ static void nios2_semi_return_u32(CPUNios2State *env, uint32_t ret,
     }
 }
 
-static void nios2_semi_return_u64(CPUNios2State *env, uint64_t ret,
-                                  uint32_t err)
+static void nios2_semi_u64_cb(CPUState *cs, uint64_t ret, int err)
 {
+    Nios2CPU *cpu = NIOS2_CPU(cs);
+    CPUNios2State *env = &cpu->env;
     target_ulong args = env->regs[R_ARG1];
+
     if (put_user_u32(ret >> 32, args) ||
         put_user_u32(ret, args + 4) ||
         put_user_u32(err, args + 8)) {
         /* No way to report this via nios2 semihosting ABI; just log it */
         qemu_log_mask(LOG_GUEST_ERROR, "nios2-semihosting: return value "
                       "discarded because argument block not writable\n");
-    }
-}
-
-static int nios2_semi_is_lseek;
-
-static void nios2_semi_cb(CPUState *cs, target_ulong ret, target_ulong err)
-{
-    Nios2CPU *cpu = NIOS2_CPU(cs);
-    CPUNios2State *env = &cpu->env;
-
-    if (nios2_semi_is_lseek) {
-        /*
-         * FIXME: We've already lost the high bits of the lseek
-         * return value.
-         */
-        nios2_semi_return_u64(env, ret, err);
-        nios2_semi_is_lseek = 0;
-    } else {
-        nios2_semi_return_u32(env, ret, err);
     }
 }
 
@@ -203,6 +150,7 @@ static void nios2_semi_cb(CPUState *cs, target_ulong ret, target_ulong err)
 
 void do_nios2_semihosting(CPUNios2State *env)
 {
+    CPUState *cs = env_cpu(env);
     int nr;
     uint32_t args;
     target_ulong arg0, arg1, arg2, arg3;
@@ -223,7 +171,7 @@ void do_nios2_semihosting(CPUNios2State *env)
         GET_ARG(2);
         GET_ARG(3);
         if (use_gdb_syscalls()) {
-            gdb_do_syscall(nios2_semi_cb, "open,%s,%x,%x", arg0, (int)arg1,
+            gdb_do_syscall(nios2_semi_u32_cb, "open,%s,%x,%x", arg0, (int)arg1,
                            arg2, arg3);
             return;
         } else {
@@ -244,7 +192,7 @@ void do_nios2_semihosting(CPUNios2State *env)
             int fd = arg0;
             if (fd > 2) {
                 if (use_gdb_syscalls()) {
-                    gdb_do_syscall(nios2_semi_cb, "close,%x", arg0);
+                    gdb_do_syscall(nios2_semi_u32_cb, "close,%x", arg0);
                     return;
                 } else {
                     result = close(fd);
@@ -260,7 +208,7 @@ void do_nios2_semihosting(CPUNios2State *env)
         GET_ARG(2);
         len = arg2;
         if (use_gdb_syscalls()) {
-            gdb_do_syscall(nios2_semi_cb, "read,%x,%x,%x",
+            gdb_do_syscall(nios2_semi_u32_cb, "read,%x,%x,%x",
                            arg0, arg1, len);
             return;
         } else {
@@ -280,7 +228,7 @@ void do_nios2_semihosting(CPUNios2State *env)
         GET_ARG(2);
         len = arg2;
         if (use_gdb_syscalls()) {
-            gdb_do_syscall(nios2_semi_cb, "write,%x,%x,%x",
+            gdb_do_syscall(nios2_semi_u32_cb, "write,%x,%x,%x",
                            arg0, arg1, len);
             return;
         } else {
@@ -303,12 +251,11 @@ void do_nios2_semihosting(CPUNios2State *env)
             GET_ARG(3);
             off = (uint32_t)arg2 | ((uint64_t)arg1 << 32);
             if (use_gdb_syscalls()) {
-                nios2_semi_is_lseek = 1;
-                gdb_do_syscall(nios2_semi_cb, "lseek,%x,%lx,%x",
+                gdb_do_syscall(nios2_semi_u64_cb, "lseek,%x,%lx,%x",
                                arg0, off, arg3);
             } else {
                 off = lseek(arg0, off, arg3);
-                nios2_semi_return_u64(env, off, errno);
+                nios2_semi_u64_cb(cs, off, errno);
             }
             return;
         }
@@ -318,7 +265,7 @@ void do_nios2_semihosting(CPUNios2State *env)
         GET_ARG(2);
         GET_ARG(3);
         if (use_gdb_syscalls()) {
-            gdb_do_syscall(nios2_semi_cb, "rename,%s,%s",
+            gdb_do_syscall(nios2_semi_u32_cb, "rename,%s,%s",
                            arg0, (int)arg1, arg2, (int)arg3);
             return;
         } else {
@@ -338,7 +285,7 @@ void do_nios2_semihosting(CPUNios2State *env)
         GET_ARG(0);
         GET_ARG(1);
         if (use_gdb_syscalls()) {
-            gdb_do_syscall(nios2_semi_cb, "unlink,%s",
+            gdb_do_syscall(nios2_semi_u32_cb, "unlink,%s",
                            arg0, (int)arg1);
             return;
         } else {
@@ -357,7 +304,7 @@ void do_nios2_semihosting(CPUNios2State *env)
         GET_ARG(1);
         GET_ARG(2);
         if (use_gdb_syscalls()) {
-            gdb_do_syscall(nios2_semi_cb, "stat,%s,%x",
+            gdb_do_syscall(nios2_semi_u32_cb, "stat,%s,%x",
                            arg0, (int)arg1, arg2);
             return;
         } else {
@@ -380,7 +327,7 @@ void do_nios2_semihosting(CPUNios2State *env)
         GET_ARG(0);
         GET_ARG(1);
         if (use_gdb_syscalls()) {
-            gdb_do_syscall(nios2_semi_cb, "fstat,%x,%x",
+            gdb_do_syscall(nios2_semi_u32_cb, "fstat,%x,%x",
                            arg0, arg1);
             return;
         } else {
@@ -396,31 +343,28 @@ void do_nios2_semihosting(CPUNios2State *env)
         /* Only the tv parameter is used.  tz is assumed NULL.  */
         GET_ARG(0);
         if (use_gdb_syscalls()) {
-            gdb_do_syscall(nios2_semi_cb, "gettimeofday,%x,%x",
+            gdb_do_syscall(nios2_semi_u32_cb, "gettimeofday,%x,%x",
                            arg0, 0);
             return;
         } else {
-            qemu_timeval tv;
             struct gdb_timeval *p;
-            result = qemu_gettimeofday(&tv);
-            if (result == 0) {
-                p = lock_user(VERIFY_WRITE, arg0, sizeof(struct gdb_timeval),
-                              0);
-                if (!p) {
-                    result = -1;
-                    errno = EFAULT;
-                } else {
-                    p->tv_sec = cpu_to_be32(tv.tv_sec);
-                    p->tv_usec = cpu_to_be64(tv.tv_usec);
-                    unlock_user(p, arg0, sizeof(struct gdb_timeval));
-                }
+            int64_t rt = g_get_real_time();
+            p = lock_user(VERIFY_WRITE, arg0, sizeof(struct gdb_timeval), 0);
+            if (!p) {
+                result = -1;
+                errno = EFAULT;
+            } else {
+                result = 0;
+                p->tv_sec = cpu_to_be32(rt / G_USEC_PER_SEC);
+                p->tv_usec = cpu_to_be64(rt % G_USEC_PER_SEC);
+                unlock_user(p, arg0, sizeof(struct gdb_timeval));
             }
         }
         break;
     case HOSTED_ISATTY:
         GET_ARG(0);
         if (use_gdb_syscalls()) {
-            gdb_do_syscall(nios2_semi_cb, "isatty,%x", arg0);
+            gdb_do_syscall(nios2_semi_u32_cb, "isatty,%x", arg0);
             return;
         } else {
             result = isatty(arg0);
@@ -430,7 +374,7 @@ void do_nios2_semihosting(CPUNios2State *env)
         GET_ARG(0);
         GET_ARG(1);
         if (use_gdb_syscalls()) {
-            gdb_do_syscall(nios2_semi_cb, "system,%s",
+            gdb_do_syscall(nios2_semi_u32_cb, "system,%s",
                            arg0, (int)arg1);
             return;
         } else {
@@ -450,5 +394,5 @@ void do_nios2_semihosting(CPUNios2State *env)
         result = 0;
     }
 failed:
-    nios2_semi_return_u32(env, result, errno);
+    nios2_semi_u32_cb(cs, result, errno);
 }

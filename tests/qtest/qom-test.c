@@ -9,11 +9,10 @@
 
 #include "qemu/osdep.h"
 
-#include "qemu-common.h"
 #include "qapi/qmp/qdict.h"
 #include "qapi/qmp/qlist.h"
 #include "qemu/cutils.h"
-#include "libqos/libqtest.h"
+#include "libqtest.h"
 
 static void test_properties(QTestState *qts, const char *path, bool recurse)
 {

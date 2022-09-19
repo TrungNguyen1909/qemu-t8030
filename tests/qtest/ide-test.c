@@ -25,12 +25,11 @@
 #include "qemu/osdep.h"
 
 
-#include "libqos/libqtest.h"
+#include "libqtest.h"
 #include "libqos/libqos.h"
 #include "libqos/pci-pc.h"
 #include "libqos/malloc-pc.h"
 #include "qapi/qmp/qdict.h"
-#include "qemu-common.h"
 #include "qemu/bswap.h"
 #include "hw/pci/pci_ids.h"
 #include "hw/pci/pci_regs.h"

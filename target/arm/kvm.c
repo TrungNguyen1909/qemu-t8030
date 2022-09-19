@@ -13,7 +13,6 @@
 
 #include <linux/kvm.h>
 
-#include "qemu-common.h"
 #include "qemu/timer.h"
 #include "qemu/error-report.h"
 #include "qemu/main-loop.h"
@@ -541,7 +540,7 @@ bool write_kvmstate_to_list(ARMCPU *cpu)
             ret = kvm_vcpu_ioctl(cs, KVM_GET_ONE_REG, &r);
             break;
         default:
-            abort();
+            g_assert_not_reached();
         }
         if (ret) {
             ok = false;
@@ -576,7 +575,7 @@ bool write_list_to_kvmstate(ARMCPU *cpu, int level)
             r.addr = (uintptr_t)(cpu->cpreg_values + i);
             break;
         default:
-            abort();
+            g_assert_not_reached();
         }
         ret = kvm_vcpu_ioctl(cs, KVM_SET_ONE_REG, &r);
         if (ret) {
@@ -960,7 +959,7 @@ void kvm_arch_init_irq_routing(KVMState *s)
 int kvm_arch_irqchip_create(KVMState *s)
 {
     if (kvm_kernel_irqchip_split()) {
-        perror("-machine kernel_irqchip=split is not supported on ARM.");
+        error_report("-machine kernel_irqchip=split is not supported on ARM.");
         exit(1);
     }
 

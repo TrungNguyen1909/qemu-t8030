@@ -33,7 +33,7 @@
 #include "hw/usb/hcd-dwc3.h"
 #include "qapi/error.h"
 #include "qemu/log.h"
-#include "qemu-common.h"
+#include "qemu/cutils.h"
 #include "trace.h"
 
 //#define DEBUG_DWC3

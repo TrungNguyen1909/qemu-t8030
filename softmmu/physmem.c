@@ -18,7 +18,7 @@
  */
 
 #include "qemu/osdep.h"
-#include "qemu-common.h"
+#include "exec/page-vary.h"
 #include "qapi/error.h"
 
 #include "qemu/cutils.h"
@@ -669,7 +669,7 @@ void tcg_iommu_init_notifier_list(CPUState *cpu)
 
 /* Called from RCU critical section */
 MemoryRegionSection *
-address_space_translate_for_iotlb(CPUState *cpu, int asidx, hwaddr addr,
+address_space_translate_for_iotlb(CPUState *cpu, int asidx, hwaddr orig_addr,
                                   hwaddr *xlat, hwaddr *plen,
                                   MemTxAttrs attrs, int *prot)
 {
@@ -678,6 +678,7 @@ address_space_translate_for_iotlb(CPUState *cpu, int asidx, hwaddr addr,
     IOMMUMemoryRegionClass *imrc;
     IOMMUTLBEntry iotlb;
     int iommu_idx;
+    hwaddr addr = orig_addr;
     AddressSpaceDispatch *d =
         qatomic_rcu_read(&cpu->cpu_ases[asidx].memory_dispatch);
 
@@ -722,6 +723,16 @@ address_space_translate_for_iotlb(CPUState *cpu, int asidx, hwaddr addr,
     return section;
 
 translate_fail:
+    /*
+     * We should be given a page-aligned address -- certainly
+     * tlb_set_page_with_attrs() does so.  The page offset of xlat
+     * is used to index sections[], and PHYS_SECTION_UNASSIGNED = 0.
+     * The page portion of xlat will be logged by memory_region_access_valid()
+     * when this memory access is rejected, so use the original untranslated
+     * physical address.
+     */
+    assert((orig_addr & ~TARGET_PAGE_MASK) == 0);
+    *xlat = orig_addr;
     return &d->map.sections[PHYS_SECTION_UNASSIGNED];
 }
 
@@ -1383,11 +1394,11 @@ long qemu_maxrampagesize(void)
 #else
 long qemu_minrampagesize(void)
 {
-    return qemu_real_host_page_size;
+    return qemu_real_host_page_size();
 }
 long qemu_maxrampagesize(void)
 {
-    return qemu_real_host_page_size;
+    return qemu_real_host_page_size();
 }
 #endif
 
@@ -2163,7 +2174,7 @@ RAMBlock *qemu_ram_alloc_internal(ram_addr_t size, ram_addr_t max_size,
     new_block->max_length = max_size;
     assert(max_size >= size);
     new_block->fd = -1;
-    new_block->page_size = qemu_real_host_page_size;
+    new_block->page_size = qemu_real_host_page_size();
     new_block->host = host;
     new_block->flags = ram_flags;
     ram_block_add(new_block, &local_err);
@@ -2719,7 +2730,7 @@ void memory_region_flush_rom_device(MemoryRegion *mr, hwaddr addr, hwaddr size)
     invalidate_and_set_dirty(mr, addr, size);
 }
 
-static int memory_access_size(MemoryRegion *mr, unsigned l, hwaddr addr)
+int memory_access_size(MemoryRegion *mr, unsigned l, hwaddr addr)
 {
     unsigned access_size_max = mr->ops->valid.max_access_size;
 
@@ -2746,7 +2757,7 @@ static int memory_access_size(MemoryRegion *mr, unsigned l, hwaddr addr)
     return l;
 }
 
-static bool prepare_mmio_access(MemoryRegion *mr)
+bool prepare_mmio_access(MemoryRegion *mr)
 {
     bool release_lock = false;
 

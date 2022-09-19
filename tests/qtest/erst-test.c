@@ -10,8 +10,7 @@
 #include "qemu/osdep.h"
 #include <glib/gstdio.h>
 #include "libqos/libqos-pc.h"
-#include "libqos/libqtest.h"
-#include "qemu-common.h"
+#include "libqtest.h"
 
 #include "hw/pci/pci.h"
 

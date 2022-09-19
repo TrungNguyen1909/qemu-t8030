@@ -94,6 +94,7 @@ struct SCSIDiskState {
     uint16_t port_index;
     uint64_t max_unmap_size;
     uint64_t max_io_size;
+    uint32_t quirks;
     QEMUBH *bh;
     char *version;
     char *serial;
@@ -1078,12 +1079,14 @@ static int mode_sense_page(SCSIDiskState *s, int page, uint8_t **p_outbuf,
                            int page_control)
 {
     static const int mode_sense_valid[0x3f] = {
+        [MODE_PAGE_VENDOR_SPECIFIC]        = (1 << TYPE_DISK) | (1 << TYPE_ROM),
         [MODE_PAGE_HD_GEOMETRY]            = (1 << TYPE_DISK),
         [MODE_PAGE_FLEXIBLE_DISK_GEOMETRY] = (1 << TYPE_DISK),
         [MODE_PAGE_CACHING]                = (1 << TYPE_DISK) | (1 << TYPE_ROM),
         [MODE_PAGE_R_W_ERROR]              = (1 << TYPE_DISK) | (1 << TYPE_ROM),
         [MODE_PAGE_AUDIO_CTL]              = (1 << TYPE_ROM),
         [MODE_PAGE_CAPABILITIES]           = (1 << TYPE_ROM),
+        [MODE_PAGE_APPLE_VENDOR]           = (1 << TYPE_ROM),
     };
 
     uint8_t *p = *p_outbuf + 2;
@@ -1185,6 +1188,10 @@ static int mode_sense_page(SCSIDiskState *s, int page, uint8_t **p_outbuf,
     case MODE_PAGE_R_W_ERROR:
         length = 10;
         if (page_control == 1) { /* Changeable Values */
+            if (s->qdev.type == TYPE_ROM) {
+                /* Automatic Write Reallocation Enabled */
+                p[0] = 0x80;
+            }
             break;
         }
         p[0] = 0x80; /* Automatic Write Reallocation Enabled */
@@ -1228,6 +1235,36 @@ static int mode_sense_page(SCSIDiskState *s, int page, uint8_t **p_outbuf,
         p[19] = (16 * 176) & 0xff;
         break;
 
+     case MODE_PAGE_APPLE_VENDOR:
+        if (s->quirks & (1 << SCSI_DISK_QUIRK_MODE_PAGE_APPLE_VENDOR)) {
+            length = 0x1e;
+            if (page_control == 1) { /* Changeable Values */
+                break;
+            }
+
+            memset(p, 0, length);
+            strcpy((char *)p + 8, "APPLE COMPUTER, INC   ");
+            break;
+        } else {
+            return -1;
+        }
+
+    case MODE_PAGE_VENDOR_SPECIFIC:
+        if (s->qdev.type == TYPE_DISK && (s->quirks &
+            (1 << SCSI_DISK_QUIRK_MODE_PAGE_VENDOR_SPECIFIC_APPLE))) {
+            length = 0x2;
+            if (page_control == 1) { /* Changeable Values */
+                p[0] = 0xff;
+                p[1] = 0xff;
+                break;
+            }
+            p[0] = 0;
+            p[1] = 0;
+            break;
+        } else {
+            return -1;
+        }
+
     default:
         return -1;
     }
@@ -1263,10 +1300,27 @@ static int scsi_disk_emulate_mode_sense(SCSIDiskReq *r, uint8_t *outbuf)
             dev_specific_param |= 0x80; /* Readonly.  */
         }
     } else {
-        /* MMC prescribes that CD/DVD drives have no block descriptors,
-         * and defines no device-specific parameter.  */
-        dev_specific_param = 0x00;
-        dbd = true;
+        if (s->quirks & (1 << SCSI_DISK_QUIRK_MODE_SENSE_ROM_USE_DBD)) {
+            /* Use DBD from the request... */
+            dev_specific_param = 0x00;
+
+            /*
+             * ... unless we receive a request for MODE_PAGE_APPLE_VENDOR
+             * which should never return a block descriptor even though DBD is
+             * not set, otherwise CDROM detection fails in MacOS
+             */
+            if (s->quirks & (1 << SCSI_DISK_QUIRK_MODE_PAGE_APPLE_VENDOR) &&
+                page == MODE_PAGE_APPLE_VENDOR) {
+                dbd = true;
+            }
+        } else {
+            /*
+             * MMC prescribes that CD/DVD drives have no block descriptors,
+             * and defines no device-specific parameter.
+             */
+            dev_specific_param = 0x00;
+            dbd = true;
+        }
     }
 
     if (r->req.cmd.buf[0] == MODE_SENSE) {
@@ -1502,7 +1556,10 @@ static int mode_select_pages(SCSIDiskReq *r, uint8_t *p, int len, bool change)
             goto invalid_param;
         }
         if (page_len > len) {
-            goto invalid_param_len;
+            if (!(s->quirks & SCSI_DISK_QUIRK_MODE_PAGE_TRUNCATED)) {
+                goto invalid_param_len;
+            }
+            trace_scsi_disk_mode_select_page_truncated(page, page_len, len);
         }
 
         if (!change) {
@@ -1534,12 +1591,15 @@ static void scsi_disk_emulate_mode_select(SCSIDiskReq *r, uint8_t *inbuf)
     int cmd = r->req.cmd.buf[0];
     int len = r->req.cmd.xfer;
     int hdr_len = (cmd == MODE_SELECT ? 4 : 8);
-    int bd_len;
+    int bd_len, bs;
     int pass;
 
-    /* We only support PF=1, SP=0.  */
     if ((r->req.cmd.buf[1] & 0x11) != 0x10) {
-        goto invalid_field;
+        if (!(s->quirks &
+            (1 << SCSI_DISK_QUIRK_MODE_PAGE_VENDOR_SPECIFIC_APPLE))) {
+            /* We only support PF=1, SP=0.  */
+            goto invalid_field;
+        }
     }
 
     if (len < hdr_len) {
@@ -1554,6 +1614,22 @@ static void scsi_disk_emulate_mode_select(SCSIDiskReq *r, uint8_t *inbuf)
     }
     if (bd_len != 0 && bd_len != 8) {
         goto invalid_param;
+    }
+
+    /* Allow changing the block size */
+    if (bd_len) {
+        bs = p[5] << 16 | p[6] << 8 | p[7];
+
+        /*
+         * Since the existing code only checks/updates bits 8-15 of the block
+         * size, restrict ourselves to the same requirement for now to ensure
+         * that a block size set by a block descriptor and then read back by
+         * a subsequent SCSI command will be the same
+         */
+        if (bs && !(bs & ~0xff00) && bs != s->qdev.blocksize) {
+            s->qdev.blocksize = bs;
+            trace_scsi_disk_mode_select_set_blocksize(s->qdev.blocksize);
+        }
     }
 
     len -= bd_len;
@@ -1783,7 +1859,7 @@ static void scsi_disk_emulate_write_same(SCSIDiskReq *r, uint8_t *inbuf)
     uint32_t nb_sectors = scsi_data_cdb_xfer(r->req.cmd.buf);
     WriteSameCBData *data;
     uint8_t *buf;
-    int i;
+    int i, l;
 
     /* Fail if PBDATA=1 or LBDATA=1 or ANCHOR=1.  */
     if (nb_sectors == 0 || (req->cmd.buf[1] & 0x16)) {
@@ -1825,8 +1901,9 @@ static void scsi_disk_emulate_write_same(SCSIDiskReq *r, uint8_t *inbuf)
                                               data->iov.iov_len);
     qemu_iovec_init_external(&data->qiov, &data->iov, 1);
 
-    for (i = 0; i < data->iov.iov_len; i += s->qdev.blocksize) {
-        memcpy(&buf[i], inbuf, s->qdev.blocksize);
+    for (i = 0; i < data->iov.iov_len; i += l) {
+        l = MIN(s->qdev.blocksize, data->iov.iov_len - i);
+        memcpy(&buf[i], inbuf, l);
     }
 
     scsi_req_ref(&r->req);
@@ -2127,6 +2204,9 @@ static int32_t scsi_disk_emulate_command(SCSIRequest *req, uint8_t *buf)
         trace_scsi_disk_emulate_command_WRITE_SAME(
                 req->cmd.buf[0] == WRITE_SAME_10 ? 10 : 16, r->req.cmd.xfer);
         break;
+    case FORMAT_UNIT:
+        trace_scsi_disk_emulate_command_FORMAT_UNIT(r->req.cmd.xfer);
+        break;
     default:
         trace_scsi_disk_emulate_command_UNKNOWN(buf[0],
                                                 scsi_command_name(buf[0]));
@@ -2419,7 +2499,6 @@ static void scsi_realize(SCSIDevice *dev, Error **errp)
     } else {
         blk_set_dev_ops(s->qdev.conf.blk, &scsi_disk_block_ops, s);
     }
-    blk_set_guest_block_size(s->qdev.conf.blk, s->qdev.blocksize);
 
     blk_iostatus_enable(s->qdev.conf.blk);
 
@@ -2533,6 +2612,7 @@ static const SCSIReqOps *const scsi_disk_reqops_dispatch[256] = {
     [VERIFY_10]                       = &scsi_disk_emulate_reqops,
     [VERIFY_12]                       = &scsi_disk_emulate_reqops,
     [VERIFY_16]                       = &scsi_disk_emulate_reqops,
+    [FORMAT_UNIT]                     = &scsi_disk_emulate_reqops,
 
     [READ_6]                          = &scsi_disk_dma_reqops,
     [READ_10]                         = &scsi_disk_dma_reqops,
@@ -3037,6 +3117,9 @@ static Property scsi_hd_properties[] = {
     DEFINE_PROP_UINT16("rotation_rate", SCSIDiskState, rotation_rate, 0),
     DEFINE_PROP_INT32("scsi_version", SCSIDiskState, qdev.default_scsi_version,
                       5),
+    DEFINE_PROP_BIT("quirk_mode_page_vendor_specific_apple", SCSIDiskState,
+                    quirks, SCSI_DISK_QUIRK_MODE_PAGE_VENDOR_SPECIFIC_APPLE,
+                    0),
     DEFINE_BLOCK_CHS_PROPERTIES(SCSIDiskState, qdev.conf),
     DEFINE_PROP_END_OF_LIST(),
 };
@@ -3085,6 +3168,15 @@ static Property scsi_cd_properties[] = {
                        DEFAULT_MAX_IO_SIZE),
     DEFINE_PROP_INT32("scsi_version", SCSIDiskState, qdev.default_scsi_version,
                       5),
+    DEFINE_PROP_BIT("quirk_mode_page_apple_vendor", SCSIDiskState, quirks,
+                    SCSI_DISK_QUIRK_MODE_PAGE_APPLE_VENDOR, 0),
+    DEFINE_PROP_BIT("quirk_mode_sense_rom_use_dbd", SCSIDiskState, quirks,
+                    SCSI_DISK_QUIRK_MODE_SENSE_ROM_USE_DBD, 0),
+    DEFINE_PROP_BIT("quirk_mode_page_vendor_specific_apple", SCSIDiskState,
+                    quirks, SCSI_DISK_QUIRK_MODE_PAGE_VENDOR_SPECIFIC_APPLE,
+                    0),
+    DEFINE_PROP_BIT("quirk_mode_page_truncated", SCSIDiskState, quirks,
+                    SCSI_DISK_QUIRK_MODE_PAGE_TRUNCATED, 0),
     DEFINE_PROP_END_OF_LIST(),
 };
 

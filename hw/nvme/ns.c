@@ -29,7 +29,8 @@ void nvme_ns_init_format(NvmeNamespace *ns)
 {
     NvmeIdNs *id_ns = &ns->id_ns;
     BlockDriverInfo bdi;
-    int npdg, nlbas, ret;
+    int npdg, ret;
+    int64_t nlbas;
 
     ns->lbaf = id_ns->lbaf[NVME_ID_NS_FLBAS_INDEX(id_ns->flbas)];
     ns->lbasz = 1 << ns->lbaf.ds;
@@ -43,7 +44,7 @@ void nvme_ns_init_format(NvmeNamespace *ns)
     id_ns->nuse = id_ns->ncap;
     id_ns->nstype = ns->params.nstype;
 
-    ns->moff = (int64_t)nlbas << ns->lbaf.ds;
+    ns->moff = nlbas << ns->lbaf.ds;
 
     npdg = ns->blkconf.discard_granularity / ns->lbasz;
 
@@ -546,6 +547,8 @@ static void nvme_ns_realize(DeviceState *dev, Error **errp)
     int i;
 
     if (!n->subsys) {
+        /* If no subsys, the ns cannot be attached to more than one ctrl. */
+        ns->params.shared = false;
         if (ns->params.detached) {
             error_setg(errp, "detached requires that the nvme device is "
                        "linked to an nvme-subsys device");
@@ -597,7 +600,7 @@ static void nvme_ns_realize(DeviceState *dev, Error **errp)
             for (i = 0; i < ARRAY_SIZE(subsys->ctrls); i++) {
                 NvmeCtrl *ctrl = subsys->ctrls[i];
 
-                if (ctrl) {
+                if (ctrl && ctrl != SUBSYS_SLOT_RSVD) {
                     nvme_attach_ns(ctrl, ns);
                 }
             }
@@ -615,7 +618,7 @@ static Property nvme_ns_props[] = {
     DEFINE_PROP_BOOL("shared", NvmeNamespace, params.shared, true),
     DEFINE_PROP_UINT32("nsid", NvmeNamespace, params.nsid, 0),
     DEFINE_PROP_UINT32("nstype", NvmeNamespace, params.nstype, 0),
-    DEFINE_PROP_UUID("uuid", NvmeNamespace, params.uuid),
+    DEFINE_PROP_UUID_NODEFAULT("uuid", NvmeNamespace, params.uuid),
     DEFINE_PROP_UINT64("eui64", NvmeNamespace, params.eui64, 0),
     DEFINE_PROP_UINT16("ms", NvmeNamespace, params.ms, 0),
     DEFINE_PROP_UINT8("mset", NvmeNamespace, params.mset, 0),
@@ -642,7 +645,7 @@ static Property nvme_ns_props[] = {
     DEFINE_PROP_SIZE("zoned.zrwas", NvmeNamespace, params.zrwas, 0),
     DEFINE_PROP_SIZE("zoned.zrwafg", NvmeNamespace, params.zrwafg, -1),
     DEFINE_PROP_BOOL("eui64-default", NvmeNamespace, params.eui64_default,
-                     true),
+                     false),
     DEFINE_PROP_END_OF_LIST(),
 };
 

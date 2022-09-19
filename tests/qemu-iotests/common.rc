@@ -17,6 +17,17 @@
 # along with this program.  If not, see <http://www.gnu.org/licenses/>.
 #
 
+export LANG=C
+
+PATH=".:$PATH"
+
+HOSTOS=$(uname -s)
+arch=$(uname -m)
+[[ "$arch" =~ "ppc64" ]] && qemu_arch=ppc64 || qemu_arch="$arch"
+
+# make sure we have a standard umask
+umask 022
+
 # bail out, setting up .notrun file
 _notrun()
 {
@@ -120,18 +131,14 @@ peek_file_raw()
     dd if="$1" bs=1 skip="$2" count="$3" status=none
 }
 
-config=common.config
-test -f $config || config=../common.config
-if ! test -f $config
-then
-    echo "$0: failed to find common.config"
-    exit 1
-fi
-if ! . $config
-    then
-    echo "$0: failed to source common.config"
-    exit 1
-fi
+_optstr_add()
+{
+    if [ -n "$1" ]; then
+        echo "$1,$2"
+    else
+        echo "$2"
+    fi
+}
 
 # Set the variables to the empty string to turn Valgrind off
 # for specific processes, e.g.
@@ -975,7 +982,7 @@ _require_large_file()
 #
 _require_devices()
 {
-    available=$($QEMU -M none -device help | \
+    available=$($QEMU -M none -device help 2> /dev/null | \
                 grep ^name | sed -e 's/^name "//' -e 's/".*$//')
     for device
     do
@@ -987,7 +994,7 @@ _require_devices()
 
 _require_one_device_of()
 {
-    available=$($QEMU -M none -device help | \
+    available=$($QEMU -M none -device help 2> /dev/null | \
                 grep ^name | sed -e 's/^name "//' -e 's/".*$//')
     for device
     do

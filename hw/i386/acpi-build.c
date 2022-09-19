@@ -28,23 +28,23 @@
 #include "qemu/bitmap.h"
 #include "qemu/error-report.h"
 #include "hw/pci/pci.h"
+#include "hw/cxl/cxl.h"
 #include "hw/core/cpu.h"
 #include "target/i386/cpu.h"
-#include "hw/misc/pvpanic.h"
 #include "hw/timer/hpet.h"
 #include "hw/acpi/acpi-defs.h"
 #include "hw/acpi/acpi.h"
 #include "hw/acpi/cpu.h"
 #include "hw/nvram/fw_cfg.h"
 #include "hw/acpi/bios-linker-loader.h"
-#include "hw/isa/isa.h"
+#include "hw/acpi/acpi_aml_interface.h"
 #include "hw/input/i8042.h"
-#include "hw/block/fdc.h"
 #include "hw/acpi/memory_hotplug.h"
 #include "sysemu/tpm.h"
 #include "hw/acpi/tpm.h"
 #include "hw/acpi/vmgenid.h"
 #include "hw/acpi/erst.h"
+#include "hw/acpi/piix4.h"
 #include "sysemu/tpm_backend.h"
 #include "hw/rtc/mc146818rtc_regs.h"
 #include "migration/vmstate.h"
@@ -66,15 +66,16 @@
 #include "hw/acpi/aml-build.h"
 #include "hw/acpi/utils.h"
 #include "hw/acpi/pci.h"
+#include "hw/acpi/cxl.h"
 
 #include "qom/qom-qobject.h"
 #include "hw/i386/amd_iommu.h"
 #include "hw/i386/intel_iommu.h"
 #include "hw/virtio/virtio-iommu.h"
 
-#include "hw/acpi/ipmi.h"
 #include "hw/acpi/hmat.h"
 #include "hw/acpi/viot.h"
+#include "hw/acpi/cxl.h"
 
 #include CONFIG_DEVICES
 
@@ -118,8 +119,6 @@ typedef struct AcpiMiscInfo {
 #endif
     const unsigned char *dsdt_code;
     unsigned dsdt_size;
-    uint16_t pvpanic_port;
-    uint16_t applesmc_io_base;
 } AcpiMiscInfo;
 
 typedef struct AcpiBuildPciBusHotplugState {
@@ -304,8 +303,6 @@ static void acpi_get_misc_info(AcpiMiscInfo *info)
 #ifdef CONFIG_TPM
     info->tpm_version = tpm_get_version(tpm_find());
 #endif
-    info->pvpanic_port = pvpanic_port();
-    info->applesmc_io_base = applesmc_port();
 }
 
 /*
@@ -862,21 +859,6 @@ static Aml *build_vmbus_device_aml(VMBusBridge *vmbus_bridge)
     return dev;
 }
 
-static void build_isa_devices_aml(Aml *table)
-{
-    bool ambiguous;
-    Object *obj = object_resolve_path_type("", TYPE_ISA_BUS, &ambiguous);
-    Aml *scope;
-
-    assert(obj && !ambiguous);
-
-    scope = aml_scope("_SB.PCI0.ISA");
-    build_acpi_ipmi_devices(scope, BUS(obj), "\\_SB.PCI0.ISA");
-    isa_build_aml(ISA_BUS(obj), scope);
-
-    aml_append(table, scope);
-}
-
 static void build_dbg_aml(Aml *table)
 {
     Aml *field;
@@ -1262,15 +1244,22 @@ static void build_q35_isa_bridge(Aml *table)
 {
     Aml *dev;
     Aml *scope;
+    Object *obj;
+    bool ambiguous;
+
+    /*
+     * temporarily fish out isa bridge, build_q35_isa_bridge() will be dropped
+     * once PCI is converted to AcpiDevAmlIf and would be ble to generate
+     * AML for bridge itself
+     */
+    obj = object_resolve_path_type("", TYPE_ICH9_LPC_DEVICE, &ambiguous);
+    assert(obj && !ambiguous);
 
     scope =  aml_scope("_SB.PCI0");
     dev = aml_device("ISA");
     aml_append(dev, aml_name_decl("_ADR", aml_int(0x001F0000)));
 
-    /* ICH9 PCI to ISA irq remapping */
-    aml_append(dev, aml_operation_region("PIRQ", AML_PCI_CONFIG,
-                                         aml_int(0x60), 0x0C));
-
+    call_dev_aml_func(DEVICE(obj), dev);
     aml_append(scope, dev);
     aml_append(table, scope);
 }
@@ -1279,15 +1268,22 @@ static void build_piix4_isa_bridge(Aml *table)
 {
     Aml *dev;
     Aml *scope;
+    Object *obj;
+    bool ambiguous;
+
+    /*
+     * temporarily fish out isa bridge, build_piix4_isa_bridge() will be dropped
+     * once PCI is converted to AcpiDevAmlIf and would be ble to generate
+     * AML for bridge itself
+     */
+    obj = object_resolve_path_type("", TYPE_PIIX3_PCI_DEVICE, &ambiguous);
+    assert(obj && !ambiguous);
 
     scope =  aml_scope("_SB.PCI0");
     dev = aml_device("ISA");
     aml_append(dev, aml_name_decl("_ADR", aml_int(0x00010000)));
 
-    /* PIIX PCI to ISA irq remapping */
-    aml_append(dev, aml_operation_region("P40C", AML_PCI_CONFIG,
-                                         aml_int(0x60), 0x04));
-
+    call_dev_aml_func(DEVICE(obj), dev);
     aml_append(scope, dev);
     aml_append(table, scope);
 }
@@ -1398,13 +1394,37 @@ static Aml *build_q35_osc_method(bool enable_native_pcie_hotplug)
     return method;
 }
 
-static void build_smb0(Aml *table, I2CBus *smbus, int devnr, int func)
+static void build_smb0(Aml *table, int devnr, int func)
 {
     Aml *scope = aml_scope("_SB.PCI0");
     Aml *dev = aml_device("SMB0");
+    bool ambiguous;
+    Object *obj;
+    /*
+     * temporarily fish out device hosting SMBUS, build_smb0 will be gone once
+     * PCI enumeration will be switched to call_dev_aml_func()
+     */
+    obj = object_resolve_path_type("", TYPE_ICH9_SMB_DEVICE, &ambiguous);
+    assert(obj && !ambiguous);
 
     aml_append(dev, aml_name_decl("_ADR", aml_int(devnr << 16 | func)));
-    build_acpi_ipmi_devices(dev, BUS(smbus), "\\_SB.PCI0.SMB0");
+    call_dev_aml_func(DEVICE(obj), dev);
+    aml_append(scope, dev);
+    aml_append(table, scope);
+}
+
+static void build_acpi0017(Aml *table)
+{
+    Aml *dev, *scope, *method;
+
+    scope =  aml_scope("_SB");
+    dev = aml_device("CXLM");
+    aml_append(dev, aml_name_decl("_HID", aml_string("ACPI0017")));
+
+    method = aml_method("_STA", 0, AML_NOTSERIALIZED);
+    aml_append(method, aml_return(aml_int(0x01)));
+    aml_append(dev, method);
+
     aml_append(scope, dev);
     aml_append(table, scope);
 }
@@ -1428,6 +1448,7 @@ build_dsdt(GArray *table_data, BIOSLinker *linker,
 #ifdef CONFIG_TPM
     TPMIf *tpm = tpm_find();
 #endif
+    bool cxl_present = false;
     int i;
     VMBusBridge *vmbus_bridge = vmbus_bridge_find();
     AcpiTable table = { .sig = "DSDT", .rev = 1, .oem_id = x86ms->oem_id,
@@ -1450,7 +1471,6 @@ build_dsdt(GArray *table_data, BIOSLinker *linker,
             build_hpet_aml(dsdt);
         }
         build_piix4_isa_bridge(dsdt);
-        build_isa_devices_aml(dsdt);
         if (pm->pcihp_bridge_en || pm->pcihp_root_en) {
             build_x86_acpi_pci_hotplug(dsdt, pm->pcihp_io_base);
         }
@@ -1499,13 +1519,12 @@ build_dsdt(GArray *table_data, BIOSLinker *linker,
             build_hpet_aml(dsdt);
         }
         build_q35_isa_bridge(dsdt);
-        build_isa_devices_aml(dsdt);
         if (pm->pcihp_bridge_en) {
             build_x86_acpi_pci_hotplug(dsdt, pm->pcihp_io_base);
         }
         build_q35_pci0_int(dsdt);
-        if (pcms->smbus && !pcmc->do_not_add_smb_acpi) {
-            build_smb0(dsdt, pcms->smbus, ICH9_SMB_DEV, ICH9_SMB_FUNC);
+        if (pcms->smbus) {
+            build_smb0(dsdt, ICH9_SMB_DEV, ICH9_SMB_FUNC);
         }
     }
 
@@ -1572,10 +1591,25 @@ build_dsdt(GArray *table_data, BIOSLinker *linker,
             }
 
             scope = aml_scope("\\_SB");
-            dev = aml_device("PC%.02X", bus_num);
+
+            if (pci_bus_is_cxl(bus)) {
+                dev = aml_device("CL%.02X", bus_num);
+            } else {
+                dev = aml_device("PC%.02X", bus_num);
+            }
             aml_append(dev, aml_name_decl("_UID", aml_int(bus_num)));
             aml_append(dev, aml_name_decl("_BBN", aml_int(bus_num)));
-            if (pci_bus_is_express(bus)) {
+            if (pci_bus_is_cxl(bus)) {
+                struct Aml *pkg = aml_package(2);
+
+                aml_append(dev, aml_name_decl("_HID", aml_string("ACPI0016")));
+                aml_append(pkg, aml_eisaid("PNP0A08"));
+                aml_append(pkg, aml_eisaid("PNP0A03"));
+                aml_append(dev, aml_name_decl("_CID", pkg));
+                aml_append(dev, aml_name_decl("_ADR", aml_int(0)));
+                aml_append(dev, aml_name_decl("_UID", aml_int(bus_num)));
+                build_cxl_osc_method(dev);
+            } else if (pci_bus_is_express(bus)) {
                 aml_append(dev, aml_name_decl("_HID", aml_eisaid("PNP0A08")));
                 aml_append(dev, aml_name_decl("_CID", aml_eisaid("PNP0A03")));
 
@@ -1595,7 +1629,21 @@ build_dsdt(GArray *table_data, BIOSLinker *linker,
             aml_append(dev, aml_name_decl("_CRS", crs));
             aml_append(scope, dev);
             aml_append(dsdt, scope);
+
+            /* Handle the ranges for the PXB expanders */
+            if (pci_bus_is_cxl(bus)) {
+                MemoryRegion *mr = &pcms->cxl_devices_state.host_mr;
+                uint64_t base = mr->addr;
+
+                cxl_present = true;
+                crs_range_insert(crs_range_set.mem_ranges, base,
+                                 base + memory_region_size(mr) - 1);
+            }
         }
+    }
+
+    if (cxl_present) {
+        build_acpi0017(dsdt);
     }
 
     /*
@@ -1747,110 +1795,15 @@ build_dsdt(GArray *table_data, BIOSLinker *linker,
         aml_append(dsdt, scope);
     }
 
-    if (misc->applesmc_io_base) {
-        scope = aml_scope("\\_SB.PCI0.ISA");
-        dev = aml_device("SMC");
-
-        aml_append(dev, aml_name_decl("_HID", aml_eisaid("APP0001")));
-        /* device present, functioning, decoding, not shown in UI */
-        aml_append(dev, aml_name_decl("_STA", aml_int(0xB)));
-
-        crs = aml_resource_template();
-        aml_append(crs,
-            aml_io(AML_DECODE16, misc->applesmc_io_base, misc->applesmc_io_base,
-                   0x01, APPLESMC_MAX_DATA_LENGTH)
-        );
-        aml_append(crs, aml_irq_no_flags(6));
-        aml_append(dev, aml_name_decl("_CRS", crs));
-
-        aml_append(scope, dev);
-        aml_append(dsdt, scope);
-    }
-
-    if (misc->pvpanic_port) {
-        scope = aml_scope("\\_SB.PCI0.ISA");
-
-        dev = aml_device("PEVT");
-        aml_append(dev, aml_name_decl("_HID", aml_string("QEMU0001")));
-
-        crs = aml_resource_template();
-        aml_append(crs,
-            aml_io(AML_DECODE16, misc->pvpanic_port, misc->pvpanic_port, 1, 1)
-        );
-        aml_append(dev, aml_name_decl("_CRS", crs));
-
-        aml_append(dev, aml_operation_region("PEOR", AML_SYSTEM_IO,
-                                              aml_int(misc->pvpanic_port), 1));
-        field = aml_field("PEOR", AML_BYTE_ACC, AML_NOLOCK, AML_PRESERVE);
-        aml_append(field, aml_named_field("PEPT", 8));
-        aml_append(dev, field);
-
-        /* device present, functioning, decoding, shown in UI */
-        aml_append(dev, aml_name_decl("_STA", aml_int(0xF)));
-
-        method = aml_method("RDPT", 0, AML_NOTSERIALIZED);
-        aml_append(method, aml_store(aml_name("PEPT"), aml_local(0)));
-        aml_append(method, aml_return(aml_local(0)));
-        aml_append(dev, method);
-
-        method = aml_method("WRPT", 1, AML_NOTSERIALIZED);
-        aml_append(method, aml_store(aml_arg(0), aml_name("PEPT")));
-        aml_append(dev, method);
-
-        aml_append(scope, dev);
-        aml_append(dsdt, scope);
-    }
-
     sb_scope = aml_scope("\\_SB");
     {
-        Object *pci_host;
-        PCIBus *bus = NULL;
-
-        pci_host = acpi_get_i386_pci_host();
+        Object *pci_host = acpi_get_i386_pci_host();
 
         if (pci_host) {
-            bus = PCI_HOST_BRIDGE(pci_host)->bus;
-        }
-
-        if (bus) {
+            PCIBus *bus = PCI_HOST_BRIDGE(pci_host)->bus;
             Aml *scope = aml_scope("PCI0");
             /* Scan all PCI buses. Generate tables to support hotplug. */
             build_append_pci_bus_devices(scope, bus, pm->pcihp_bridge_en);
-
-#ifdef CONFIG_TPM
-            if (TPM_IS_TIS_ISA(tpm)) {
-                if (misc->tpm_version == TPM_VERSION_2_0) {
-                    dev = aml_device("TPM");
-                    aml_append(dev, aml_name_decl("_HID",
-                                                  aml_string("MSFT0101")));
-                    aml_append(dev,
-                               aml_name_decl("_STR",
-                                             aml_string("TPM 2.0 Device")));
-                } else {
-                    dev = aml_device("ISA.TPM");
-                    aml_append(dev, aml_name_decl("_HID",
-                                                  aml_eisaid("PNP0C31")));
-                }
-                aml_append(dev, aml_name_decl("_UID", aml_int(1)));
-
-                aml_append(dev, aml_name_decl("_STA", aml_int(0xF)));
-                crs = aml_resource_template();
-                aml_append(crs, aml_memory32_fixed(TPM_TIS_ADDR_BASE,
-                           TPM_TIS_ADDR_SIZE, AML_READ_WRITE));
-                /*
-                    FIXME: TPM_TIS_IRQ=5 conflicts with PNP0C0F irqs,
-                    Rewrite to take IRQ from TPM device model and
-                    fix default IRQ value there to use some unused IRQ
-                 */
-                /* aml_append(crs, aml_irq_no_flags(TPM_TIS_IRQ)); */
-                aml_append(dev, aml_name_decl("_CRS", crs));
-
-                tpm_build_ppi_acpi(tpm, dev);
-
-                aml_append(scope, dev);
-            }
-#endif
-
             aml_append(sb_scope, scope);
         }
     }
@@ -2071,7 +2024,7 @@ build_srat(GArray *table_data, BIOSLinker *linker, MachineState *machine)
                 build_srat_memory(table_data, mem_base, mem_len, i - 1,
                                   MEM_AFFINITY_ENABLED);
             }
-            mem_base = 1ULL << 32;
+            mem_base = x86ms->above_4g_mem_start;
             mem_len = next_base - x86ms->below_4g_mem_size;
             next_base = mem_base + mem_len;
         }
@@ -2661,6 +2614,10 @@ void acpi_build(AcpiBuildTables *tables, MachineState *machine)
         nvdimm_build_acpi(table_offsets, tables_blob, tables->linker,
                           machine->nvdimms_state, machine->ram_slots,
                           x86ms->oem_id, x86ms->oem_table_id);
+    }
+    if (pcms->cxl_devices_state.is_enabled) {
+        cxl_build_cedt(table_offsets, tables_blob, tables->linker,
+                       x86ms->oem_id, x86ms->oem_table_id, &pcms->cxl_devices_state);
     }
 
     acpi_add_table(table_offsets, tables_blob);

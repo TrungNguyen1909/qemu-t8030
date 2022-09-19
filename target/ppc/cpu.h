@@ -21,9 +21,11 @@
 #define PPC_CPU_H
 
 #include "qemu/int128.h"
+#include "qemu/cpu-float.h"
 #include "exec/cpu-defs.h"
 #include "cpu-qom.h"
 #include "qom/object.h"
+#include "hw/registerfields.h"
 
 #define TCG_GUEST_DEFAULT_MO 0
 
@@ -36,6 +38,7 @@
 #define PPC_ELF_MACHINE     EM_PPC
 #endif
 
+#define PPC_BIT_NR(bit)         (63 - (bit))
 #define PPC_BIT(bit)            (0x8000000000000000ULL >> (bit))
 #define PPC_BIT32(bit)          (0x80000000 >> (bit))
 #define PPC_BIT8(bit)           (0x80 >> (bit))
@@ -43,6 +46,18 @@
 #define PPC_BITMASK32(bs, be)   ((PPC_BIT32(bs) - PPC_BIT32(be)) | \
                                  PPC_BIT32(bs))
 #define PPC_BITMASK8(bs, be)    ((PPC_BIT8(bs) - PPC_BIT8(be)) | PPC_BIT8(bs))
+
+/*
+ * QEMU version of the GETFIELD/SETFIELD macros from skiboot
+ *
+ * It might be better to use the existing extract64() and
+ * deposit64() but this means that all the register definitions will
+ * change and become incompatible with the ones found in skiboot.
+ */
+#define MASK_TO_LSH(m)          (__builtin_ffsll(m) - 1)
+#define GETFIELD(m, v)          (((v) & (m)) >> MASK_TO_LSH(m))
+#define SETFIELD(m, v, val) \
+        (((v) & ~(m)) | ((((typeof(v))(val)) << MASK_TO_LSH(m)) & (m)))
 
 /*****************************************************************************/
 /* Exception vectors definitions                                             */
@@ -224,6 +239,7 @@ typedef union _ppc_vsr_t {
     int16_t s16[8];
     int32_t s32[4];
     int64_t s64[2];
+    float16 f16[8];
     float32 f32[4];
     float64 f64[2];
     float128 f128;
@@ -235,6 +251,7 @@ typedef union _ppc_vsr_t {
 
 typedef ppc_vsr_t ppc_avr_t;
 typedef ppc_vsr_t ppc_fprp_t;
+typedef ppc_vsr_t ppc_acc_t;
 
 #if !defined(CONFIG_USER_ONLY)
 /* Software TLB cache */
@@ -308,49 +325,106 @@ typedef enum {
 
 /*****************************************************************************/
 /* Machine state register bits definition                                    */
-#define MSR_SF   63 /* Sixty-four-bit mode                            hflags */
-#define MSR_TAG  62 /* Tag-active mode (POWERx ?)                            */
-#define MSR_ISF  61 /* Sixty-four-bit interrupt mode on 630                  */
-#define MSR_HV   60 /* hypervisor state                               hflags */
-#define MSR_TS0  34 /* Transactional state, 2 bits (Book3s)                  */
-#define MSR_TS1  33
-#define MSR_TM   32 /* Transactional Memory Available (Book3s)               */
-#define MSR_CM   31 /* Computation mode for BookE                     hflags */
-#define MSR_ICM  30 /* Interrupt computation mode for BookE                  */
-#define MSR_GS   28 /* guest state for BookE                                 */
-#define MSR_UCLE 26 /* User-mode cache lock enable for BookE                 */
-#define MSR_VR   25 /* altivec available                            x hflags */
-#define MSR_SPE  25 /* SPE enable for BookE                         x hflags */
-#define MSR_VSX  23 /* Vector Scalar Extension (ISA 2.06 and later) x hflags */
-#define MSR_S    22 /* Secure state                                          */
-#define MSR_KEY  19 /* key bit on 603e                                       */
-#define MSR_POW  18 /* Power management                                      */
-#define MSR_WE   18 /* Wait State Enable on 405                              */
-#define MSR_TGPR 17 /* TGPR usage on 602/603                        x        */
-#define MSR_CE   17 /* Critical interrupt enable on embedded PowerPC x       */
-#define MSR_ILE  16 /* Interrupt little-endian mode                          */
-#define MSR_EE   15 /* External interrupt enable                             */
-#define MSR_PR   14 /* Problem state                                  hflags */
-#define MSR_FP   13 /* Floating point available                       hflags */
-#define MSR_ME   12 /* Machine check interrupt enable                        */
-#define MSR_FE0  11 /* Floating point exception mode 0                       */
-#define MSR_SE   10 /* Single-step trace enable                     x hflags */
-#define MSR_DWE  10 /* Debug wait enable on 405                     x        */
-#define MSR_UBLE 10 /* User BTB lock enable on e500                 x        */
-#define MSR_BE   9  /* Branch trace enable                          x hflags */
-#define MSR_DE   9  /* Debug interrupts enable on embedded PowerPC  x        */
-#define MSR_FE1  8  /* Floating point exception mode 1                       */
-#define MSR_AL   7  /* AL bit on POWER                                       */
-#define MSR_EP   6  /* Exception prefix on 601                               */
-#define MSR_IR   5  /* Instruction relocate                                  */
-#define MSR_DR   4  /* Data relocate                                         */
-#define MSR_IS   5  /* Instruction address space (BookE)                     */
-#define MSR_DS   4  /* Data address space (BookE)                            */
-#define MSR_PE   3  /* Protection enable on 403                              */
-#define MSR_PX   2  /* Protection exclusive on 403                  x        */
-#define MSR_PMM  2  /* Performance monitor mark on POWER            x        */
-#define MSR_RI   1  /* Recoverable interrupt                        1        */
-#define MSR_LE   0  /* Little-endian mode                           1 hflags */
+#define MSR_SF   PPC_BIT_NR(0)  /* Sixty-four-bit mode                hflags */
+#define MSR_TAG  PPC_BIT_NR(1)  /* Tag-active mode (POWERx ?)                */
+#define MSR_ISF  PPC_BIT_NR(2)  /* Sixty-four-bit interrupt mode on 630      */
+#define MSR_HV   PPC_BIT_NR(3)  /* hypervisor state                   hflags */
+#define MSR_TS0  PPC_BIT_NR(29) /* Transactional state, 2 bits (Book3s)      */
+#define MSR_TS1  PPC_BIT_NR(30)
+#define MSR_TM   PPC_BIT_NR(31) /* Transactional Memory Available (Book3s)   */
+#define MSR_CM   PPC_BIT_NR(32) /* Computation mode for BookE         hflags */
+#define MSR_ICM  PPC_BIT_NR(33) /* Interrupt computation mode for BookE      */
+#define MSR_GS   PPC_BIT_NR(35) /* guest state for BookE                     */
+#define MSR_UCLE PPC_BIT_NR(37) /* User-mode cache lock enable for BookE     */
+#define MSR_VR   PPC_BIT_NR(38) /* altivec available                x hflags */
+#define MSR_SPE  PPC_BIT_NR(38) /* SPE enable for BookE             x hflags */
+#define MSR_VSX  PPC_BIT_NR(40) /* Vector Scalar Extension (>= 2.06)x hflags */
+#define MSR_S    PPC_BIT_NR(41) /* Secure state                              */
+#define MSR_KEY  PPC_BIT_NR(44) /* key bit on 603e                           */
+#define MSR_POW  PPC_BIT_NR(45) /* Power management                          */
+#define MSR_WE   PPC_BIT_NR(45) /* Wait State Enable on 405                  */
+#define MSR_TGPR PPC_BIT_NR(46) /* TGPR usage on 602/603            x        */
+#define MSR_CE   PPC_BIT_NR(46) /* Critical int. enable on embedded PPC x    */
+#define MSR_ILE  PPC_BIT_NR(47) /* Interrupt little-endian mode              */
+#define MSR_EE   PPC_BIT_NR(48) /* External interrupt enable                 */
+#define MSR_PR   PPC_BIT_NR(49) /* Problem state                      hflags */
+#define MSR_FP   PPC_BIT_NR(50) /* Floating point available           hflags */
+#define MSR_ME   PPC_BIT_NR(51) /* Machine check interrupt enable            */
+#define MSR_FE0  PPC_BIT_NR(52) /* Floating point exception mode 0           */
+#define MSR_SE   PPC_BIT_NR(53) /* Single-step trace enable         x hflags */
+#define MSR_DWE  PPC_BIT_NR(53) /* Debug wait enable on 405         x        */
+#define MSR_UBLE PPC_BIT_NR(53) /* User BTB lock enable on e500     x        */
+#define MSR_BE   PPC_BIT_NR(54) /* Branch trace enable              x hflags */
+#define MSR_DE   PPC_BIT_NR(54) /* Debug int. enable on embedded PPC   x     */
+#define MSR_FE1  PPC_BIT_NR(55) /* Floating point exception mode 1           */
+#define MSR_AL   PPC_BIT_NR(56) /* AL bit on POWER                           */
+#define MSR_EP   PPC_BIT_NR(57) /* Exception prefix on 601                   */
+#define MSR_IR   PPC_BIT_NR(58) /* Instruction relocate                      */
+#define MSR_IS   PPC_BIT_NR(58) /* Instruction address space (BookE)         */
+#define MSR_DR   PPC_BIT_NR(59) /* Data relocate                             */
+#define MSR_DS   PPC_BIT_NR(59) /* Data address space (BookE)                */
+#define MSR_PE   PPC_BIT_NR(60) /* Protection enable on 403                  */
+#define MSR_PX   PPC_BIT_NR(61) /* Protection exclusive on 403        x      */
+#define MSR_PMM  PPC_BIT_NR(61) /* Performance monitor mark on POWER  x      */
+#define MSR_RI   PPC_BIT_NR(62) /* Recoverable interrupt            1        */
+#define MSR_LE   PPC_BIT_NR(63) /* Little-endian mode               1 hflags */
+
+FIELD(MSR, SF, MSR_SF, 1)
+FIELD(MSR, TAG, MSR_TAG, 1)
+FIELD(MSR, ISF, MSR_ISF, 1)
+#if defined(TARGET_PPC64)
+FIELD(MSR, HV, MSR_HV, 1)
+#define FIELD_EX64_HV(storage) FIELD_EX64(storage, MSR, HV)
+#else
+#define FIELD_EX64_HV(storage) 0
+#endif
+FIELD(MSR, TS0, MSR_TS0, 1)
+FIELD(MSR, TS1, MSR_TS1, 1)
+FIELD(MSR, TS, MSR_TS0, 2)
+FIELD(MSR, TM, MSR_TM, 1)
+FIELD(MSR, CM, MSR_CM, 1)
+FIELD(MSR, ICM, MSR_ICM, 1)
+FIELD(MSR, GS, MSR_GS, 1)
+FIELD(MSR, UCLE, MSR_UCLE, 1)
+FIELD(MSR, VR, MSR_VR, 1)
+FIELD(MSR, SPE, MSR_SPE, 1)
+FIELD(MSR, VSX, MSR_VSX, 1)
+FIELD(MSR, S, MSR_S, 1)
+FIELD(MSR, KEY, MSR_KEY, 1)
+FIELD(MSR, POW, MSR_POW, 1)
+FIELD(MSR, WE, MSR_WE, 1)
+FIELD(MSR, TGPR, MSR_TGPR, 1)
+FIELD(MSR, CE, MSR_CE, 1)
+FIELD(MSR, ILE, MSR_ILE, 1)
+FIELD(MSR, EE, MSR_EE, 1)
+FIELD(MSR, PR, MSR_PR, 1)
+FIELD(MSR, FP, MSR_FP, 1)
+FIELD(MSR, ME, MSR_ME, 1)
+FIELD(MSR, FE0, MSR_FE0, 1)
+FIELD(MSR, SE, MSR_SE, 1)
+FIELD(MSR, DWE, MSR_DWE, 1)
+FIELD(MSR, UBLE, MSR_UBLE, 1)
+FIELD(MSR, BE, MSR_BE, 1)
+FIELD(MSR, DE, MSR_DE, 1)
+FIELD(MSR, FE1, MSR_FE1, 1)
+FIELD(MSR, AL, MSR_AL, 1)
+FIELD(MSR, EP, MSR_EP, 1)
+FIELD(MSR, IR, MSR_IR, 1)
+FIELD(MSR, DR, MSR_DR, 1)
+FIELD(MSR, IS, MSR_IS, 1)
+FIELD(MSR, DS, MSR_DS, 1)
+FIELD(MSR, PE, MSR_PE, 1)
+FIELD(MSR, PX, MSR_PX, 1)
+FIELD(MSR, PMM, MSR_PMM, 1)
+FIELD(MSR, RI, MSR_RI, 1)
+FIELD(MSR, LE, MSR_LE, 1)
+
+/*
+ * FE0 and FE1 bits are not side-by-side
+ * so we can't combine them using FIELD()
+ */
+#define FIELD_EX64_FE(msr) \
+    ((FIELD_EX64(msr, MSR, FE0) << 1) | FIELD_EX64(msr, MSR, FE1))
 
 /* PMU bits */
 #define MMCR0_FC     PPC_BIT(32)         /* Freeze Counters  */
@@ -461,50 +535,6 @@ typedef enum {
 /* HFSCR bits */
 #define HFSCR_MSGP     PPC_BIT(53) /* Privileged Message Send Facilities */
 #define HFSCR_IC_MSGP  0xA
-
-#define msr_sf   ((env->msr >> MSR_SF)   & 1)
-#define msr_isf  ((env->msr >> MSR_ISF)  & 1)
-#if defined(TARGET_PPC64)
-#define msr_hv   ((env->msr >> MSR_HV)   & 1)
-#else
-#define msr_hv   (0)
-#endif
-#define msr_cm   ((env->msr >> MSR_CM)   & 1)
-#define msr_icm  ((env->msr >> MSR_ICM)  & 1)
-#define msr_gs   ((env->msr >> MSR_GS)   & 1)
-#define msr_ucle ((env->msr >> MSR_UCLE) & 1)
-#define msr_vr   ((env->msr >> MSR_VR)   & 1)
-#define msr_spe  ((env->msr >> MSR_SPE)  & 1)
-#define msr_vsx  ((env->msr >> MSR_VSX)  & 1)
-#define msr_key  ((env->msr >> MSR_KEY)  & 1)
-#define msr_pow  ((env->msr >> MSR_POW)  & 1)
-#define msr_tgpr ((env->msr >> MSR_TGPR) & 1)
-#define msr_ce   ((env->msr >> MSR_CE)   & 1)
-#define msr_ile  ((env->msr >> MSR_ILE)  & 1)
-#define msr_ee   ((env->msr >> MSR_EE)   & 1)
-#define msr_pr   ((env->msr >> MSR_PR)   & 1)
-#define msr_fp   ((env->msr >> MSR_FP)   & 1)
-#define msr_me   ((env->msr >> MSR_ME)   & 1)
-#define msr_fe0  ((env->msr >> MSR_FE0)  & 1)
-#define msr_se   ((env->msr >> MSR_SE)   & 1)
-#define msr_dwe  ((env->msr >> MSR_DWE)  & 1)
-#define msr_uble ((env->msr >> MSR_UBLE) & 1)
-#define msr_be   ((env->msr >> MSR_BE)   & 1)
-#define msr_de   ((env->msr >> MSR_DE)   & 1)
-#define msr_fe1  ((env->msr >> MSR_FE1)  & 1)
-#define msr_al   ((env->msr >> MSR_AL)   & 1)
-#define msr_ep   ((env->msr >> MSR_EP)   & 1)
-#define msr_ir   ((env->msr >> MSR_IR)   & 1)
-#define msr_dr   ((env->msr >> MSR_DR)   & 1)
-#define msr_is   ((env->msr >> MSR_IS)   & 1)
-#define msr_ds   ((env->msr >> MSR_DS)   & 1)
-#define msr_pe   ((env->msr >> MSR_PE)   & 1)
-#define msr_px   ((env->msr >> MSR_PX)   & 1)
-#define msr_pmm  ((env->msr >> MSR_PMM)  & 1)
-#define msr_ri   ((env->msr >> MSR_RI)   & 1)
-#define msr_le   ((env->msr >> MSR_LE)   & 1)
-#define msr_ts   ((env->msr >> MSR_TS1)  & 3)
-#define msr_tm   ((env->msr >> MSR_TM)   & 1)
 
 #define DBCR0_ICMP (1 << 27)
 #define DBCR0_BRT (1 << 26)
@@ -676,77 +706,50 @@ enum {
 
 /*****************************************************************************/
 /* Floating point status and control register                                */
-#define FPSCR_DRN2   34 /* Decimal Floating-Point rounding control           */
-#define FPSCR_DRN1   33 /* Decimal Floating-Point rounding control           */
-#define FPSCR_DRN0   32 /* Decimal Floating-Point rounding control           */
-#define FPSCR_FX     31 /* Floating-point exception summary                  */
-#define FPSCR_FEX    30 /* Floating-point enabled exception summary          */
-#define FPSCR_VX     29 /* Floating-point invalid operation exception summ.  */
-#define FPSCR_OX     28 /* Floating-point overflow exception                 */
-#define FPSCR_UX     27 /* Floating-point underflow exception                */
-#define FPSCR_ZX     26 /* Floating-point zero divide exception              */
-#define FPSCR_XX     25 /* Floating-point inexact exception                  */
-#define FPSCR_VXSNAN 24 /* Floating-point invalid operation exception (sNan) */
-#define FPSCR_VXISI  23 /* Floating-point invalid operation exception (inf)  */
-#define FPSCR_VXIDI  22 /* Floating-point invalid operation exception (inf)  */
-#define FPSCR_VXZDZ  21 /* Floating-point invalid operation exception (zero) */
-#define FPSCR_VXIMZ  20 /* Floating-point invalid operation exception (inf)  */
-#define FPSCR_VXVC   19 /* Floating-point invalid operation exception (comp) */
-#define FPSCR_FR     18 /* Floating-point fraction rounded                   */
-#define FPSCR_FI     17 /* Floating-point fraction inexact                   */
-#define FPSCR_C      16 /* Floating-point result class descriptor            */
-#define FPSCR_FL     15 /* Floating-point less than or negative              */
-#define FPSCR_FG     14 /* Floating-point greater than or negative           */
-#define FPSCR_FE     13 /* Floating-point equal or zero                      */
-#define FPSCR_FU     12 /* Floating-point unordered or NaN                   */
-#define FPSCR_FPCC   12 /* Floating-point condition code                     */
-#define FPSCR_FPRF   12 /* Floating-point result flags                       */
-#define FPSCR_VXSOFT 10 /* Floating-point invalid operation exception (soft) */
-#define FPSCR_VXSQRT 9  /* Floating-point invalid operation exception (sqrt) */
-#define FPSCR_VXCVI  8  /* Floating-point invalid operation exception (int)  */
-#define FPSCR_VE     7  /* Floating-point invalid operation exception enable */
-#define FPSCR_OE     6  /* Floating-point overflow exception enable          */
-#define FPSCR_UE     5  /* Floating-point underflow exception enable          */
-#define FPSCR_ZE     4  /* Floating-point zero divide exception enable       */
-#define FPSCR_XE     3  /* Floating-point inexact exception enable           */
-#define FPSCR_NI     2  /* Floating-point non-IEEE mode                      */
-#define FPSCR_RN1    1
-#define FPSCR_RN0    0  /* Floating-point rounding control                   */
-#define fpscr_drn    (((env->fpscr) & FP_DRN) >> FPSCR_DRN0)
-#define fpscr_fex    (((env->fpscr) >> FPSCR_FEX)    & 0x1)
-#define fpscr_vx     (((env->fpscr) >> FPSCR_VX)     & 0x1)
-#define fpscr_ox     (((env->fpscr) >> FPSCR_OX)     & 0x1)
-#define fpscr_ux     (((env->fpscr) >> FPSCR_UX)     & 0x1)
-#define fpscr_zx     (((env->fpscr) >> FPSCR_ZX)     & 0x1)
-#define fpscr_xx     (((env->fpscr) >> FPSCR_XX)     & 0x1)
-#define fpscr_vxsnan (((env->fpscr) >> FPSCR_VXSNAN) & 0x1)
-#define fpscr_vxisi  (((env->fpscr) >> FPSCR_VXISI)  & 0x1)
-#define fpscr_vxidi  (((env->fpscr) >> FPSCR_VXIDI)  & 0x1)
-#define fpscr_vxzdz  (((env->fpscr) >> FPSCR_VXZDZ)  & 0x1)
-#define fpscr_vximz  (((env->fpscr) >> FPSCR_VXIMZ)  & 0x1)
-#define fpscr_vxvc   (((env->fpscr) >> FPSCR_VXVC)   & 0x1)
-#define fpscr_fpcc   (((env->fpscr) >> FPSCR_FPCC)   & 0xF)
-#define fpscr_vxsoft (((env->fpscr) >> FPSCR_VXSOFT) & 0x1)
-#define fpscr_vxsqrt (((env->fpscr) >> FPSCR_VXSQRT) & 0x1)
-#define fpscr_vxcvi  (((env->fpscr) >> FPSCR_VXCVI)  & 0x1)
-#define fpscr_ve     (((env->fpscr) >> FPSCR_VE)     & 0x1)
-#define fpscr_oe     (((env->fpscr) >> FPSCR_OE)     & 0x1)
-#define fpscr_ue     (((env->fpscr) >> FPSCR_UE)     & 0x1)
-#define fpscr_ze     (((env->fpscr) >> FPSCR_ZE)     & 0x1)
-#define fpscr_xe     (((env->fpscr) >> FPSCR_XE)     & 0x1)
-#define fpscr_ni     (((env->fpscr) >> FPSCR_NI)     & 0x1)
-#define fpscr_rn     (((env->fpscr) >> FPSCR_RN0)    & 0x3)
+#define FPSCR_DRN2   PPC_BIT_NR(29) /* Decimal Floating-Point rounding ctrl. */
+#define FPSCR_DRN1   PPC_BIT_NR(30) /* Decimal Floating-Point rounding ctrl. */
+#define FPSCR_DRN0   PPC_BIT_NR(31) /* Decimal Floating-Point rounding ctrl. */
+#define FPSCR_FX     PPC_BIT_NR(32) /* Floating-point exception summary      */
+#define FPSCR_FEX    PPC_BIT_NR(33) /* Floating-point enabled exception summ.*/
+#define FPSCR_VX     PPC_BIT_NR(34) /* Floating-point invalid op. excp. summ.*/
+#define FPSCR_OX     PPC_BIT_NR(35) /* Floating-point overflow exception     */
+#define FPSCR_UX     PPC_BIT_NR(36) /* Floating-point underflow exception    */
+#define FPSCR_ZX     PPC_BIT_NR(37) /* Floating-point zero divide exception  */
+#define FPSCR_XX     PPC_BIT_NR(38) /* Floating-point inexact exception      */
+#define FPSCR_VXSNAN PPC_BIT_NR(39) /* Floating-point invalid op. excp (sNan)*/
+#define FPSCR_VXISI  PPC_BIT_NR(40) /* Floating-point invalid op. excp (inf) */
+#define FPSCR_VXIDI  PPC_BIT_NR(41) /* Floating-point invalid op. excp (inf) */
+#define FPSCR_VXZDZ  PPC_BIT_NR(42) /* Floating-point invalid op. excp (zero)*/
+#define FPSCR_VXIMZ  PPC_BIT_NR(43) /* Floating-point invalid op. excp (inf) */
+#define FPSCR_VXVC   PPC_BIT_NR(44) /* Floating-point invalid op. excp (comp)*/
+#define FPSCR_FR     PPC_BIT_NR(45) /* Floating-point fraction rounded       */
+#define FPSCR_FI     PPC_BIT_NR(46) /* Floating-point fraction inexact       */
+#define FPSCR_C      PPC_BIT_NR(47) /* Floating-point result class descriptor*/
+#define FPSCR_FL     PPC_BIT_NR(48) /* Floating-point less than or negative  */
+#define FPSCR_FG     PPC_BIT_NR(49) /* Floating-point greater than or neg.   */
+#define FPSCR_FE     PPC_BIT_NR(50) /* Floating-point equal or zero          */
+#define FPSCR_FU     PPC_BIT_NR(51) /* Floating-point unordered or NaN       */
+#define FPSCR_FPCC   PPC_BIT_NR(51) /* Floating-point condition code         */
+#define FPSCR_FPRF   PPC_BIT_NR(51) /* Floating-point result flags           */
+#define FPSCR_VXSOFT PPC_BIT_NR(53) /* Floating-point invalid op. excp (soft)*/
+#define FPSCR_VXSQRT PPC_BIT_NR(54) /* Floating-point invalid op. excp (sqrt)*/
+#define FPSCR_VXCVI  PPC_BIT_NR(55) /* Floating-point invalid op. excp (int) */
+#define FPSCR_VE     PPC_BIT_NR(56) /* Floating-point invalid op. excp enable*/
+#define FPSCR_OE     PPC_BIT_NR(57) /* Floating-point overflow excp. enable  */
+#define FPSCR_UE     PPC_BIT_NR(58) /* Floating-point underflow excp. enable */
+#define FPSCR_ZE     PPC_BIT_NR(59) /* Floating-point zero divide excp enable*/
+#define FPSCR_XE     PPC_BIT_NR(60) /* Floating-point inexact excp. enable   */
+#define FPSCR_NI     PPC_BIT_NR(61) /* Floating-point non-IEEE mode          */
+#define FPSCR_RN1    PPC_BIT_NR(62)
+#define FPSCR_RN0    PPC_BIT_NR(63) /* Floating-point rounding control       */
 /* Invalid operation exception summary */
 #define FPSCR_IX     ((1 << FPSCR_VXSNAN) | (1 << FPSCR_VXISI)  | \
                       (1 << FPSCR_VXIDI)  | (1 << FPSCR_VXZDZ)  | \
                       (1 << FPSCR_VXIMZ)  | (1 << FPSCR_VXVC)   | \
                       (1 << FPSCR_VXSOFT) | (1 << FPSCR_VXSQRT) | \
                       (1 << FPSCR_VXCVI))
-/* exception summary */
-#define fpscr_ex  (((env->fpscr) >> FPSCR_XX) & 0x1F)
-/* enabled exception summary */
-#define fpscr_eex (((env->fpscr) >> FPSCR_XX) & ((env->fpscr) >> FPSCR_XE) &  \
-                   0x1F)
+
+FIELD(FPSCR, FI, FPSCR_FI, 1)
 
 #define FP_DRN2         (1ull << FPSCR_DRN2)
 #define FP_DRN1         (1ull << FPSCR_DRN1)
@@ -1181,7 +1184,6 @@ struct CPUArchState {
      * by recent Book3s compatible CPUs (POWER7 and newer).
      */
     uint32_t irq_input_state;
-    void **irq_inputs;
 
     target_ulong excp_vectors[POWERPC_EXCP_NB]; /* Exception vectors */
     target_ulong excp_prefix;
@@ -2212,8 +2214,6 @@ enum {
     PPC_DCR            = 0x1000000000000000ULL,
     /* DCR extended accesse                                                  */
     PPC_DCRX           = 0x2000000000000000ULL,
-    /* user-mode DCR access, implemented in PowerPC 460                      */
-    PPC_DCRUX          = 0x4000000000000000ULL,
     /* popcntw and popcntd instructions                                      */
     PPC_POPCNTWD       = 0x8000000000000000ULL,
 
@@ -2237,8 +2237,8 @@ enum {
                         | PPC_405_MAC | PPC_440_SPEC | PPC_BOOKE \
                         | PPC_MFAPIDI | PPC_TLBIVA | PPC_TLBIVAX \
                         | PPC_4xx_COMMON | PPC_40x_ICBT | PPC_RFMCI \
-                        | PPC_RFDI | PPC_DCR | PPC_DCRX | PPC_DCRUX \
-                        | PPC_POPCNTWD | PPC_CILDST)
+                        | PPC_RFDI | PPC_DCR | PPC_DCRX | PPC_POPCNTWD \
+                        | PPC_CILDST)
 
     /* extended type values */
 
@@ -2284,6 +2284,10 @@ enum {
     PPC2_ISA300        = 0x0000000000080000ULL,
     /* POWER ISA 3.1                                                         */
     PPC2_ISA310        = 0x0000000000100000ULL,
+    /*   lwsync instruction                                                  */
+    PPC2_MEM_LWSYNC    = 0x0000000000200000ULL,
+    /* ISA 2.06 BCD assist instructions                                      */
+    PPC2_BCDA_ISA206   = 0x0000000000400000ULL,
 
 #define PPC_TCG_INSNS2 (PPC2_BOOKE206 | PPC2_VSX | PPC2_PRCNTL | PPC2_DBRX | \
                         PPC2_ISA205 | PPC2_VSX207 | PPC2_PERM_ISA206 | \
@@ -2292,7 +2296,8 @@ enum {
                         PPC2_BCTAR_ISA207 | PPC2_LSQ_ISA207 | \
                         PPC2_ALTIVEC_207 | PPC2_ISA207S | PPC2_DFP | \
                         PPC2_FP_CVT_S64 | PPC2_TM | PPC2_PM_ISA206 | \
-                        PPC2_ISA300 | PPC2_ISA310)
+                        PPC2_ISA300 | PPC2_ISA310 | PPC2_MEM_LWSYNC | \
+                        PPC2_BCDA_ISA206)
 };
 
 /*****************************************************************************/
@@ -2491,13 +2496,13 @@ static inline void cpu_get_tb_cpu_state(CPUPPCState *env, target_ulong *pc,
 }
 #endif
 
-void QEMU_NORETURN raise_exception(CPUPPCState *env, uint32_t exception);
-void QEMU_NORETURN raise_exception_ra(CPUPPCState *env, uint32_t exception,
-                                      uintptr_t raddr);
-void QEMU_NORETURN raise_exception_err(CPUPPCState *env, uint32_t exception,
-                                       uint32_t error_code);
-void QEMU_NORETURN raise_exception_err_ra(CPUPPCState *env, uint32_t exception,
-                                          uint32_t error_code, uintptr_t raddr);
+G_NORETURN void raise_exception(CPUPPCState *env, uint32_t exception);
+G_NORETURN void raise_exception_ra(CPUPPCState *env, uint32_t exception,
+                                   uintptr_t raddr);
+G_NORETURN void raise_exception_err(CPUPPCState *env, uint32_t exception,
+                                    uint32_t error_code);
+G_NORETURN void raise_exception_err_ra(CPUPPCState *env, uint32_t exception,
+                                       uint32_t error_code, uintptr_t raddr);
 
 /* PERFM EBB helper*/
 #if defined(TARGET_PPC64) && !defined(CONFIG_USER_ONLY)
@@ -2642,7 +2647,7 @@ static inline bool lsw_reg_in_range(int start, int nregs, int rx)
 }
 
 /* Accessors for FP, VMX and VSX registers */
-#if defined(HOST_WORDS_BIGENDIAN)
+#if HOST_BIG_ENDIAN
 #define VsrB(i) u8[i]
 #define VsrSB(i) s8[i]
 #define VsrH(i) u16[i]
@@ -2651,6 +2656,9 @@ static inline bool lsw_reg_in_range(int start, int nregs, int rx)
 #define VsrSW(i) s32[i]
 #define VsrD(i) u64[i]
 #define VsrSD(i) s64[i]
+#define VsrHF(i) f16[i]
+#define VsrSF(i) f32[i]
+#define VsrDF(i) f64[i]
 #else
 #define VsrB(i) u8[15 - (i)]
 #define VsrSB(i) s8[15 - (i)]
@@ -2660,6 +2668,9 @@ static inline bool lsw_reg_in_range(int start, int nregs, int rx)
 #define VsrSW(i) s32[3 - (i)]
 #define VsrD(i) u64[1 - (i)]
 #define VsrSD(i) s64[1 - (i)]
+#define VsrHF(i) f16[7 - (i)]
+#define VsrSF(i) f32[3 - (i)]
+#define VsrDF(i) f64[1 - (i)]
 #endif
 
 static inline int vsr64_offset(int i, bool high)
@@ -2670,6 +2681,11 @@ static inline int vsr64_offset(int i, bool high)
 static inline int vsr_full_offset(int i)
 {
     return offsetof(CPUPPCState, vsr[i].u64[0]);
+}
+
+static inline int acc_full_offset(int i)
+{
+    return vsr_full_offset(i * 4);
 }
 
 static inline int fpr_offset(int i)
@@ -2725,7 +2741,7 @@ static inline bool ppc_interrupts_little_endian(PowerPCCPU *cpu, bool hv)
     } else if (pcc->lpcr_mask & LPCR_ILE) {
         ile = !!(env->spr[SPR_LPCR] & LPCR_ILE);
     } else {
-        ile = !!(msr_ile);
+        ile = FIELD_EX64(env->msr, MSR, ILE);
     }
 
     return ile;

@@ -275,7 +275,7 @@ static void ibm_40p_init(MachineState *machine)
     /* PCI -> ISA bridge */
     i82378_dev = DEVICE(pci_create_simple(pci_bus, PCI_DEVFN(11, 0), "i82378"));
     qdev_connect_gpio_out(i82378_dev, 0,
-                          cpu->env.irq_inputs[PPC6xx_INPUT_INT]);
+                          qdev_get_gpio_in(DEVICE(cpu), PPC6xx_INPUT_INT));
     sysbus_connect_irq(pcihost, 0, qdev_get_gpio_in(i82378_dev, 15));
     isa_bus = ISA_BUS(qdev_get_child_bus(i82378_dev, "isa.0"));
 
@@ -381,7 +381,7 @@ static void ibm_40p_init(MachineState *machine)
         }
         boot_device = 'm';
     } else {
-        boot_device = machine->boot_order[0];
+        boot_device = machine->boot_config.order[0];
     }
 
     fw_cfg_add_i16(fw_cfg, FW_CFG_MAX_CPUS, (uint16_t)machine->smp.max_cpus);

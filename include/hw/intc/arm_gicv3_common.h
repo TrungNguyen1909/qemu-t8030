@@ -38,18 +38,18 @@
 
 #define GICV3_LPI_INTID_START 8192
 
+/*
+ * The redistributor in GICv3 has two 64KB frames per CPU; in
+ * GICv4 it has four 64KB frames per CPU.
+ */
 #define GICV3_REDIST_SIZE 0x20000
+#define GICV4_REDIST_SIZE 0x40000
 
 /* Number of SGI target-list bits */
 #define GICV3_TARGETLIST_BITS 16
 
 /* Maximum number of list registers (architectural limit) */
 #define GICV3_LR_MAX 16
-
-/* Minimum BPR for Secure, or when security not enabled */
-#define GIC_MIN_BPR 0
-/* Minimum BPR for Nonsecure when security is enabled */
-#define GIC_MIN_BPR_NS (GIC_MIN_BPR + 1)
 
 /* For some distributor fields we want to model the array of 32-bit
  * register values which hold various bitmaps corresponding to enabled,
@@ -174,6 +174,9 @@ struct GICv3CPUState {
     uint32_t gicr_igrpmodr0;
     uint32_t gicr_nsacr;
     uint8_t gicr_ipriorityr[GIC_INTERNAL];
+    /* VLPI_base page registers */
+    uint64_t gicr_vpropbaser;
+    uint64_t gicr_vpendbaser;
 
     /* CPU interface */
     uint64_t icc_sre_el1;
@@ -198,6 +201,8 @@ struct GICv3CPUState {
     int num_list_regs;
     int vpribits; /* number of virtual priority bits */
     int vprebits; /* number of virtual preemption bits */
+    int pribits; /* number of physical priority bits */
+    int prebits; /* number of physical preemption bits */
 
     /* Current highest priority pending interrupt for this CPU.
      * This is cached information that can be recalculated from the
@@ -210,6 +215,9 @@ struct GICv3CPUState {
      * in guest memory
      */
     PendingIrq hpplpi;
+
+    /* Cached information recalculated from vLPI tables in guest memory */
+    PendingIrq hppvlpi;
 
     /* This is temporary working state, to avoid a malloc in gicv3_update() */
     bool seenbetter;
@@ -240,6 +248,7 @@ struct GICv3State {
     uint32_t revision;
     bool lpi_enable;
     bool security_extn;
+    bool force_8bit_prio;
     bool irq_reset_nonsecure;
     bool gicd_no_migration_shift_bug;
 
@@ -272,6 +281,8 @@ struct GICv3State {
     uint32_t gicd_nsacr[DIV_ROUND_UP(GICV3_MAXIRQ, 16)];
 
     GICv3CPUState *cpu;
+    /* List of all ITSes connected to this GIC */
+    GPtrArray *itslist;
 };
 
 #define GICV3_BITMAP_ACCESSORS(BMP)                                     \

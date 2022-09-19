@@ -235,7 +235,7 @@ static TCGv dest_fpr(DisasContext *ctx, unsigned reg)
 static int get_flag_ofs(unsigned shift)
 {
     int ofs = offsetof(CPUAlphaState, flags);
-#ifdef HOST_WORDS_BIGENDIAN
+#if HOST_BIG_ENDIAN
     ofs += 3 - (shift / 8);
 #else
     ofs += shift / 8;
@@ -3027,10 +3027,11 @@ static void alpha_tr_tb_stop(DisasContextBase *dcbase, CPUState *cpu)
     }
 }
 
-static void alpha_tr_disas_log(const DisasContextBase *dcbase, CPUState *cpu)
+static void alpha_tr_disas_log(const DisasContextBase *dcbase,
+                               CPUState *cpu, FILE *logfile)
 {
-    qemu_log("IN: %s\n", lookup_symbol(dcbase->pc_first));
-    log_target_disas(cpu, dcbase->pc_first, dcbase->tb->size);
+    fprintf(logfile, "IN: %s\n", lookup_symbol(dcbase->pc_first));
+    target_disas(logfile, cpu, dcbase->pc_first, dcbase->tb->size);
 }
 
 static const TranslatorOps alpha_tr_ops = {

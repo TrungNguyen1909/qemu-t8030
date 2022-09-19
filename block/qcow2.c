@@ -94,9 +94,9 @@ static int qcow2_probe(const uint8_t *buf, int buf_size, const char *filename)
 }
 
 
-static ssize_t qcow2_crypto_hdr_read_func(QCryptoBlock *block, size_t offset,
-                                          uint8_t *buf, size_t buflen,
-                                          void *opaque, Error **errp)
+static int qcow2_crypto_hdr_read_func(QCryptoBlock *block, size_t offset,
+                                      uint8_t *buf, size_t buflen,
+                                      void *opaque, Error **errp)
 {
     BlockDriverState *bs = opaque;
     BDRVQcow2State *s = bs->opaque;
@@ -107,18 +107,18 @@ static ssize_t qcow2_crypto_hdr_read_func(QCryptoBlock *block, size_t offset,
         return -1;
     }
 
-    ret = bdrv_pread(bs->file,
-                     s->crypto_header.offset + offset, buf, buflen);
+    ret = bdrv_pread(bs->file, s->crypto_header.offset + offset, buflen, buf,
+                     0);
     if (ret < 0) {
         error_setg_errno(errp, -ret, "Could not read encryption header");
         return -1;
     }
-    return ret;
+    return 0;
 }
 
 
-static ssize_t qcow2_crypto_hdr_init_func(QCryptoBlock *block, size_t headerlen,
-                                          void *opaque, Error **errp)
+static int qcow2_crypto_hdr_init_func(QCryptoBlock *block, size_t headerlen,
+                                      void *opaque, Error **errp)
 {
     BlockDriverState *bs = opaque;
     BDRVQcow2State *s = bs->opaque;
@@ -151,13 +151,13 @@ static ssize_t qcow2_crypto_hdr_init_func(QCryptoBlock *block, size_t headerlen,
         return -1;
     }
 
-    return ret;
+    return 0;
 }
 
 
-static ssize_t qcow2_crypto_hdr_write_func(QCryptoBlock *block, size_t offset,
-                                           const uint8_t *buf, size_t buflen,
-                                           void *opaque, Error **errp)
+static int qcow2_crypto_hdr_write_func(QCryptoBlock *block, size_t offset,
+                                       const uint8_t *buf, size_t buflen,
+                                       void *opaque, Error **errp)
 {
     BlockDriverState *bs = opaque;
     BDRVQcow2State *s = bs->opaque;
@@ -168,13 +168,13 @@ static ssize_t qcow2_crypto_hdr_write_func(QCryptoBlock *block, size_t offset,
         return -1;
     }
 
-    ret = bdrv_pwrite(bs->file,
-                      s->crypto_header.offset + offset, buf, buflen);
+    ret = bdrv_pwrite(bs->file, s->crypto_header.offset + offset, buflen, buf,
+                      0);
     if (ret < 0) {
         error_setg_errno(errp, -ret, "Could not read encryption header");
         return -1;
     }
-    return ret;
+    return 0;
 }
 
 static QDict*
@@ -227,7 +227,7 @@ static int qcow2_read_extensions(BlockDriverState *bs, uint64_t start_offset,
         printf("attempting to read extended header in offset %lu\n", offset);
 #endif
 
-        ret = bdrv_pread(bs->file, offset, &ext, sizeof(ext));
+        ret = bdrv_pread(bs->file, offset, sizeof(ext), &ext, 0);
         if (ret < 0) {
             error_setg_errno(errp, -ret, "qcow2_read_extension: ERROR: "
                              "pread fail from offset %" PRIu64, offset);
@@ -255,7 +255,7 @@ static int qcow2_read_extensions(BlockDriverState *bs, uint64_t start_offset,
                            sizeof(bs->backing_format));
                 return 2;
             }
-            ret = bdrv_pread(bs->file, offset, bs->backing_format, ext.len);
+            ret = bdrv_pread(bs->file, offset, ext.len, bs->backing_format, 0);
             if (ret < 0) {
                 error_setg_errno(errp, -ret, "ERROR: ext_backing_format: "
                                  "Could not read format name");
@@ -271,7 +271,7 @@ static int qcow2_read_extensions(BlockDriverState *bs, uint64_t start_offset,
         case QCOW2_EXT_MAGIC_FEATURE_TABLE:
             if (p_feature_table != NULL) {
                 void *feature_table = g_malloc0(ext.len + 2 * sizeof(Qcow2Feature));
-                ret = bdrv_pread(bs->file, offset , feature_table, ext.len);
+                ret = bdrv_pread(bs->file, offset, ext.len, feature_table, 0);
                 if (ret < 0) {
                     error_setg_errno(errp, -ret, "ERROR: ext_feature_table: "
                                      "Could not read table");
@@ -296,7 +296,7 @@ static int qcow2_read_extensions(BlockDriverState *bs, uint64_t start_offset,
                 return -EINVAL;
             }
 
-            ret = bdrv_pread(bs->file, offset, &s->crypto_header, ext.len);
+            ret = bdrv_pread(bs->file, offset, ext.len, &s->crypto_header, 0);
             if (ret < 0) {
                 error_setg_errno(errp, -ret,
                                  "Unable to read CRYPTO header extension");
@@ -352,7 +352,7 @@ static int qcow2_read_extensions(BlockDriverState *bs, uint64_t start_offset,
                 break;
             }
 
-            ret = bdrv_pread(bs->file, offset, &bitmaps_ext, ext.len);
+            ret = bdrv_pread(bs->file, offset, ext.len, &bitmaps_ext, 0);
             if (ret < 0) {
                 error_setg_errno(errp, -ret, "bitmaps_ext: "
                                  "Could not read ext header");
@@ -416,7 +416,7 @@ static int qcow2_read_extensions(BlockDriverState *bs, uint64_t start_offset,
         case QCOW2_EXT_MAGIC_DATA_FILE:
         {
             s->image_data_file = g_malloc0(ext.len + 1);
-            ret = bdrv_pread(bs->file, offset, s->image_data_file, ext.len);
+            ret = bdrv_pread(bs->file, offset, ext.len, s->image_data_file, 0);
             if (ret < 0) {
                 error_setg_errno(errp, -ret,
                                  "ERROR: Could not read data file name");
@@ -440,7 +440,7 @@ static int qcow2_read_extensions(BlockDriverState *bs, uint64_t start_offset,
                 uext->len = ext.len;
                 QLIST_INSERT_HEAD(&s->unknown_header_ext, uext, next);
 
-                ret = bdrv_pread(bs->file, offset , uext->data, uext->len);
+                ret = bdrv_pread(bs->file, offset, uext->len, uext->data, 0);
                 if (ret < 0) {
                     error_setg_errno(errp, -ret, "ERROR: unknown extension: "
                                      "Could not read data");
@@ -516,12 +516,9 @@ int qcow2_mark_dirty(BlockDriverState *bs)
     }
 
     val = cpu_to_be64(s->incompatible_features | QCOW2_INCOMPAT_DIRTY);
-    ret = bdrv_pwrite(bs->file, offsetof(QCowHeader, incompatible_features),
-                      &val, sizeof(val));
-    if (ret < 0) {
-        return ret;
-    }
-    ret = bdrv_flush(bs->file->bs);
+    ret = bdrv_pwrite_sync(bs->file,
+                           offsetof(QCowHeader, incompatible_features),
+                           sizeof(val), &val, 0);
     if (ret < 0) {
         return ret;
     }
@@ -1296,7 +1293,8 @@ static int validate_compression_type(BDRVQcow2State *s, Error **errp)
 
 /* Called with s->lock held.  */
 static int coroutine_fn qcow2_do_open(BlockDriverState *bs, QDict *options,
-                                      int flags, Error **errp)
+                                      int flags, bool open_data_file,
+                                      Error **errp)
 {
     ERRP_GUARD();
     BDRVQcow2State *s = bs->opaque;
@@ -1307,7 +1305,7 @@ static int coroutine_fn qcow2_do_open(BlockDriverState *bs, QDict *options,
     uint64_t l1_vm_state_index;
     bool update_header = false;
 
-    ret = bdrv_pread(bs->file, 0, &header, sizeof(header));
+    ret = bdrv_pread(bs->file, 0, sizeof(header), &header, 0);
     if (ret < 0) {
         error_setg_errno(errp, -ret, "Could not read qcow2 header");
         goto fail;
@@ -1383,8 +1381,9 @@ static int coroutine_fn qcow2_do_open(BlockDriverState *bs, QDict *options,
     if (header.header_length > sizeof(header)) {
         s->unknown_header_fields_size = header.header_length - sizeof(header);
         s->unknown_header_fields = g_malloc(s->unknown_header_fields_size);
-        ret = bdrv_pread(bs->file, sizeof(header), s->unknown_header_fields,
-                         s->unknown_header_fields_size);
+        ret = bdrv_pread(bs->file, sizeof(header),
+                         s->unknown_header_fields_size,
+                         s->unknown_header_fields, 0);
         if (ret < 0) {
             error_setg_errno(errp, -ret, "Could not read unknown qcow2 header "
                              "fields");
@@ -1579,8 +1578,8 @@ static int coroutine_fn qcow2_do_open(BlockDriverState *bs, QDict *options,
             ret = -ENOMEM;
             goto fail;
         }
-        ret = bdrv_pread(bs->file, s->l1_table_offset, s->l1_table,
-                         s->l1_size * L1E_SIZE);
+        ret = bdrv_pread(bs->file, s->l1_table_offset, s->l1_size * L1E_SIZE,
+                         s->l1_table, 0);
         if (ret < 0) {
             error_setg_errno(errp, -ret, "Could not read L1 table");
             goto fail;
@@ -1614,50 +1613,52 @@ static int coroutine_fn qcow2_do_open(BlockDriverState *bs, QDict *options,
         goto fail;
     }
 
-    /* Open external data file */
-    s->data_file = bdrv_open_child(NULL, options, "data-file", bs,
-                                   &child_of_bds, BDRV_CHILD_DATA,
-                                   true, errp);
-    if (*errp) {
-        ret = -EINVAL;
-        goto fail;
-    }
+    if (open_data_file) {
+        /* Open external data file */
+        s->data_file = bdrv_open_child(NULL, options, "data-file", bs,
+                                       &child_of_bds, BDRV_CHILD_DATA,
+                                       true, errp);
+        if (*errp) {
+            ret = -EINVAL;
+            goto fail;
+        }
 
-    if (s->incompatible_features & QCOW2_INCOMPAT_DATA_FILE) {
-        if (!s->data_file && s->image_data_file) {
-            s->data_file = bdrv_open_child(s->image_data_file, options,
-                                           "data-file", bs, &child_of_bds,
-                                           BDRV_CHILD_DATA, false, errp);
+        if (s->incompatible_features & QCOW2_INCOMPAT_DATA_FILE) {
+            if (!s->data_file && s->image_data_file) {
+                s->data_file = bdrv_open_child(s->image_data_file, options,
+                                               "data-file", bs, &child_of_bds,
+                                               BDRV_CHILD_DATA, false, errp);
+                if (!s->data_file) {
+                    ret = -EINVAL;
+                    goto fail;
+                }
+            }
             if (!s->data_file) {
+                error_setg(errp, "'data-file' is required for this image");
                 ret = -EINVAL;
                 goto fail;
             }
-        }
-        if (!s->data_file) {
-            error_setg(errp, "'data-file' is required for this image");
-            ret = -EINVAL;
-            goto fail;
-        }
 
-        /* No data here */
-        bs->file->role &= ~BDRV_CHILD_DATA;
+            /* No data here */
+            bs->file->role &= ~BDRV_CHILD_DATA;
 
-        /* Must succeed because we have given up permissions if anything */
-        bdrv_child_refresh_perms(bs, bs->file, &error_abort);
-    } else {
-        if (s->data_file) {
-            error_setg(errp, "'data-file' can only be set for images with an "
-                             "external data file");
-            ret = -EINVAL;
-            goto fail;
-        }
+            /* Must succeed because we have given up permissions if anything */
+            bdrv_child_refresh_perms(bs, bs->file, &error_abort);
+        } else {
+            if (s->data_file) {
+                error_setg(errp, "'data-file' can only be set for images with "
+                                 "an external data file");
+                ret = -EINVAL;
+                goto fail;
+            }
 
-        s->data_file = bs->file;
+            s->data_file = bs->file;
 
-        if (data_file_is_raw(bs)) {
-            error_setg(errp, "data-file-raw requires a data file");
-            ret = -EINVAL;
-            goto fail;
+            if (data_file_is_raw(bs)) {
+                error_setg(errp, "data-file-raw requires a data file");
+                ret = -EINVAL;
+                goto fail;
+            }
         }
     }
 
@@ -1695,8 +1696,8 @@ static int coroutine_fn qcow2_do_open(BlockDriverState *bs, QDict *options,
             ret = -EINVAL;
             goto fail;
         }
-        ret = bdrv_pread(bs->file, header.backing_file_offset,
-                         bs->auto_backing_file, len);
+        ret = bdrv_pread(bs->file, header.backing_file_offset, len,
+                         bs->auto_backing_file, 0);
         if (ret < 0) {
             error_setg_errno(errp, -ret, "Could not read backing file name");
             goto fail;
@@ -1839,7 +1840,7 @@ static int coroutine_fn qcow2_do_open(BlockDriverState *bs, QDict *options,
 
  fail:
     g_free(s->image_data_file);
-    if (has_data_file(bs)) {
+    if (open_data_file && has_data_file(bs)) {
         bdrv_unref_child(bs, s->data_file);
         s->data_file = NULL;
     }
@@ -1876,7 +1877,8 @@ static void coroutine_fn qcow2_open_entry(void *opaque)
     BDRVQcow2State *s = qoc->bs->opaque;
 
     qemu_co_mutex_lock(&s->lock);
-    qoc->ret = qcow2_do_open(qoc->bs, qoc->options, qoc->flags, qoc->errp);
+    qoc->ret = qcow2_do_open(qoc->bs, qoc->options, qoc->flags, true,
+                             qoc->errp);
     qemu_co_mutex_unlock(&s->lock);
 }
 
@@ -2714,7 +2716,7 @@ static int qcow2_inactivate(BlockDriverState *bs)
     return result;
 }
 
-static void qcow2_close(BlockDriverState *bs)
+static void qcow2_do_close(BlockDriverState *bs, bool close_data_file)
 {
     BDRVQcow2State *s = bs->opaque;
     qemu_vfree(s->l1_table);
@@ -2740,7 +2742,7 @@ static void qcow2_close(BlockDriverState *bs)
     g_free(s->image_backing_file);
     g_free(s->image_backing_format);
 
-    if (has_data_file(bs)) {
+    if (close_data_file && has_data_file(bs)) {
         bdrv_unref_child(bs, s->data_file);
         s->data_file = NULL;
     }
@@ -2749,11 +2751,17 @@ static void qcow2_close(BlockDriverState *bs)
     qcow2_free_snapshots(bs);
 }
 
+static void qcow2_close(BlockDriverState *bs)
+{
+    qcow2_do_close(bs, true);
+}
+
 static void coroutine_fn qcow2_co_invalidate_cache(BlockDriverState *bs,
                                                    Error **errp)
 {
     ERRP_GUARD();
     BDRVQcow2State *s = bs->opaque;
+    BdrvChild *data_file;
     int flags = s->flags;
     QCryptoBlock *crypto = NULL;
     QDict *options;
@@ -2767,14 +2775,24 @@ static void coroutine_fn qcow2_co_invalidate_cache(BlockDriverState *bs,
     crypto = s->crypto;
     s->crypto = NULL;
 
-    qcow2_close(bs);
+    /*
+     * Do not reopen s->data_file (i.e., have qcow2_do_close() not close it,
+     * and then prevent qcow2_do_open() from opening it), because this function
+     * runs in the I/O path and as such we must not invoke global-state
+     * functions like bdrv_unref_child() and bdrv_open_child().
+     */
 
+    qcow2_do_close(bs, false);
+
+    data_file = s->data_file;
     memset(s, 0, sizeof(BDRVQcow2State));
+    s->data_file = data_file;
+
     options = qdict_clone_shallow(bs->options);
 
     flags &= ~BDRV_O_INACTIVE;
     qemu_co_mutex_lock(&s->lock);
-    ret = qcow2_do_open(bs, options, flags, errp);
+    ret = qcow2_do_open(bs, options, flags, false, errp);
     qemu_co_mutex_unlock(&s->lock);
     qobject_unref(options);
     if (ret < 0) {
@@ -3061,7 +3079,7 @@ int qcow2_update_header(BlockDriverState *bs)
     }
 
     /* Write the new header */
-    ret = bdrv_pwrite(bs->file, 0, header, s->cluster_size);
+    ret = bdrv_pwrite(bs->file, 0, s->cluster_size, header, 0);
     if (ret < 0) {
         goto fail;
     }
@@ -3648,7 +3666,7 @@ qcow2_co_create(BlockdevCreateOptions *create_options, Error **errp)
             cpu_to_be64(QCOW2_INCOMPAT_EXTL2);
     }
 
-    ret = blk_pwrite(blk, 0, header, cluster_size, 0);
+    ret = blk_pwrite(blk, 0, cluster_size, header, 0);
     g_free(header);
     if (ret < 0) {
         error_setg_errno(errp, -ret, "Could not write qcow2 header");
@@ -3658,7 +3676,7 @@ qcow2_co_create(BlockdevCreateOptions *create_options, Error **errp)
     /* Write a refcount table with one refcount block */
     refcount_table = g_malloc0(2 * cluster_size);
     refcount_table[0] = cpu_to_be64(2 * cluster_size);
-    ret = blk_pwrite(blk, cluster_size, refcount_table, 2 * cluster_size, 0);
+    ret = blk_pwrite(blk, cluster_size, 2 * cluster_size, refcount_table, 0);
     g_free(refcount_table);
 
     if (ret < 0) {
@@ -4530,8 +4548,8 @@ static int coroutine_fn qcow2_co_truncate(BlockDriverState *bs, int64_t offset,
 
     /* write updated header.size */
     offset = cpu_to_be64(offset);
-    ret = bdrv_pwrite_sync(bs->file, offsetof(QCowHeader, size),
-                           &offset, sizeof(offset));
+    ret = bdrv_co_pwrite_sync(bs->file, offsetof(QCowHeader, size),
+                              sizeof(offset), &offset, 0);
     if (ret < 0) {
         error_setg_errno(errp, -ret, "Failed to update the image size");
         goto fail;
@@ -4808,7 +4826,7 @@ static int make_completely_empty(BlockDriverState *bs)
     l1_ofs_rt_ofs_cls.reftable_offset = cpu_to_be64(s->cluster_size);
     l1_ofs_rt_ofs_cls.reftable_clusters = cpu_to_be32(1);
     ret = bdrv_pwrite_sync(bs->file, offsetof(QCowHeader, l1_table_offset),
-                           &l1_ofs_rt_ofs_cls, sizeof(l1_ofs_rt_ofs_cls));
+                           sizeof(l1_ofs_rt_ofs_cls), &l1_ofs_rt_ofs_cls, 0);
     if (ret < 0) {
         goto fail_broken_refcounts;
     }
@@ -4839,8 +4857,8 @@ static int make_completely_empty(BlockDriverState *bs)
 
     /* Enter the first refblock into the reftable */
     rt_entry = cpu_to_be64(2 * s->cluster_size);
-    ret = bdrv_pwrite_sync(bs->file, s->cluster_size,
-                           &rt_entry, sizeof(rt_entry));
+    ret = bdrv_pwrite_sync(bs->file, s->cluster_size, sizeof(rt_entry),
+                           &rt_entry, 0);
     if (ret < 0) {
         goto fail_broken_refcounts;
     }

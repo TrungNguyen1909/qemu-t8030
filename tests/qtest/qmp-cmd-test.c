@@ -11,7 +11,7 @@
  */
 
 #include "qemu/osdep.h"
-#include "libqos/libqtest.h"
+#include "libqtest.h"
 #include "qapi/error.h"
 #include "qapi/qapi-visit-introspect.h"
 #include "qapi/qmp/qdict.h"
@@ -110,6 +110,8 @@ static bool query_is_ignored(const char *cmd)
         "query-sev-capabilities",
         "query-sgx",
         "query-sgx-capabilities",
+        /* Success depends on enabling dirty page rate limit */
+        "query-vcpu-dirty-limit",
         NULL
     };
     int i;

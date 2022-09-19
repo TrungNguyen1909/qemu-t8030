@@ -18,6 +18,8 @@
 #ifndef PPC_INTERNAL_H
 #define PPC_INTERNAL_H
 
+#include "hw/registerfields.h"
+
 #define FUNC_MASK(name, ret_type, size, max_val)                  \
 static inline ret_type name(uint##size##_t start,                 \
                               uint##size##_t end)                 \
@@ -157,15 +159,15 @@ EXTRACT_HELPER(FPL, 25, 1);
 EXTRACT_HELPER(FPFLM, 17, 8);
 EXTRACT_HELPER(FPW, 16, 1);
 
-/* mffscrni */
-EXTRACT_HELPER(RM, 11, 2);
-
 /* addpcis */
 EXTRACT_HELPER_SPLIT_3(DX, 10, 6, 6, 5, 16, 1, 1, 0, 0)
 #if defined(TARGET_PPC64)
 /* darn */
 EXTRACT_HELPER(L, 16, 2);
 #endif
+/* wait */
+EXTRACT_HELPER(WC, 21, 2);
+EXTRACT_HELPER(PL, 16, 2);
 
 /***                            Jump target decoding                       ***/
 /* Immediate address */
@@ -286,9 +288,22 @@ void ppc_cpu_record_sigsegv(CPUState *cs, vaddr addr,
 bool ppc_cpu_tlb_fill(CPUState *cs, vaddr address, int size,
                       MMUAccessType access_type, int mmu_idx,
                       bool probe, uintptr_t retaddr);
-void ppc_cpu_do_unaligned_access(CPUState *cs, vaddr addr,
-                                 MMUAccessType access_type, int mmu_idx,
-                                 uintptr_t retaddr) QEMU_NORETURN;
+G_NORETURN void ppc_cpu_do_unaligned_access(CPUState *cs, vaddr addr,
+                                            MMUAccessType access_type, int mmu_idx,
+                                            uintptr_t retaddr);
 #endif
+
+FIELD(GER_MSK, XMSK, 0, 4)
+FIELD(GER_MSK, YMSK, 4, 4)
+FIELD(GER_MSK, PMSK, 8, 8)
+
+static inline int ger_pack_masks(int pmsk, int ymsk, int xmsk)
+{
+    int msk = 0;
+    msk = FIELD_DP32(msk, GER_MSK, XMSK, xmsk);
+    msk = FIELD_DP32(msk, GER_MSK, YMSK, ymsk);
+    msk = FIELD_DP32(msk, GER_MSK, PMSK, pmsk);
+    return msk;
+}
 
 #endif /* PPC_INTERNAL_H */

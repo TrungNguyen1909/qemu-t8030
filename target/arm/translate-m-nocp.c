@@ -143,8 +143,8 @@ static bool trans_VSCCLRM(DisasContext *s, arg_VSCCLRM *a)
     tcg_gen_brcondi_i32(TCG_COND_EQ, sfpa, 0, s->condlabel);
 
     if (s->fp_excp_el != 0) {
-        gen_exception_insn(s, s->pc_curr, EXCP_NOCP,
-                           syn_uncategorized(), s->fp_excp_el);
+        gen_exception_insn_el(s, s->pc_curr, EXCP_NOCP,
+                              syn_uncategorized(), s->fp_excp_el);
         return true;
     }
 
@@ -173,7 +173,7 @@ static bool trans_VSCCLRM(DisasContext *s, arg_VSCCLRM *a)
     }
 
     /* Zero the Sregs from btmreg to topreg inclusive. */
-    zero = tcg_const_i64(0);
+    zero = tcg_constant_i64(0);
     if (btmreg & 1) {
         write_neon_element64(zero, btmreg >> 1, 1, MO_32);
         btmreg++;
@@ -187,8 +187,7 @@ static bool trans_VSCCLRM(DisasContext *s, arg_VSCCLRM *a)
     }
     assert(btmreg == topreg + 1);
     if (dc_isar_feature(aa32_mve, s)) {
-        TCGv_i32 z32 = tcg_const_i32(0);
-        store_cpu_field(z32, v7m.vpr);
+        store_cpu_field(tcg_constant_i32(0), v7m.vpr);
     }
 
     clear_eci_state(s);
@@ -377,7 +376,7 @@ static bool gen_M_fp_sysreg_write(DisasContext *s, int regno,
         if (!vfp_access_check_m(s, true)) {
             /*
              * This was only a conditional exception, so override
-             * gen_exception_insn()'s default to DISAS_NORETURN
+             * gen_exception_insn_el()'s default to DISAS_NORETURN
              */
             s->base.is_jmp = DISAS_NEXT;
             break;
@@ -512,7 +511,7 @@ static bool gen_M_fp_sysreg_read(DisasContext *s, int regno,
     }
     case ARM_VFP_FPCXT_NS:
     {
-        TCGv_i32 control, sfpa, fpscr, fpdscr, zero;
+        TCGv_i32 control, sfpa, fpscr, fpdscr;
         TCGLabel *lab_active = gen_new_label();
 
         lookup_tb = true;
@@ -533,7 +532,7 @@ static bool gen_M_fp_sysreg_read(DisasContext *s, int regno,
         if (!vfp_access_check_m(s, true)) {
             /*
              * This was only a conditional exception, so override
-             * gen_exception_insn()'s default to DISAS_NORETURN
+             * gen_exception_insn_el()'s default to DISAS_NORETURN
              */
             s->base.is_jmp = DISAS_NEXT;
             break;
@@ -552,10 +551,9 @@ static bool gen_M_fp_sysreg_read(DisasContext *s, int regno,
         storefn(s, opaque, tmp, true);
         /* If SFPA is zero then set FPSCR from FPDSCR_NS */
         fpdscr = load_cpu_field(v7m.fpdscr[M_REG_NS]);
-        zero = tcg_const_i32(0);
-        tcg_gen_movcond_i32(TCG_COND_EQ, fpscr, sfpa, zero, fpdscr, fpscr);
+        tcg_gen_movcond_i32(TCG_COND_EQ, fpscr, sfpa, tcg_constant_i32(0),
+                            fpdscr, fpscr);
         gen_helper_vfp_set_fpscr(cpu_env, fpscr);
-        tcg_temp_free_i32(zero);
         tcg_temp_free_i32(sfpa);
         tcg_temp_free_i32(fpdscr);
         tcg_temp_free_i32(fpscr);
@@ -767,14 +765,13 @@ static bool trans_NOCP(DisasContext *s, arg_nocp *a)
     }
 
     if (a->cp != 10) {
-        gen_exception_insn(s, s->pc_curr, EXCP_NOCP,
-                           syn_uncategorized(), default_exception_el(s));
+        gen_exception_insn(s, s->pc_curr, EXCP_NOCP, syn_uncategorized());
         return true;
     }
 
     if (s->fp_excp_el != 0) {
-        gen_exception_insn(s, s->pc_curr, EXCP_NOCP,
-                           syn_uncategorized(), s->fp_excp_el);
+        gen_exception_insn_el(s, s->pc_curr, EXCP_NOCP,
+                              syn_uncategorized(), s->fp_excp_el);
         return true;
     }
 

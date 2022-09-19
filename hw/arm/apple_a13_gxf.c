@@ -1,35 +1,14 @@
 #include "qemu/osdep.h"
 #include "qemu/log.h"
 #include "qapi/error.h"
-#include "qemu-common.h"
 #include "target/arm/cpu.h"
+#include "target/arm/cpregs.h"
 #include "target/arm/internals.h"
 #include "apple_a13_gxf.h"
 #include "exec/exec-all.h"
 
 CPAccessResult access_tvm_trvm(CPUARMState *env, const ARMCPRegInfo *ri,
                                bool isread);
-
-static uint64_t raw_read(CPUARMState *env, const ARMCPRegInfo *ri)
-{
-    assert(ri->fieldoffset);
-    if (cpreg_field_is_64bit(ri)) {
-        return CPREG_FIELD64(env, ri);
-    } else {
-        return CPREG_FIELD32(env, ri);
-    }
-}
-
-static void raw_write(CPUARMState *env, const ARMCPRegInfo *ri,
-                      uint64_t value)
-{
-    assert(ri->fieldoffset);
-    if (cpreg_field_is_64bit(ri)) {
-        CPREG_FIELD64(env, ri) = value;
-    } else {
-        CPREG_FIELD32(env, ri) = value;
-    }
-}
 
 static CPAccessResult access_gxf(CPUARMState *env, const ARMCPRegInfo *ri,
                                  bool isread)
@@ -238,7 +217,6 @@ static const ARMCPRegInfo apple_a13_gxf_cp_override_reginfo[] = {
       .fieldoffset = offsetof(CPUARMState, cp15.far_el[1]),
       .readfn = far_el1_read, .writefn = far_el1_write,
       .resetvalue = 0, },
-    REGINFO_SENTINEL
 };
 
 static const ARMCPRegInfo apple_a13_gxf_cp_reginfo[] = {
@@ -379,7 +357,6 @@ static const ARMCPRegInfo apple_a13_gxf_cp_reginfo[] = {
       .opc0 = 3, .opc1 = 6, .crn = 15, .crm = 3, .opc2 = 4,
       .access = PL1_RW, .resetvalue = 0,
       .fieldoffset = offsetof(CPUARMState, sprr.mprr_el_br_el1[1][1]) },
-      REGINFO_SENTINEL,
 };
 
 void apple_a13_init_gxf_override(AppleA13State *cpu)

@@ -4,7 +4,6 @@
 #include "qemu/osdep.h"
 #include "qemu/log.h"
 #include "qapi/error.h"
-#include "qemu-common.h"
 #include "target/arm/cpu.h"
 #include "hw/arm/apple_a13.h"
 

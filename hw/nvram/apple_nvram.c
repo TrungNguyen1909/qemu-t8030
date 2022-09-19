@@ -1,7 +1,6 @@
 #include "qemu/osdep.h"
 #include "qapi/error.h"
 #include "qemu/error-report.h"
-#include "qemu-common.h"
 #include "sysemu/block-backend.h"
 #include "hw/nvram/apple_nvram.h"
 #include <zlib.h>
@@ -427,7 +426,7 @@ void apple_nvram_save(AppleNvramState *s)
         return;
     }
 
-    if (blk_pwrite(ns->blkconf.blk, 0, buf, len, 0) <= 0) {
+    if (blk_pwrite(ns->blkconf.blk, 0, len, buf, 0) < 0) {
         error_report("%s: Failed to write NVRAM", __func__);
         return;
     }
@@ -448,11 +447,11 @@ void apple_nvram_load(AppleNvramState *s)
     blk_flush(ns->blkconf.blk);
     blk_drain(ns->blkconf.blk);
 
-    if (blk_pread(ns->blkconf.blk, 0, buffer, len) <= 0) {
+    if (blk_pread(ns->blkconf.blk, 0, len, buffer, 0) < 0) {
         error_report("%s: Failed to read NVRAM", __func__);
         return;
     }
-    
+
     apple_nvram_cleanup(s);
     s->len = len;
     s->bank = nvram_parse(buffer, len);

@@ -25,7 +25,6 @@
 #define HW_ARM_XNU_DTB_H
 
 #include "qemu/osdep.h"
-#include "qemu-common.h"
 
 #define DT_PROP_FLAG_PLACEHOLDER (1 << 31)
 #define DT_PROP_FLAGS_MASK		(0xf0000000)

@@ -24,8 +24,6 @@
  */
 
 #include "qemu/osdep.h"
-#include "qemu-common.h"
-#include "sysemu/tcg.h"
 #include "sysemu/replay.h"
 #include "sysemu/cpu-timers.h"
 #include "qemu/main-loop.h"
@@ -86,8 +84,7 @@ void icount_handle_deadline(void)
      * Don't interrupt cpu thread, when these events are waiting
      * (i.e., there is no checkpoint)
      */
-    if (deadline == 0
-        && (replay_mode != REPLAY_MODE_PLAY || replay_has_checkpoint())) {
+    if (deadline == 0) {
         icount_notify_aio_contexts();
     }
 }
@@ -111,8 +108,14 @@ void icount_prepare_for_run(CPUState *cpu)
 
     replay_mutex_lock();
 
-    if (cpu->icount_budget == 0 && replay_has_checkpoint()) {
+    if (cpu->icount_budget == 0) {
+        /*
+         * We're called without the iothread lock, so must take it while
+         * we're calling timer handlers.
+         */
+        qemu_mutex_lock_iothread();
         icount_notify_aio_contexts();
+        qemu_mutex_unlock_iothread();
     }
 }
 

@@ -570,14 +570,14 @@ static void armv7m_reset(void *opaque)
 
 void armv7m_load_kernel(ARMCPU *cpu, const char *kernel_filename, int mem_size)
 {
-    int image_size;
+    ssize_t image_size;
     uint64_t entry;
     int big_endian;
     AddressSpace *as;
     int asidx;
     CPUState *cs = CPU(cpu);
 
-#ifdef TARGET_WORDS_BIGENDIAN
+#if TARGET_BIG_ENDIAN
     big_endian = 1;
 #else
     big_endian = 0;

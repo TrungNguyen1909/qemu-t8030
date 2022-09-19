@@ -371,6 +371,8 @@ static bool tcg_target_const_match(int64_t val, TCGType type, int ct)
 #define MULHWU XO31( 11)
 #define DIVW   XO31(491)
 #define DIVWU  XO31(459)
+#define MODSW  XO31(779)
+#define MODUW  XO31(267)
 #define CMP    XO31(  0)
 #define CMPL   XO31( 32)
 #define LHBRX  XO31(790)
@@ -403,6 +405,8 @@ static bool tcg_target_const_match(int64_t val, TCGType type, int ct)
 #define MULHDU XO31(  9)
 #define DIVD   XO31(489)
 #define DIVDU  XO31(457)
+#define MODSD  XO31(777)
+#define MODUD  XO31(265)
 
 #define LBZX   XO31( 87)
 #define LHZX   XO31(279)
@@ -1832,13 +1836,14 @@ static void tcg_out_brcond2 (TCGContext *s, const TCGArg *args,
 
 static void tcg_out_mb(TCGContext *s, TCGArg a0)
 {
-    uint32_t insn = HWSYNC;
-    a0 &= TCG_MO_ALL;
-    if (a0 == TCG_MO_LD_LD) {
+    uint32_t insn;
+
+    if (a0 & TCG_MO_ST_LD) {
+        insn = HWSYNC;
+    } else {
         insn = LWSYNC;
-    } else if (a0 == TCG_MO_ST_ST) {
-        insn = EIEIO;
     }
+
     tcg_out32(s, insn);
 }
 
@@ -1864,7 +1869,7 @@ void tb_target_set_jmp_target(uintptr_t tc_ptr, uintptr_t jmp_rx,
             i1 = ADDIS | TAI(TCG_REG_TB, TCG_REG_TB, hi >> 16);
             i2 = ADDI | TAI(TCG_REG_TB, TCG_REG_TB, lo);
         }
-#ifdef HOST_WORDS_BIGENDIAN
+#if HOST_BIG_ENDIAN
         pair = (uint64_t)i1 << 32 | i2;
 #else
         pair = (uint64_t)i2 << 32 | i1;
@@ -2805,6 +2810,14 @@ static void tcg_out_op(TCGContext *s, TCGOpcode opc,
         tcg_out32(s, DIVWU | TAB(args[0], args[1], args[2]));
         break;
 
+    case INDEX_op_rem_i32:
+        tcg_out32(s, MODSW | TAB(args[0], args[1], args[2]));
+        break;
+
+    case INDEX_op_remu_i32:
+        tcg_out32(s, MODUW | TAB(args[0], args[1], args[2]));
+        break;
+
     case INDEX_op_shl_i32:
         if (const_args[2]) {
             /* Limit immediate shift count lest we create an illegal insn.  */
@@ -2945,6 +2958,12 @@ static void tcg_out_op(TCGContext *s, TCGOpcode opc,
         break;
     case INDEX_op_divu_i64:
         tcg_out32(s, DIVDU | TAB(args[0], args[1], args[2]));
+        break;
+    case INDEX_op_rem_i64:
+        tcg_out32(s, MODSD | TAB(args[0], args[1], args[2]));
+        break;
+    case INDEX_op_remu_i64:
+        tcg_out32(s, MODUD | TAB(args[0], args[1], args[2]));
         break;
 
     case INDEX_op_qemu_ld_i32:
@@ -3235,7 +3254,7 @@ static bool tcg_out_dupm_vec(TCGContext *s, TCGType type, unsigned vece,
             tcg_out_mem_long(s, 0, LVEBX, out, base, offset);
         }
         elt = extract32(offset, 0, 4);
-#ifndef HOST_WORDS_BIGENDIAN
+#if !HOST_BIG_ENDIAN
         elt ^= 15;
 #endif
         tcg_out32(s, VSPLTB | VRT(out) | VRB(out) | (elt << 16));
@@ -3248,7 +3267,7 @@ static bool tcg_out_dupm_vec(TCGContext *s, TCGType type, unsigned vece,
             tcg_out_mem_long(s, 0, LVEHX, out, base, offset);
         }
         elt = extract32(offset, 1, 3);
-#ifndef HOST_WORDS_BIGENDIAN
+#if !HOST_BIG_ENDIAN
         elt ^= 7;
 #endif
         tcg_out32(s, VSPLTH | VRT(out) | VRB(out) | (elt << 16));
@@ -3261,7 +3280,7 @@ static bool tcg_out_dupm_vec(TCGContext *s, TCGType type, unsigned vece,
         tcg_debug_assert((offset & 3) == 0);
         tcg_out_mem_long(s, 0, LVEWX, out, base, offset);
         elt = extract32(offset, 2, 2);
-#ifndef HOST_WORDS_BIGENDIAN
+#if !HOST_BIG_ENDIAN
         elt ^= 3;
 #endif
         tcg_out32(s, VSPLTW | VRT(out) | VRB(out) | (elt << 16));
@@ -3275,7 +3294,7 @@ static bool tcg_out_dupm_vec(TCGContext *s, TCGType type, unsigned vece,
         tcg_out_mem_long(s, 0, LVX, out, base, offset & -16);
         tcg_out_vsldoi(s, TCG_VEC_TMP1, out, out, 8);
         elt = extract32(offset, 3, 1);
-#ifndef HOST_WORDS_BIGENDIAN
+#if !HOST_BIG_ENDIAN
         elt = !elt;
 #endif
         if (elt) {
@@ -3721,6 +3740,8 @@ static TCGConstraintSetIndex tcg_target_op_def(TCGOpcode op)
 
     case INDEX_op_div_i32:
     case INDEX_op_divu_i32:
+    case INDEX_op_rem_i32:
+    case INDEX_op_remu_i32:
     case INDEX_op_nand_i32:
     case INDEX_op_nor_i32:
     case INDEX_op_muluh_i32:
@@ -3731,6 +3752,8 @@ static TCGConstraintSetIndex tcg_target_op_def(TCGOpcode op)
     case INDEX_op_nor_i64:
     case INDEX_op_div_i64:
     case INDEX_op_divu_i64:
+    case INDEX_op_rem_i64:
+    case INDEX_op_remu_i64:
     case INDEX_op_mulsh_i64:
     case INDEX_op_muluh_i64:
         return C_O1_I2(r, r, r);
@@ -4008,3 +4031,4 @@ void tcg_register_jit(const void *buf, size_t buf_size)
 #undef VMULOUB
 #undef VMULOUH
 #undef VMULOUW
+#undef VMSUMUHM

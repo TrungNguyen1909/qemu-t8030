@@ -184,8 +184,6 @@ void avr_cpu_tcg_init(void);
 
 void avr_cpu_list(void);
 int cpu_avr_exec(CPUState *cpu);
-int avr_cpu_memory_rw_debug(CPUState *cs, vaddr address, uint8_t *buf,
-                            int len, bool is_write);
 
 enum {
     TB_FLAGS_FULL_ACCESS = 1,
@@ -247,4 +245,4 @@ bool avr_cpu_tlb_fill(CPUState *cs, vaddr address, int size,
 
 #include "exec/cpu-all.h"
 
-#endif /* !defined (QEMU_AVR_CPU_H) */
+#endif /* QEMU_AVR_CPU_H */

@@ -104,7 +104,7 @@
 #
 # @status: the virtual machine @RunState
 #
-# Since:  0.14
+# Since: 0.14
 #
 # Notes: @singlestep is enabled through the GDB stub
 ##
@@ -118,7 +118,7 @@
 #
 # Returns: @StatusInfo reflecting all VCPUs
 #
-# Since:  0.14
+# Since: 0.14
 #
 # Example:
 #
@@ -348,7 +348,7 @@
 #
 # @poweroff: Shutdown the VM and exit
 #
-# @pause: pause the VM#
+# @pause: pause the VM
 #
 # Since: 6.0
 ##
@@ -364,10 +364,13 @@
 #
 # @shutdown: Shutdown the VM and exit, according to the shutdown action
 #
+# @exit-failure: Shutdown the VM and exit with nonzero status
+#                (since 7.1)
+#
 # Since: 6.0
 ##
 { 'enum': 'PanicAction',
-  'data': [ 'pause', 'shutdown', 'none' ] }
+  'data': [ 'pause', 'shutdown', 'exit-failure', 'none' ] }
 
 ##
 # @watchdog-set-action:
@@ -592,12 +595,10 @@
 # @guest: memory failure at guest memory,
 #
 # Since: 5.2
-#
 ##
 { 'enum': 'MemoryFailureRecipient',
   'data': [ 'hypervisor',
             'guest' ] }
-
 
 ##
 # @MemoryFailureAction:
@@ -619,7 +620,6 @@
 #         to handle memory failures.
 #
 # Since: 5.2
-#
 ##
 { 'enum': 'MemoryFailureAction',
   'data': [ 'ignore',
@@ -639,7 +639,6 @@
 #             failure was still in progress.
 #
 # Since: 5.2
-#
 ##
 { 'struct': 'MemoryFailureFlags',
   'data': { 'action-required': 'bool',

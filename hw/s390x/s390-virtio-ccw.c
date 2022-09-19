@@ -25,6 +25,7 @@
 #include "qemu/error-report.h"
 #include "qemu/option.h"
 #include "qemu/qemu-print.h"
+#include "qemu/units.h"
 #include "hw/s390x/s390-pci-bus.h"
 #include "sysemu/reset.h"
 #include "hw/s390x/storage-keys.h"
@@ -767,7 +768,7 @@ bool css_migration_enabled(void)
     {                                                                         \
         MachineClass *mc = MACHINE_CLASS(oc);                                 \
         ccw_machine_##suffix##_class_options(mc);                             \
-        mc->desc = "VirtIO-ccw based S390 machine v" verstr;                  \
+        mc->desc = "Virtual s390x machine (version " verstr ")";              \
         if (latest) {                                                         \
             mc->alias = "s390-ccw-virtio";                                    \
             mc->is_default = true;                                            \
@@ -791,14 +792,29 @@ bool css_migration_enabled(void)
     }                                                                         \
     type_init(ccw_machine_register_##suffix)
 
+static void ccw_machine_7_1_instance_options(MachineState *machine)
+{
+}
+
+static void ccw_machine_7_1_class_options(MachineClass *mc)
+{
+}
+DEFINE_CCW_MACHINE(7_1, "7.1", true);
+
 static void ccw_machine_7_0_instance_options(MachineState *machine)
 {
+    static const S390FeatInit qemu_cpu_feat = { S390_FEAT_LIST_QEMU_V7_0 };
+
+    ccw_machine_7_1_instance_options(machine);
+    s390_set_qemu_cpu_model(0x8561, 15, 1, qemu_cpu_feat);
 }
 
 static void ccw_machine_7_0_class_options(MachineClass *mc)
 {
+    ccw_machine_7_1_class_options(mc);
+    compat_props_add(mc->compat_props, hw_compat_7_0, hw_compat_7_0_len);
 }
-DEFINE_CCW_MACHINE(7_0, "7.0", true);
+DEFINE_CCW_MACHINE(7_0, "7.0", false);
 
 static void ccw_machine_6_2_instance_options(MachineState *machine)
 {

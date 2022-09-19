@@ -174,10 +174,11 @@ static void create_fdt(SpikeState *s, const MemMapEntry *memmap,
 
     riscv_socket_fdt_write_distance_matrix(mc, fdt);
 
-    if (cmdline) {
-        qemu_fdt_add_subnode(fdt, "/chosen");
+    qemu_fdt_add_subnode(fdt, "/chosen");
+    qemu_fdt_setprop_string(fdt, "/chosen", "stdout-path", "/htif");
+
+    if (cmdline && *cmdline) {
         qemu_fdt_setprop_string(fdt, "/chosen", "bootargs", cmdline);
-        qemu_fdt_setprop_string(fdt, "/chosen", "stdout-path", "/htif");
     }
 }
 
@@ -229,7 +230,7 @@ static void spike_board_init(MachineState *machine)
                                 base_hartid, &error_abort);
         object_property_set_int(OBJECT(&s->soc[i]), "num-harts",
                                 hart_count, &error_abort);
-        sysbus_realize(SYS_BUS_DEVICE(&s->soc[i]), &error_abort);
+        sysbus_realize(SYS_BUS_DEVICE(&s->soc[i]), &error_fatal);
 
         /* Core Local Interruptor (timer and IPI) for each socket */
         riscv_aclint_swi_create(

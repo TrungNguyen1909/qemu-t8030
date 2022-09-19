@@ -25,7 +25,6 @@
 #include "qemu/osdep.h"
 #include "qemu/units.h"
 #include "qemu/bitops.h"
-#include "qemu-common.h"
 #include "qemu/datadir.h"
 #include "hw/clock.h"
 #include "hw/southbridge/piix.h"
@@ -367,7 +366,7 @@ static uint64_t malta_fpga_read(void *opaque, hwaddr addr,
 
     /* STATUS Register */
     case 0x00208:
-#ifdef TARGET_WORDS_BIGENDIAN
+#if TARGET_BIG_ENDIAN
         val = 0x00000012;
 #else
         val = 0x00000010;
@@ -695,7 +694,7 @@ static void write_bootloader_nanomips(uint8_t *base, uint64_t run_addr,
     stw_p(p++, 0xe040); stw_p(p++, 0x0681);
                                 /* lui t1, %hi(0xb4000000)      */
 
-#ifdef TARGET_WORDS_BIGENDIAN
+#if TARGET_BIG_ENDIAN
 
     stw_p(p++, 0xe020); stw_p(p++, 0x0be1);
                                 /* lui t0, %hi(0xdf000000)      */
@@ -894,7 +893,7 @@ static void write_bootloader(uint8_t *base, uint64_t run_addr,
     /* Load BAR registers as done by YAMON */
     stl_p(p++, 0x3c09b400);                  /* lui t1, 0xb400 */
 
-#ifdef TARGET_WORDS_BIGENDIAN
+#if TARGET_BIG_ENDIAN
     stl_p(p++, 0x3c08df00);                  /* lui t0, 0xdf00 */
 #else
     stl_p(p++, 0x340800df);                  /* ori t0, r0, 0x00df */
@@ -903,39 +902,39 @@ static void write_bootloader(uint8_t *base, uint64_t run_addr,
 
     stl_p(p++, 0x3c09bbe0);                  /* lui t1, 0xbbe0 */
 
-#ifdef TARGET_WORDS_BIGENDIAN
+#if TARGET_BIG_ENDIAN
     stl_p(p++, 0x3c08c000);                  /* lui t0, 0xc000 */
 #else
     stl_p(p++, 0x340800c0);                  /* ori t0, r0, 0x00c0 */
 #endif
     stl_p(p++, 0xad280048);                  /* sw t0, 0x0048(t1) */
-#ifdef TARGET_WORDS_BIGENDIAN
+#if TARGET_BIG_ENDIAN
     stl_p(p++, 0x3c084000);                  /* lui t0, 0x4000 */
 #else
     stl_p(p++, 0x34080040);                  /* ori t0, r0, 0x0040 */
 #endif
     stl_p(p++, 0xad280050);                  /* sw t0, 0x0050(t1) */
 
-#ifdef TARGET_WORDS_BIGENDIAN
+#if TARGET_BIG_ENDIAN
     stl_p(p++, 0x3c088000);                  /* lui t0, 0x8000 */
 #else
     stl_p(p++, 0x34080080);                  /* ori t0, r0, 0x0080 */
 #endif
     stl_p(p++, 0xad280058);                  /* sw t0, 0x0058(t1) */
-#ifdef TARGET_WORDS_BIGENDIAN
+#if TARGET_BIG_ENDIAN
     stl_p(p++, 0x3c083f00);                  /* lui t0, 0x3f00 */
 #else
     stl_p(p++, 0x3408003f);                  /* ori t0, r0, 0x003f */
 #endif
     stl_p(p++, 0xad280060);                  /* sw t0, 0x0060(t1) */
 
-#ifdef TARGET_WORDS_BIGENDIAN
+#if TARGET_BIG_ENDIAN
     stl_p(p++, 0x3c08c100);                  /* lui t0, 0xc100 */
 #else
     stl_p(p++, 0x340800c1);                  /* ori t0, r0, 0x00c1 */
 #endif
     stl_p(p++, 0xad280080);                  /* sw t0, 0x0080(t1) */
-#ifdef TARGET_WORDS_BIGENDIAN
+#if TARGET_BIG_ENDIAN
     stl_p(p++, 0x3c085e00);                  /* lui t0, 0x5e00 */
 #else
     stl_p(p++, 0x3408005e);                  /* ori t0, r0, 0x005e */
@@ -1030,7 +1029,7 @@ static uint64_t load_kernel(void)
     int prom_index = 0;
     uint64_t (*xlate_to_kseg0) (void *opaque, uint64_t addr);
 
-#ifdef TARGET_WORDS_BIGENDIAN
+#if TARGET_BIG_ENDIAN
     big_endian = 1;
 #else
     big_endian = 0;
@@ -1238,7 +1237,9 @@ void mips_malta_init(MachineState *machine)
     int fl_idx = 0;
     int be;
     MaltaState *s;
+    PCIDevice *piix4;
     DeviceState *dev;
+    DeviceState *pm_dev;
 
     s = MIPS_MALTA(qdev_new(TYPE_MIPS_MALTA));
     sysbus_realize_and_unref(SYS_BUS_DEVICE(s), &error_fatal);
@@ -1272,7 +1273,7 @@ void mips_malta_init(MachineState *machine)
                                     ram_low_postio);
     }
 
-#ifdef TARGET_WORDS_BIGENDIAN
+#if TARGET_BIG_ENDIAN
     be = 1;
 #else
     be = 0;
@@ -1353,7 +1354,7 @@ void mips_malta_init(MachineState *machine)
          * In little endian mode the 32bit words in the bios are swapped,
          * a neat trick which allows bi-endian firmware.
          */
-#ifndef TARGET_WORDS_BIGENDIAN
+#if !TARGET_BIG_ENDIAN
         {
             uint32_t *end, *addr;
             const size_t swapsize = MIN(bios_size, 0x3e0000);
@@ -1400,7 +1401,12 @@ void mips_malta_init(MachineState *machine)
     empty_slot_init("GT64120", 0, 0x20000000);
 
     /* Southbridge */
-    dev = piix4_create(pci_bus, &isa_bus, &smbus);
+    piix4 = pci_create_simple_multifunction(pci_bus, PCI_DEVFN(10, 0), true,
+                                            TYPE_PIIX4_PCI_DEVICE);
+    dev = DEVICE(piix4);
+    isa_bus = ISA_BUS(qdev_get_child_bus(dev, "isa.0"));
+    pm_dev = DEVICE(object_resolve_path_component(OBJECT(dev), "pm"));
+    smbus = I2C_BUS(qdev_get_child_bus(pm_dev, "i2c"));
 
     /* Interrupt controller */
     qdev_connect_gpio_out_named(dev, "intr", 0, i8259_irq);
@@ -1436,6 +1442,14 @@ static const TypeInfo mips_malta_device = {
     .instance_init = mips_malta_instance_init,
 };
 
+GlobalProperty malta_compat[] = {
+    { "PIIX4_PM", "memory-hotplug-support", "off" },
+    { "PIIX4_PM", "acpi-pci-hotplug-with-bridge-support", "off" },
+    { "PIIX4_PM", "acpi-root-pci-hotplug", "off" },
+    { "PIIX4_PM", "x-not-migrate-acpi-index", "true" },
+};
+const size_t malta_compat_len = G_N_ELEMENTS(malta_compat);
+
 static void mips_malta_machine_init(MachineClass *mc)
 {
     mc->desc = "MIPS Malta Core LV";
@@ -1449,6 +1463,7 @@ static void mips_malta_machine_init(MachineClass *mc)
     mc->default_cpu_type = MIPS_CPU_TYPE_NAME("24Kf");
 #endif
     mc->default_ram_id = "mips_malta.ram";
+    compat_props_add(mc->compat_props, malta_compat, malta_compat_len);
 }
 
 DEFINE_MACHINE("malta", mips_malta_machine_init)

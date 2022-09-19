@@ -904,14 +904,17 @@ static void dcr_write_dma(void *opaque, int dcrn, uint32_t val)
                     int width, i, sidx, didx;
                     uint8_t *rptr, *wptr;
                     hwaddr rlen, wlen;
+                    hwaddr xferlen;
 
                     sidx = didx = 0;
                     width = 1 << ((val & DMA0_CR_PW) >> 25);
+                    xferlen = count * width;
+                    wlen = rlen = xferlen;
                     rptr = cpu_physical_memory_map(dma->ch[chnl].sa, &rlen,
                                                    false);
                     wptr = cpu_physical_memory_map(dma->ch[chnl].da, &wlen,
                                                    true);
-                    if (rptr && wptr) {
+                    if (rptr && rlen == xferlen && wptr && wlen == xferlen) {
                         if (!(val & DMA0_CR_DEC) &&
                             val & DMA0_CR_SAI && val & DMA0_CR_DAI) {
                             /* optimise common case */
@@ -1180,6 +1183,14 @@ static void dcr_write_pcie(void *opaque, int dcrn, uint32_t val)
     case PEGPL_CFGMSK:
         s->cfg_mask = val;
         size = ~(val & 0xfffffffe) + 1;
+        /*
+         * Firmware sets this register to E0000001. Why we are not sure,
+         * but the current guess is anything above PCIE_MMCFG_SIZE_MAX is
+         * ignored.
+         */
+        if (size > PCIE_MMCFG_SIZE_MAX) {
+            size = PCIE_MMCFG_SIZE_MAX;
+        }
         pcie_host_mmcfg_update(PCIE_HOST_BRIDGE(s), val & 1, s->cfg_base, size);
         break;
     case PEGPL_MSGBAH:

@@ -27,6 +27,7 @@
 
 QemuOptsList qemu_semihosting_config_opts = {
     .name = "semihosting-config",
+    .merge_lists = true,
     .implied_opt_name = "enable",
     .head = QTAILQ_HEAD_INITIALIZER(qemu_semihosting_config_opts.head),
     .desc = {
@@ -50,7 +51,6 @@ QemuOptsList qemu_semihosting_config_opts = {
 typedef struct SemihostingConfig {
     bool enabled;
     SemihostingTarget target;
-    Chardev *chardev;
     char **argv;
     int argc;
     const char *cmdline; /* concatenated argv */
@@ -121,11 +121,6 @@ void semihosting_arg_fallback(const char *file, const char *cmd)
     }
 }
 
-Chardev *semihosting_get_chardev(void)
-{
-    return semihosting.chardev;
-}
-
 void qemu_semihosting_enable(void)
 {
     semihosting.enabled = true;
@@ -171,16 +166,19 @@ int qemu_semihosting_config_options(const char *optarg)
     return 0;
 }
 
-void qemu_semihosting_connect_chardevs(void)
+/* We had to defer this until chardevs were created */
+void qemu_semihosting_chardev_init(void)
 {
-    /* We had to defer this until chardevs were created */
+    Chardev *chr = NULL;
+
     if (semihost_chardev) {
-        Chardev *chr = qemu_chr_find(semihost_chardev);
+        chr = qemu_chr_find(semihost_chardev);
         if (chr == NULL) {
             error_report("semihosting chardev '%s' not found",
                          semihost_chardev);
             exit(1);
         }
-        semihosting.chardev = chr;
     }
+
+    qemu_semihosting_console_init(chr);
 }

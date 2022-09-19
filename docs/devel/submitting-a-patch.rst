@@ -18,9 +18,9 @@ one-shot fix, the bare minimum we ask is that:
    <http://git.kernel.org/cgit/linux/kernel/git/torvalds/linux.git/tree/Documentation/SubmittingPatches?id=f6f94e2ab1b33f0082ac22d71f66385a60d8157f#n297>`__
    policy.) ``git commit -s`` or ``git format-patch -s`` will add one.
 -  All contributions to QEMU must be **sent as patches** to the
-   qemu-devel `mailing list <MailingLists>`__. Patch contributions
-   should not be posted on the bug tracker, posted on forums, or
-   externally hosted and linked to. (We have other mailing lists too,
+   qemu-devel `mailing list <https://wiki.qemu.org/Contribute/MailingLists>`__.
+   Patch contributions should not be posted on the bug tracker, posted on
+   forums, or externally hosted and linked to. (We have other mailing lists too,
    but all patches must go to qemu-devel, possibly with a Cc: to another
    list.) ``git send-email`` (`step-by-step setup
    guide <https://git-send-email.io/>`__ and `hints and
@@ -39,7 +39,7 @@ ideas from other posts. If you do subscribe, be prepared for a high
 volume of email, often over one thousand messages in a week. The list is
 moderated; first-time posts from an email address (whether or not you
 subscribed) may be subject to some delay while waiting for a moderator
-to whitelist your address.
+to allow your address.
 
 The larger your contribution is, or if you plan on becoming a long-term
 contributor, then the more important the rest of this page becomes.
@@ -204,23 +204,25 @@ log`` for these keywords for example usage.
 Test your patches
 ~~~~~~~~~~~~~~~~~
 
-Although QEMU has `continuous integration
-services <Testing#Continuous_Integration>`__ that attempt to test
-patches submitted to the list, it still saves everyone time if you have
-already tested that your patch compiles and works. Because QEMU is such
-a large project, it's okay to use configure arguments to limit what is
-built for faster turnaround during your development time; but it is
-still wise to also check that your patches work with a full build before
-submitting a series, especially if your changes might have an unintended
-effect on other areas of the code you don't normally experiment with.
-See `Testing <Testing>`__ for more details on what tests are available.
-Also, it is a wise idea to include a testsuite addition as part of your
-patches - either to ensure that future changes won't regress your new
-feature, or to add a test which exposes the bug that the rest of your
-series fixes. Keeping separate commits for the test and the fix allows
-reviewers to rebase the test to occur first to prove it catches the
-problem, then again to place it last in the series so that bisection
-doesn't land on a known-broken state.
+Although QEMU uses various :ref:`ci` services that attempt to test
+patches submitted to the list, it still saves everyone time if you
+have already tested that your patch compiles and works. Because QEMU
+is such a large project the default configuration won't create a
+testing pipeline on GitLab when a branch is pushed. See the :ref:`CI
+variable documentation<ci_var>` for details on how to control the
+running of tests; but it is still wise to also check that your patches
+work with a full build before submitting a series, especially if your
+changes might have an unintended effect on other areas of the code you
+don't normally experiment with. See :ref:`testing` for more details on
+what tests are available.
+
+Also, it is a wise idea to include a testsuite addition as part of
+your patches - either to ensure that future changes won't regress your
+new feature, or to add a test which exposes the bug that the rest of
+your series fixes. Keeping separate commits for the test and the fix
+allows reviewers to rebase the test to occur first to prove it catches
+the problem, then again to place it last in the series so that
+bisection doesn't land on a known-broken state.
 
 .. _submitting_your_patches:
 

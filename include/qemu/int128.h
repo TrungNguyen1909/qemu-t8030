@@ -83,6 +83,11 @@ static inline Int128 int128_rshift(Int128 a, int n)
     return a >> n;
 }
 
+static inline Int128 int128_urshift(Int128 a, int n)
+{
+    return (__uint128_t)a >> n;
+}
+
 static inline Int128 int128_lshift(Int128 a, int n)
 {
     return a << n;
@@ -123,9 +128,19 @@ static inline bool int128_ge(Int128 a, Int128 b)
     return a >= b;
 }
 
+static inline bool int128_uge(Int128 a, Int128 b)
+{
+    return ((__uint128_t)a) >= ((__uint128_t)b);
+}
+
 static inline bool int128_lt(Int128 a, Int128 b)
 {
     return a < b;
+}
+
+static inline bool int128_ult(Int128 a, Int128 b)
+{
+    return (__uint128_t)a < (__uint128_t)b;
 }
 
 static inline bool int128_le(Int128 a, Int128 b)
@@ -172,6 +187,15 @@ static inline Int128 bswap128(Int128 a)
 #endif
 }
 
+static inline int clz128(Int128 a)
+{
+    if (a >> 64) {
+        return __builtin_clzll(a >> 64);
+    } else {
+        return (a) ? __builtin_clzll((uint64_t)a) + 64 : 128;
+    }
+}
+
 static inline Int128 int128_divu(Int128 a, Int128 b)
 {
     return (__uint128_t)a / (__uint128_t)b;
@@ -205,7 +229,7 @@ typedef struct Int128 Int128;
  * a union with other integer types).
  */
 struct Int128 {
-#ifdef HOST_WORDS_BIGENDIAN
+#if HOST_BIG_ENDIAN
     int64_t hi;
     uint64_t lo;
 #else
@@ -299,6 +323,20 @@ static inline Int128 int128_rshift(Int128 a, int n)
     }
 }
 
+static inline Int128 int128_urshift(Int128 a, int n)
+{
+    uint64_t h = a.hi;
+    if (!n) {
+        return a;
+    }
+    h = h >> (n & 63);
+    if (n >= 64) {
+        return int128_make64(h);
+    } else {
+        return int128_make128((a.lo >> n) | ((uint64_t)a.hi << (64 - n)), h);
+    }
+}
+
 static inline Int128 int128_lshift(Int128 a, int n)
 {
     uint64_t l = a.lo << (n & 63);
@@ -354,9 +392,19 @@ static inline bool int128_ge(Int128 a, Int128 b)
     return a.hi > b.hi || (a.hi == b.hi && a.lo >= b.lo);
 }
 
+static inline bool int128_uge(Int128 a, Int128 b)
+{
+    return (uint64_t)a.hi > (uint64_t)b.hi || (a.hi == b.hi && a.lo >= b.lo);
+}
+
 static inline bool int128_lt(Int128 a, Int128 b)
 {
     return !int128_ge(a, b);
+}
+
+static inline bool int128_ult(Int128 a, Int128 b)
+{
+    return !int128_uge(a, b);
 }
 
 static inline bool int128_le(Int128 a, Int128 b)
@@ -399,6 +447,15 @@ static inline Int128 bswap128(Int128 a)
     return int128_make128(bswap64(a.hi), bswap64(a.lo));
 }
 
+static inline int clz128(Int128 a)
+{
+    if (a.hi) {
+        return __builtin_clzll(a.hi);
+    } else {
+        return (a.lo) ? __builtin_clzll(a.lo) + 64 : 128;
+    }
+}
+
 Int128 int128_divu(Int128, Int128);
 Int128 int128_remu(Int128, Int128);
 Int128 int128_divs(Int128, Int128);
@@ -412,5 +469,7 @@ static inline void bswap128s(Int128 *s)
 }
 
 #define UINT128_MAX int128_make128(~0LL, ~0LL)
+#define INT128_MAX int128_make128(UINT64_MAX, INT64_MAX)
+#define INT128_MIN int128_make128(0, INT64_MIN)
 
 #endif /* INT128_H */

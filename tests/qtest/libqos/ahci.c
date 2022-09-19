@@ -24,11 +24,10 @@
 
 #include "qemu/osdep.h"
 
-#include "libqtest.h"
+#include "../libqtest.h"
 #include "ahci.h"
 #include "pci-pc.h"
 
-#include "qemu-common.h"
 #include "qemu/host-utils.h"
 
 #include "hw/pci/pci_ids.h"

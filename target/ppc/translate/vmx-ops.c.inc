@@ -126,12 +126,8 @@ GEN_VXFORM(vsubuws, 0, 26),
 GEN_VXFORM_DUAL(vsubsbs, bcdtrunc, 0, 28, PPC_ALTIVEC, PPC2_ISA300),
 GEN_VXFORM(vsubshs, 0, 29),
 GEN_VXFORM_DUAL(vsubsws, xpnd04_2, 0, 30, PPC_ALTIVEC, PPC_NONE),
-GEN_VXFORM_207(vadduqm, 0, 4),
-GEN_VXFORM_207(vaddcuq, 0, 5),
-GEN_VXFORM_DUAL(vaddeuqm, vaddecuq, 30, 0xFF, PPC_NONE, PPC2_ALTIVEC_207),
-GEN_VXFORM_DUAL(vsubuqm, bcdtrunc, 0, 20, PPC2_ALTIVEC_207, PPC2_ISA300),
-GEN_VXFORM_DUAL(vsubcuq, bcdutrunc, 0, 21, PPC2_ALTIVEC_207, PPC2_ISA300),
-GEN_VXFORM_DUAL(vsubeuqm, vsubecuq, 31, 0xFF, PPC_NONE, PPC2_ALTIVEC_207),
+GEN_VXFORM_300(bcdtrunc, 0, 20),
+GEN_VXFORM_300(bcdutrunc, 0, 21),
 GEN_VXFORM(vsl, 2, 7),
 GEN_VXFORM(vsr, 2, 11),
 GEN_VXFORM(vpkuhum, 7, 0),
@@ -221,13 +217,9 @@ GEN_VXFORM_UIMM(vcfsx, 5, 13),
 GEN_VXFORM_UIMM(vctuxs, 5, 14),
 GEN_VXFORM_UIMM(vctsxs, 5, 15),
 
-
 #define GEN_VAFORM_PAIRED(name0, name1, opc2)                           \
     GEN_HANDLER(name0##_##name1, 0x04, opc2, 0xFF, 0x00000000, PPC_ALTIVEC)
 GEN_VAFORM_PAIRED(vmhaddshs, vmhraddshs, 16),
-GEN_VAFORM_PAIRED(vmsumubm, vmsummbm, 18),
-GEN_VAFORM_PAIRED(vmsumuhm, vmsumuhs, 19),
-GEN_VAFORM_PAIRED(vmsumshm, vmsumshs, 20),
 GEN_VAFORM_PAIRED(vmaddfp, vnmsubfp, 23),
 
 GEN_VXFORM_DUAL(vclzb, vpopcntb, 1, 28, PPC_NONE, PPC2_ALTIVEC_207),
@@ -241,7 +233,6 @@ GEN_VXFORM_207(vgbbd, 6, 20),
 GEN_VXFORM_207(vpmsumb, 4, 16),
 GEN_VXFORM_207(vpmsumh, 4, 17),
 GEN_VXFORM_207(vpmsumw, 4, 18),
-GEN_VXFORM_207(vpmsumd, 4, 19),
 
 GEN_VXFORM_207(vsbox, 4, 23),
 
