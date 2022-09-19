@@ -134,7 +134,7 @@ static void far_el1_write(CPUARMState *env, const ARMCPRegInfo *ri, uint64_t val
 static void sprr_perm_el0_write(CPUARMState *env, const ARMCPRegInfo *ri, uint64_t value)
 {
     uint64_t perm = raw_read(env, ri);
-    uint32_t mask = env->sprr.sprr_el_br_el1[0][0];
+    uint32_t mask = env->sprr.mprr_el_br_el1[0][0];
     if (arm_current_el(env)) {
         raw_write(env, ri, value);
         return;

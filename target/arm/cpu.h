@@ -252,11 +252,13 @@ typedef struct CPUARMTBFlags {
 #define SPRR_EXTRACT_IDX_ATTR(_sprr_value, _idx) \
 	(((_sprr_value) >> SPRR_SHIFT_FOR_IDX(_idx)) & SPRR_ATTR_MASK)
 
+#define SPRR_MASK_MASK (3ULL)
+
 #define SPRR_MASK_SHIFT_FOR_IDX(x) \
 	((x) << 1ULL)
 
 #define SPRR_MASK_EXTRACT_IDX_ATTR(_sprr_mask_value, _idx) \
-	(((_sprr_mask_value) >> SPRR_MASK_SHIFT_FOR_IDX(_idx)) & APRR_ATTR_MASK)
+	(((_sprr_mask_value) >> SPRR_MASK_SHIFT_FOR_IDX(_idx)) & SPRR_MASK_MASK)
 
 typedef struct CPUArchState {
     /* Regs for current mode.  */
@@ -583,7 +585,7 @@ typedef struct CPUArchState {
     struct {
         uint64_t sprr_el_br_el1[4][2];
         uint64_t sprr_config_el[4];
-        uint32_t mprr_el_br_el1[4][2];
+        uint64_t mprr_el_br_el1[4][2];
     } sprr;
 
     struct {
