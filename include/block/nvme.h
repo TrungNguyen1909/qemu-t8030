@@ -1680,14 +1680,4 @@ static inline void _nvme_check_size(void)
     QEMU_BUILD_BUG_ON(sizeof(NvmeSecCtrlEntry) != 32);
     QEMU_BUILD_BUG_ON(sizeof(NvmeSecCtrlList) != 4096);
 }
-
-#define NVME_APPLE_MAX_PEND_CMDS		0x1210
-#define   NVME_APPLE_MAX_PEND_CMDS_VAL	((64 << 16) | 64)
-#define NVME_APPLE_BOOT_STATUS		    0x1300
-#define   NVME_APPLE_BOOT_STATUS_OK		0xde71ce55
-#define NVME_APPLE_BASE_CMD_ID		    0x1308
-#define   NVME_APPLE_BASE_CMD_ID_MASK	0xffff
-#define NVME_APPLE_LINEAR_SQ_CTRL		0x24908
-#define   NVME_APPLE_LINEAR_SQ_CTRL_EN	(1 << 0)
-#define NVME_APPLE_MODESEL              0x1304
 #endif

@@ -6960,21 +6960,6 @@ static uint64_t nvme_mmio_read(void *opaque, hwaddr addr, unsigned size)
     }
 
     if (addr > sizeof(n->bar) - size) {
-        if (n->params.is_apple_ans) {
-            switch (addr) {
-                case NVME_APPLE_MAX_PEND_CMDS:
-                    return NVME_APPLE_MAX_PEND_CMDS_VAL;
-                    break;
-                case NVME_APPLE_BOOT_STATUS:
-                    return NVME_APPLE_BOOT_STATUS_OK;
-                    break;
-                case NVME_APPLE_BASE_CMD_ID:
-                    return 0x6000;
-                    break;
-                default:
-                    break;
-            }
-        }
         NVME_GUEST_ERR(pci_nvme_ub_mmiord_invalid_ofs,
                        "MMIO read beyond last register,"
                        " offset=0x%"PRIx64", returning 0", addr);
@@ -7166,11 +7151,8 @@ static void nvme_mmio_write(void *opaque, hwaddr addr, uint64_t data,
 
     if (addr < sizeof(n->bar)) {
         nvme_write_bar(n, addr, data, size);
-    } else if (addr < sizeof(n->bar) + 2 * (n->params.max_ioqpairs + 1) * NVME_DB_SIZE) {
+    } else {
         nvme_process_db(n, addr, data);
-    } else if (n->params.is_apple_ans) {
-        fprintf(stderr, "ANS2: MMIO write to unknown vendor register,"
-                        " offset=0x%"PRIx64" value=0x%"PRIx64", returning\n", addr, data);
     }
 }
 
@@ -7523,7 +7505,6 @@ static int nvme_init_pci(NvmeCtrl *n, PCIDevice *pci_dev, Error **errp)
     uint64_t bar_size;
     unsigned msix_table_offset, msix_pba_offset;
     int ret;
-    uint64_t reg_size;
 
     Error *err = NULL;
 
@@ -7549,14 +7530,10 @@ static int nvme_init_pci(NvmeCtrl *n, PCIDevice *pci_dev, Error **errp)
     /* add one to max_ioqpairs to account for the admin queue pair */
     bar_size = nvme_bar_size(n->params.max_ioqpairs + 1, n->params.msix_qsize,
                              &msix_table_offset, &msix_pba_offset);
-    reg_size = msix_table_offset;
-    if (n->params.is_apple_ans) {
-        reg_size = 0x40000;
-    }
 
     memory_region_init(&n->bar0, OBJECT(n), "nvme-bar0", bar_size);
     memory_region_init_io(&n->iomem, OBJECT(n), &nvme_mmio_ops, n, "nvme",
-                          reg_size);
+                          msix_table_offset);
     memory_region_add_subregion(&n->bar0, 0, &n->iomem);
 
     if (pci_is_vf(pci_dev)) {
@@ -7663,8 +7640,12 @@ static void nvme_init_ctrl(NvmeCtrl *n, PCIDevice *pci_dev)
     id->wctemp = cpu_to_le16(NVME_TEMPERATURE_WARNING);
     id->cctemp = cpu_to_le16(NVME_TEMPERATURE_CRITICAL);
 
-    // TODO: ANS2: IOSQES = 7 on non-admin queues
-    id->sqes = (0x7 << 4) | 0x6;
+    if (n->params.is_apple_ans) {
+        /* XXX: ANS2: IOSQES = 7 on non-admin queues */
+        id->sqes = (0x7 << 4) | 0x6;
+    } else {
+        id->sqes = (0x6 << 4) | 0x6;
+    }
     id->cqes = (0x4 << 4) | 0x4;
     id->nn = cpu_to_le32(NVME_MAX_NAMESPACES);
     id->oncs = cpu_to_le16(NVME_ONCS_WRITE_ZEROES | NVME_ONCS_TIMESTAMP |

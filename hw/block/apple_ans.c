@@ -17,6 +17,14 @@
 #include "hw/misc/apple_mbox.h"
 #include "hw/block/apple_ans.h"
 
+//#define DEBUG_ANS
+#ifdef DEBUG_ANS
+#define DPRINTF(fmt, ...) \
+do { qemu_log_mask(LOG_UNIMP, " fmt , ## __VA_ARGS__); } while (0)
+#else
+#define DPRINTF(fmt, ...) do {} while(0)
+#endif
+
 #define TYPE_APPLE_ANS "apple.ans"
 OBJECT_DECLARE_SIMPLE_TYPE(AppleANSState, APPLE_ANS)
 
@@ -25,8 +33,16 @@ do { qemu_log_mask(LOG_GUEST_ERROR, "ANS2: message:" \
                    " ep=%u msg=0x" TARGET_FMT_plx, \
                    ep, msg); } while (0)
 
-#define APPLE_BOOT_STATUS       0x1300
-#define   APPLE_BOOT_STATUS_OK  0xde71ce55
+#define NVME_APPLE_MAX_PEND_CMDS		0x1210
+#define   NVME_APPLE_MAX_PEND_CMDS_VAL	((64 << 16) | 64)
+#define NVME_APPLE_BOOT_STATUS		    0x1300
+#define   NVME_APPLE_BOOT_STATUS_OK		0xde71ce55
+#define NVME_APPLE_BASE_CMD_ID		    0x1308
+#define   NVME_APPLE_BASE_CMD_ID_MASK	0xffff
+#define NVME_APPLE_LINEAR_SQ_CTRL		0x24908
+#define   NVME_APPLE_LINEAR_SQ_CTRL_EN	(1 << 0)
+#define NVME_APPLE_MODESEL              0x1304
+#define NVME_APPLE_VENDOR_REG_SIZE      (0x60000)
 
 typedef struct QEMU_PACKED {
     uint32_t NSID;
@@ -36,7 +52,7 @@ typedef struct QEMU_PACKED {
 
 struct AppleANSState {
     PCIExpressHost parent_obj;
-    MemoryRegion *iomems[4];
+    MemoryRegion iomems[4];
     MemoryRegion io_mmio;
     MemoryRegion io_ioport;
     MemoryRegion msix;
@@ -45,6 +61,7 @@ struct AppleANSState {
 
     NvmeCtrl nvme;
     uint32_t nvme_interrupt_idx;
+    uint32_t vendor_reg[NVME_APPLE_VENDOR_REG_SIZE / sizeof(uint32_t)];
     bool started;
 };
 
@@ -52,7 +69,7 @@ static void ascv2_core_reg_write(void *opaque, hwaddr addr,
                   uint64_t data,
                   unsigned size)
 {
-    qemu_log_mask(LOG_UNIMP, "ANS2: AppleASCWrapV2 core reg WRITE @ 0x"
+    DPRINTF("ANS2: AppleASCWrapV2 core reg WRITE @ 0x"
                   TARGET_FMT_plx " value: 0x" TARGET_FMT_plx "\n", addr, data);
 }
 
@@ -60,7 +77,7 @@ static uint64_t ascv2_core_reg_read(void *opaque,
                      hwaddr addr,
                      unsigned size)
 {
-    qemu_log_mask(LOG_UNIMP, "ANS2: AppleASCWrapV2 core reg READ @ 0x"
+    DPRINTF("ANS2: AppleASCWrapV2 core reg READ @ 0x"
                   TARGET_FMT_plx "\n", addr);
     return 0;
 }
@@ -81,13 +98,13 @@ static void iop_autoboot_reg_write(void *opaque,
                   uint64_t data,
                   unsigned size)
 {
-    qemu_log_mask(LOG_UNIMP, "ANS2: AppleA7IOP autoboot reg WRITE @ 0x"
+    DPRINTF("ANS2: AppleA7IOP autoboot reg WRITE @ 0x"
                   TARGET_FMT_plx " value: 0x" TARGET_FMT_plx "\n", addr, data);
 }
 
 static uint64_t iop_autoboot_reg_read(void *opaque, hwaddr addr, unsigned size)
 {
-    qemu_log_mask(LOG_UNIMP, "ANS2: AppleA7IOP autoboot reg READ @ 0x"
+    DPRINTF("ANS2: AppleA7IOP autoboot reg READ @ 0x"
                   TARGET_FMT_plx "\n", addr);
     return 0;
 }
@@ -95,6 +112,54 @@ static uint64_t iop_autoboot_reg_read(void *opaque, hwaddr addr, unsigned size)
 static const MemoryRegionOps iop_autoboot_reg_ops = {
     .write = iop_autoboot_reg_write,
     .read = iop_autoboot_reg_read,
+};
+
+static void apple_ans_vendor_reg_write(void *opaque, hwaddr addr,
+                                       uint64_t data,
+                                       unsigned size)
+{
+    AppleANSState *s = APPLE_ANS(opaque);
+    uint32_t *mmio = &s->vendor_reg[addr >> 2];
+    DPRINTF("ANS2: vendor reg WRITE @ 0x"
+                  TARGET_FMT_plx " value: 0x" TARGET_FMT_plx "\n", addr, data);
+    *mmio = data;
+}
+
+static uint64_t apple_ans_vendor_reg_read(void *opaque,
+                                          hwaddr addr,
+                                          unsigned size)
+{
+    AppleANSState *s = APPLE_ANS(opaque);
+    uint32_t *mmio = &s->vendor_reg[addr >> 2];
+    uint32_t val = *mmio;
+
+    DPRINTF("ANS2: vendor reg READ @ 0x"
+                  TARGET_FMT_plx "\n", addr);
+    switch (addr) {
+        case NVME_APPLE_MAX_PEND_CMDS:
+            val = NVME_APPLE_MAX_PEND_CMDS_VAL;
+            break;
+        case NVME_APPLE_BOOT_STATUS:
+            val = NVME_APPLE_BOOT_STATUS_OK;
+            break;
+        case NVME_APPLE_BASE_CMD_ID:
+            val = 0x6000;
+            break;
+        default:
+            break;
+    }
+    return val;
+}
+
+static const MemoryRegionOps apple_ans_vendor_reg_ops = {
+    .write = apple_ans_vendor_reg_write,
+    .read = apple_ans_vendor_reg_read,
+    .endianness = DEVICE_NATIVE_ENDIAN,
+    .impl.min_access_size = 4,
+    .impl.max_access_size = 4,
+    .valid.min_access_size = 4,
+    .valid.max_access_size = 8,
+    .valid.unaligned = false,
 };
 
 static void apple_ans_set_irq(void *opaque, int irq_num, int level)
@@ -138,6 +203,7 @@ SysBusDevice *apple_ans_create(DTBNode *node, uint32_t protocol_version)
     DTBProp *prop;
     uint64_t *reg;
     uint32_t data;
+    MemoryRegion *alias;
 
     dev = qdev_new(TYPE_APPLE_ANS);
     s = APPLE_ANS(dev);
@@ -161,15 +227,13 @@ SysBusDevice *apple_ans_create(DTBNode *node, uint32_t protocol_version)
     apple_mbox_register_endpoint(s->mbox, 1, apple_ans_ep_handler);
     sysbus_init_mmio(sbd, sysbus_mmio_get_region(SYS_BUS_DEVICE(s->mbox), 0));
 
-    s->iomems[1] = g_new(MemoryRegion, 1);
-    memory_region_init_io(s->iomems[1], OBJECT(dev), &ascv2_core_reg_ops, s,
+    memory_region_init_io(&s->iomems[1], OBJECT(dev), &ascv2_core_reg_ops, s,
                           TYPE_APPLE_ANS ".ascv2-core-reg", reg[3]);
-    sysbus_init_mmio(sbd, s->iomems[1]);
+    sysbus_init_mmio(sbd, &s->iomems[1]);
 
-    s->iomems[2] = g_new(MemoryRegion, 1);
-    memory_region_init_io(s->iomems[2], OBJECT(dev), &iop_autoboot_reg_ops, s,
+    memory_region_init_io(&s->iomems[2], OBJECT(dev), &iop_autoboot_reg_ops, s,
                           TYPE_APPLE_ANS ".iop-autoboot-reg", reg[5]);
-    sysbus_init_mmio(sbd, s->iomems[2]);
+    sysbus_init_mmio(sbd, &s->iomems[2]);
 
     sysbus_pass_irq(sbd, SYS_BUS_DEVICE(s->mbox));
     sysbus_init_irq(sbd, &s->irq);
@@ -187,10 +251,12 @@ SysBusDevice *apple_ans_create(DTBNode *node, uint32_t protocol_version)
                             "QEMUT8030ANS", &error_fatal);
     object_property_set_bool(OBJECT(&s->nvme), "is-apple-ans",
                              true, &error_fatal);
-    object_property_set_uint(OBJECT(&s->nvme), "max_ioqpairs", 8, &error_fatal);
+    object_property_set_uint(OBJECT(&s->nvme), "max_ioqpairs", 7, &error_fatal);
     object_property_set_uint(OBJECT(&s->nvme), "mdts", 8, &error_fatal);
-    object_property_set_uint(OBJECT(&s->nvme), "logical_block_size", 4096, &error_fatal);
-    object_property_set_uint(OBJECT(&s->nvme), "physical_block_size", 4096, &error_fatal);
+    object_property_set_uint(OBJECT(&s->nvme), "logical_block_size", 4096,
+                             &error_fatal);
+    object_property_set_uint(OBJECT(&s->nvme), "physical_block_size", 4096,
+                             &error_fatal);
 
     pcie_host_mmcfg_init(pex, PCIE_MMCFG_SIZE_MAX);
     memory_region_init(&s->io_mmio, OBJECT(s), "ans_pci_mmio", UINT64_MAX);
@@ -200,10 +266,13 @@ SysBusDevice *apple_ans_create(DTBNode *node, uint32_t protocol_version)
                                      pci_swizzle_map_irq_fn, s, &s->io_mmio,
                                      &s->io_ioport, 0, 4, TYPE_PCIE_BUS);
 
-    s->iomems[3] = g_new(MemoryRegion, 1);
-    memory_region_init_alias(s->iomems[3], OBJECT(dev), TYPE_APPLE_ANS ".nvme",
-                             &s->nvme.iomem, 0, reg[7]);
-    sysbus_init_mmio(sbd, s->iomems[3]);
+    memory_region_init_io(&s->iomems[3], OBJECT(dev), &apple_ans_vendor_reg_ops,
+                          s, TYPE_APPLE_ANS ".mmio", reg[7]);
+    alias = g_new(MemoryRegion, 1);
+    memory_region_init_alias(alias, OBJECT(dev), TYPE_APPLE_ANS ".nvme",
+                             &s->nvme.iomem, 0, 0x1200);
+    memory_region_add_subregion_overlap(&s->iomems[3], 0, alias, 1);
+    sysbus_init_mmio(sbd, &s->iomems[3]);
 
     return sbd;
 }
