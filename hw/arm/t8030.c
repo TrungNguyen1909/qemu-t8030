@@ -1753,8 +1753,10 @@ static void t8030_machine_init(MachineState *machine)
     data = 0x4;
     set_dtb_prop(child, "board-id", 4, &data);
 
-    uint64_t ecid = 0x1122334455667788;
-    set_dtb_prop(child, "unique-chip-id", 8, &ecid);
+    if (tms->ecid == 0) {
+        tms->ecid = 0x1122334455667788;
+    }
+    set_dtb_prop(child, "unique-chip-id", 8, &tms->ecid);
 
     /* update the display parameters */
     set_dtb_prop(child, "display-rotation", sizeof(display_rotation),
@@ -1908,6 +1910,30 @@ static void t8030_set_rtbuddyv2_protocol_version(Object *obj, Visitor *v,
     tms->rtbuddyv2_protocol_version = value;
 }
 
+static void t8030_get_ecid(Object *obj, Visitor *v,
+                           const char *name, void *opaque,
+                           Error **errp)
+{
+    T8030MachineState *tms = T8030_MACHINE(obj);
+    int64_t value = tms->ecid;
+
+    visit_type_int(v, name, &value, errp);
+}
+
+static void t8030_set_ecid(Object *obj, Visitor *v,
+                           const char *name, void *opaque,
+                           Error **errp)
+{
+    T8030MachineState *tms = T8030_MACHINE(obj);
+    int64_t value;
+
+    if (!visit_type_int(v, name, &value, errp)) {
+        return;
+    }
+
+    tms->ecid = value;
+}
+
 static void t8030_set_kaslr_off(Object *obj, bool value, Error **errp)
 {
     T8030MachineState *tms = T8030_MACHINE(obj);
@@ -1970,6 +1996,12 @@ static void t8030_machine_class_init(ObjectClass *oc, void *data)
         NULL, NULL);
     object_class_property_set_description(oc, "rtbuddyv2-protocol-version",
         "Override RTBuddyV2 protocol version");
+    object_class_property_add(oc, "ecid", "uint64",
+        t8030_get_ecid,
+        t8030_set_ecid,
+        NULL, NULL);
+    object_class_property_set_description(oc, "ecid",
+        "Set device's ECID");
     object_class_property_add_bool(oc, "kaslr-off",
                                   t8030_get_kaslr_off,
                                   t8030_set_kaslr_off);
