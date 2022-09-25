@@ -508,7 +508,7 @@ uint8_t *load_trustcache_from_file(const char *filename, uint64_t *size)
 
     file_size = (unsigned long)length;
 
-    trustcache_size = file_size + 8;
+    trustcache_size = align_16k_high(file_size + 8);
     trustcache_data = (uint32_t *)g_malloc(trustcache_size);
     trustcache_data[0] = 1; //#trustcaches
     trustcache_data[1] = 8; //offset
@@ -546,7 +546,7 @@ uint8_t *load_trustcache_from_file(const char *filename, uint64_t *size)
         exit(EXIT_FAILURE);
     }
 
-    *size = align_16k_high(trustcache_size);
+    *size = trustcache_size;
     return (uint8_t *)trustcache_data;
 }
 
