@@ -181,6 +181,7 @@ static void apple_hw_i2c_reg_write(void *opaque,
             if (s->xip) {
                 i2c_end_transfer(s->bus);
                 REG(s, rSMSTA) |= kSMSTAxen;
+                s->xip = false;
             }
         }
         break;
