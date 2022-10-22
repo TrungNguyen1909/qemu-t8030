@@ -10,7 +10,7 @@
 #include "qemu/timer.h"
 #include "hw/arm/xnu_dtb.h"
 
-//#define DEBUG_APPLE_HW_I2C
+//#define DEBUG_APPLE_I2C
 
 #define MMIO_SIZE   (0x10000)
 
@@ -93,7 +93,7 @@
 
 #define REG(_s,_x) *(uint32_t *)&_s->reg[_x]
 
-static void apple_hw_i2c_update_irq(AppleHWI2CState *s)
+static void apple_i2c_update_irq(AppleI2CState *s)
 {
     bool level = false;
     if (REG(s, rSMSTA) & REG(s, rIMASK)) {
@@ -107,14 +107,14 @@ static void apple_hw_i2c_update_irq(AppleHWI2CState *s)
     }
 }
 
-static void apple_hw_i2c_reg_write(void *opaque,
+static void apple_i2c_reg_write(void *opaque,
                   hwaddr addr,
                   uint64_t data,
                   unsigned size)
 {
-    AppleHWI2CState *s = APPLE_HW_I2C(opaque);
+    AppleI2CState *s = APPLE_I2C(opaque);
     DeviceState *dev = DEVICE(opaque);
-    #ifdef DEBUG_APPLE_HW_I2C
+    #ifdef DEBUG_APPLE_I2C
     qemu_log_mask(LOG_UNIMP, "%s: reg WRITE @ 0x" TARGET_FMT_plx
                              " value: 0x" TARGET_FMT_plx "\n", dev->id, addr, data);
     #endif
@@ -205,15 +205,15 @@ static void apple_hw_i2c_reg_write(void *opaque,
 
     *mmio = value;
     if (iflg) {
-        apple_hw_i2c_update_irq(s);
+        apple_i2c_update_irq(s);
     }
 }
 
-static uint64_t apple_hw_i2c_reg_read(void *opaque,
+static uint64_t apple_i2c_reg_read(void *opaque,
                      hwaddr addr,
                      unsigned size)
 {
-    AppleHWI2CState *s = APPLE_HW_I2C(opaque);
+    AppleI2CState *s = APPLE_I2C(opaque);
     uint32_t *mmio = (uint32_t *)&s->reg[addr];
     uint32_t value = *mmio;
 
@@ -236,7 +236,7 @@ static uint64_t apple_hw_i2c_reg_read(void *opaque,
         break;
     }
 
-    #ifdef DEBUG_APPLE_HW_I2C
+    #ifdef DEBUG_APPLE_I2C
     qemu_log_mask(LOG_UNIMP, "%s: reg READ @ 0x" TARGET_FMT_plx
                              " value: 0x%x\n", DEVICE(s)->id, addr, value);
     #endif
@@ -244,17 +244,17 @@ static uint64_t apple_hw_i2c_reg_read(void *opaque,
 }
 
 static const MemoryRegionOps i2c_reg_ops = {
-    .write = apple_hw_i2c_reg_write,
-    .read = apple_hw_i2c_reg_read,
+    .write = apple_i2c_reg_write,
+    .read = apple_i2c_reg_read,
     .valid.min_access_size = 4,
     .valid.max_access_size = 4,
     .endianness = DEVICE_NATIVE_ENDIAN,
 };
 
-static void apple_hw_i2c_reset_enter(Object *obj, ResetType type)
+static void apple_i2c_reset_enter(Object *obj, ResetType type)
 {
-    AppleHWI2CClass *c = APPLE_HW_I2C_GET_CLASS(obj);
-    AppleHWI2CState *s = APPLE_HW_I2C(obj);
+    AppleHWI2CClass *c = APPLE_I2C_GET_CLASS(obj);
+    AppleI2CState *s = APPLE_I2C(obj);
 
     if (c->parent_phases.enter) {
         c->parent_phases.enter(obj, type);
@@ -264,10 +264,10 @@ static void apple_hw_i2c_reset_enter(Object *obj, ResetType type)
     fifo8_reset(&s->rx_fifo);
 }
 
-static void apple_hw_i2c_reset_hold(Object *obj)
+static void apple_i2c_reset_hold(Object *obj)
 {
-    AppleHWI2CClass *c = APPLE_HW_I2C_GET_CLASS(obj);
-    AppleHWI2CState *s = APPLE_HW_I2C(obj);
+    AppleHWI2CClass *c = APPLE_I2C_GET_CLASS(obj);
+    AppleI2CState *s = APPLE_I2C(obj);
 
     if (c->parent_phases.hold) {
         c->parent_phases.hold(obj);
@@ -276,10 +276,10 @@ static void apple_hw_i2c_reset_hold(Object *obj)
     s->last_irq = 0;
 }
 
-static void apple_hw_i2c_reset_exit(Object *obj)
+static void apple_i2c_reset_exit(Object *obj)
 {
-    AppleHWI2CClass *c = APPLE_HW_I2C_GET_CLASS(obj);
-    AppleHWI2CState *s = APPLE_HW_I2C(obj);
+    AppleHWI2CClass *c = APPLE_I2C_GET_CLASS(obj);
+    AppleI2CState *s = APPLE_I2C(obj);
 
     if (c->parent_phases.exit) {
         c->parent_phases.exit(obj);
@@ -289,11 +289,11 @@ static void apple_hw_i2c_reset_exit(Object *obj)
     qemu_set_irq(s->scl, 1);
 }
 
-SysBusDevice *apple_hw_i2c_create(const char *name)
+SysBusDevice *apple_i2c_create(const char *name)
 {
-    DeviceState *dev = qdev_new(TYPE_APPLE_HW_I2C);
+    DeviceState *dev = qdev_new(TYPE_APPLE_I2C);
     SysBusDevice *sbd = SYS_BUS_DEVICE(dev);
-    AppleHWI2CState *s = APPLE_HW_I2C(dev);
+    AppleI2CState *s = APPLE_I2C(dev);
     char bus_name[32] = { 0 };
 
     dev->id = g_strdup(name);
@@ -304,8 +304,8 @@ SysBusDevice *apple_hw_i2c_create(const char *name)
     sysbus_init_mmio(sbd, &s->iomem);
     sysbus_init_irq(sbd, &s->irq);
 
-    qdev_init_gpio_out_named(DEVICE(dev), &s->sda, APPLE_HW_I2C_SDA, 1);
-    qdev_init_gpio_out_named(DEVICE(dev), &s->scl, APPLE_HW_I2C_SCL, 1);
+    qdev_init_gpio_out_named(DEVICE(dev), &s->sda, APPLE_I2C_SDA, 1);
+    qdev_init_gpio_out_named(DEVICE(dev), &s->scl, APPLE_I2C_SCL, 1);
 
     s->last_irq = 0;
     fifo8_create(&s->rx_fifo, 0x100);
@@ -313,46 +313,46 @@ SysBusDevice *apple_hw_i2c_create(const char *name)
     return sbd;
 }
 
-static const VMStateDescription vmstate_apple_hw_i2c = {
-    .name = "apple_hw_i2c",
+static const VMStateDescription vmstate_apple_i2c = {
+    .name = "apple_i2c",
     .version_id = 1,
     .minimum_version_id = 1,
     .fields = (VMStateField[]) {
-        VMSTATE_UINT8_ARRAY(reg, AppleHWI2CState, APPLE_HW_I2C_MMIO_SIZE),
-        VMSTATE_FIFO8(rx_fifo, AppleHWI2CState),
-        VMSTATE_BOOL(last_irq, AppleHWI2CState),
-        VMSTATE_BOOL(nak, AppleHWI2CState),
-        VMSTATE_BOOL(xip, AppleHWI2CState),
-        VMSTATE_BOOL(is_recv, AppleHWI2CState),
+        VMSTATE_UINT8_ARRAY(reg, AppleI2CState, APPLE_I2C_MMIO_SIZE),
+        VMSTATE_FIFO8(rx_fifo, AppleI2CState),
+        VMSTATE_BOOL(last_irq, AppleI2CState),
+        VMSTATE_BOOL(nak, AppleI2CState),
+        VMSTATE_BOOL(xip, AppleI2CState),
+        VMSTATE_BOOL(is_recv, AppleI2CState),
         VMSTATE_END_OF_LIST()
     }
 };
 
-static void apple_hw_i2c_class_init(ObjectClass *klass, void *data)
+static void apple_i2c_class_init(ObjectClass *klass, void *data)
 {
     DeviceClass *dc = DEVICE_CLASS(klass);
-    AppleHWI2CClass *c = APPLE_HW_I2C_CLASS(klass);
+    AppleHWI2CClass *c = APPLE_I2C_CLASS(klass);
     ResettableClass *rc = RESETTABLE_CLASS(klass);
 
-    dc->desc = "Apple HW I2C Controller";
-    dc->vmsd = &vmstate_apple_hw_i2c;
-    resettable_class_set_parent_phases(rc, apple_hw_i2c_reset_enter,
-                                       apple_hw_i2c_reset_hold,
-                                       apple_hw_i2c_reset_exit,
+    dc->desc = "Apple I2C Controller";
+    dc->vmsd = &vmstate_apple_i2c;
+    resettable_class_set_parent_phases(rc, apple_i2c_reset_enter,
+                                       apple_i2c_reset_hold,
+                                       apple_i2c_reset_exit,
                                        &c->parent_phases);
 }
 
-static const TypeInfo apple_hw_i2c_type_info = {
-    .name = TYPE_APPLE_HW_I2C,
+static const TypeInfo apple_i2c_type_info = {
+    .name = TYPE_APPLE_I2C,
     .parent = TYPE_SYS_BUS_DEVICE,
-    .instance_size = sizeof(AppleHWI2CState),
+    .instance_size = sizeof(AppleI2CState),
     .class_size = sizeof(AppleHWI2CClass),
-    .class_init = apple_hw_i2c_class_init,
+    .class_init = apple_i2c_class_init,
 };
 
-static void apple_hw_i2c_register_types(void)
+static void apple_i2c_register_types(void)
 {
-    type_register_static(&apple_hw_i2c_type_info);
+    type_register_static(&apple_i2c_type_info);
 }
 
-type_init(apple_hw_i2c_register_types)
+type_init(apple_i2c_register_types)

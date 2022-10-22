@@ -428,7 +428,7 @@ static void s8000_create_i2c(MachineState *machine, const char *name)
 
     child = find_dtb_node(child, name);
     assert(child);
-    i2c = apple_hw_i2c_create(name);
+    i2c = apple_i2c_create(name);
     assert(i2c);
     object_property_add_child(OBJECT(machine), name, OBJECT(i2c));
 
