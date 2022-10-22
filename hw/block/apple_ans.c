@@ -20,7 +20,7 @@
 //#define DEBUG_ANS
 #ifdef DEBUG_ANS
 #define DPRINTF(fmt, ...) \
-do { qemu_log_mask(LOG_UNIMP, " fmt , ## __VA_ARGS__); } while (0)
+do { qemu_log_mask(LOG_UNIMP, fmt , ## __VA_ARGS__); } while (0)
 #else
 #define DPRINTF(fmt, ...) do {} while(0)
 #endif
