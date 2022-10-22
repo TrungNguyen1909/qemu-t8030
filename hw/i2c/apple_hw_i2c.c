@@ -285,6 +285,8 @@ static void apple_hw_i2c_reset_exit(Object *obj)
         c->parent_phases.exit(obj);
     }
 
+    qemu_set_irq(s->sda, 1);
+    qemu_set_irq(s->scl, 1);
 }
 
 SysBusDevice *apple_hw_i2c_create(const char *name)
@@ -301,6 +303,9 @@ SysBusDevice *apple_hw_i2c_create(const char *name)
                           &i2c_reg_ops, s, dev->id, MMIO_SIZE);
     sysbus_init_mmio(sbd, &s->iomem);
     sysbus_init_irq(sbd, &s->irq);
+
+    qdev_init_gpio_out_named(DEVICE(dev), &s->sda, APPLE_HW_I2C_SDA, 1);
+    qdev_init_gpio_out_named(DEVICE(dev), &s->scl, APPLE_HW_I2C_SCL, 1);
 
     s->last_irq = 0;
     fifo8_create(&s->rx_fifo, 0x100);

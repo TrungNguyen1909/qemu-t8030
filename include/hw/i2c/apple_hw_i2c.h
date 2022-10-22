@@ -10,6 +10,8 @@
 OBJECT_DECLARE_TYPE(AppleHWI2CState, AppleHWI2CClass, APPLE_HW_I2C)
 
 #define APPLE_HW_I2C_MMIO_SIZE  (0x10000)
+#define APPLE_HW_I2C_SDA        "i2c.sda"
+#define APPLE_HW_I2C_SCL        "i2c.scl"
 
 typedef struct AppleHWI2CClass {
     /*< private >*/
@@ -27,6 +29,7 @@ typedef struct AppleHWI2CState {
     MemoryRegion iomem;
     I2CBus *bus;
     qemu_irq irq;
+    qemu_irq sda, scl;
     uint8_t reg[APPLE_HW_I2C_MMIO_SIZE];
     Fifo8 rx_fifo;
     bool last_irq;
