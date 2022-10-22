@@ -113,9 +113,10 @@ static void apple_hw_i2c_reg_write(void *opaque,
                   unsigned size)
 {
     AppleHWI2CState *s = APPLE_HW_I2C(opaque);
+    DeviceState *dev = DEVICE(opaque);
     #ifdef DEBUG_APPLE_HW_I2C
-    qemu_log_mask(LOG_UNIMP, "I2C: reg WRITE @ 0x" TARGET_FMT_plx
-                             " value: 0x" TARGET_FMT_plx "\n", addr, data);
+    qemu_log_mask(LOG_UNIMP, "%s: reg WRITE @ 0x" TARGET_FMT_plx
+                             " value: 0x" TARGET_FMT_plx "\n", dev->id, addr, data);
     #endif
 
     uint32_t *mmio = (uint32_t *)&s->reg[addr];
@@ -136,7 +137,7 @@ static void apple_hw_i2c_reg_write(void *opaque,
             }
             if (i2c_start_transfer(s->bus, addr, s->is_recv) != 0) {
                 qemu_log_mask(LOG_GUEST_ERROR,
-                              "I2C: can't find device @ 0x%x\n", addr);
+                              "%s: can't find device @ 0x%x\n", dev->id, addr);
                 REG(s, rSMSTA) |= kSMSTAmtn;
                 break;
             }
@@ -146,7 +147,6 @@ static void apple_hw_i2c_reg_write(void *opaque,
         } else if (s->xip) {
             if (value & kMTXFIFORead) {
                 uint8_t len = kMTXFIFOData(value);
-                //printf("I2C: Receiving 0x%x bytes\n", len);
                 if (!s->is_recv) {
                     s->is_recv = 1;
                     if (i2c_start_transfer(s->bus, addr, s->is_recv) != 0) {
@@ -237,8 +237,8 @@ static uint64_t apple_hw_i2c_reg_read(void *opaque,
     }
 
     #ifdef DEBUG_APPLE_HW_I2C
-    qemu_log_mask(LOG_UNIMP, "I2C: reg READ @ 0x" TARGET_FMT_plx
-                             " value: 0x%x\n", addr, value);
+    qemu_log_mask(LOG_UNIMP, "%s: reg READ @ 0x" TARGET_FMT_plx
+                             " value: 0x%x\n", DEVICE(s)->id, addr, value);
     #endif
     return value;
 }
