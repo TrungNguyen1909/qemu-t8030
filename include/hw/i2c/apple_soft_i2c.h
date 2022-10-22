@@ -1,5 +1,5 @@
-#ifndef APPLE_I2C_H
-#define APPLE_I2C_H
+#ifndef APPLE_SOFT_I2C_H
+#define APPLE_SOFT_I2C_H
 
 #include "hw/sysbus.h"
 #include "qom/object.h"
@@ -23,4 +23,4 @@ struct AppleI2CState {
 };
 
 DeviceState *apple_i2c_create(DTBNode *node);
-#endif /* APPLE_I2C_H */
+#endif /* APPLE_SOFT_I2C_H */

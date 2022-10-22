@@ -1,5 +1,5 @@
 #include "qemu/osdep.h"
-#include "hw/i2c/apple_i2c.h"
+#include "hw/i2c/apple_soft_i2c.h"
 #include "hw/i2c/i2c.h"
 #include "hw/i2c/bitbang_i2c.h"
 #include "hw/irq.h"
