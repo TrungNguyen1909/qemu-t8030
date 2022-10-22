@@ -393,6 +393,75 @@ static const MemoryRegionOps apple_spmi_control_ops = {
     .endianness = DEVICE_NATIVE_ENDIAN,
 };
 
+static uint64_t apple_spmi_fault_read(void *opaque, hwaddr addr, unsigned size)
+{
+    AppleSPMIState *s = APPLE_SPMI(opaque);
+    bool qflg = false;
+    bool iflg = false;
+    uint32_t value = 0;
+    value = s->fault_reg[addr >> 2];
+
+    switch (addr) {
+    case SPMI_QUEUE_STATUS:
+        value &= ~(SPMI_QUEUE_STATUS_REQ_EMPTY | SPMI_QUEUE_STATUS_RSP_EMPTY);
+        value |= SPMI_QUEUE_STATUS_REQ_EMPTY;
+        value |= SPMI_QUEUE_STATUS_RSP_EMPTY;
+        break;
+    default:
+        break;
+    }
+
+    if (qflg) {
+        apple_spmi_update_queues_status(s);
+    }
+    if (iflg) {
+        apple_spmi_update_irq(s);
+    }
+#ifdef DEBUG_SPMI
+    qemu_log_mask(LOG_UNIMP, "%s: %s @ 0x" TARGET_FMT_plx ": 0x%x\n", __func__,
+                  DEVICE(s)->id, addr, value);
+#endif
+    return value;
+}
+
+static void apple_spmi_fault_write(void *opaque, hwaddr addr,
+                                   uint64_t data, unsigned size)
+{
+    AppleSPMIState *s = APPLE_SPMI(opaque);
+    uint32_t value = data;
+    uint32_t *mmio = &s->fault_reg[addr >> 2];
+    bool iflg = false;
+    bool qflg = false;
+#ifdef DEBUG_SPMI
+    qemu_log_mask(LOG_UNIMP, "%s: %s @ 0x"
+    TARGET_FMT_plx " value: 0x" TARGET_FMT_plx "\n",
+    DEVICE(s)->id, __func__, addr, data);
+#endif
+
+    switch (addr) {
+    default:
+        break;
+    }
+
+    *mmio = value;
+    if (qflg) {
+        apple_spmi_update_queues_status(s);
+    }
+    if (iflg) {
+        apple_spmi_update_irq(s);
+    }
+}
+
+static const MemoryRegionOps apple_spmi_fault_ops = {
+    .read = apple_spmi_fault_read,
+    .write = apple_spmi_fault_write,
+    .impl.min_access_size = 4,
+    .impl.max_access_size = 4,
+    .valid.min_access_size = 4,
+    .valid.max_access_size = 4,
+    .endianness = DEVICE_NATIVE_ENDIAN,
+};
+
 static void apple_spmi_reset_enter(Object *obj, ResetType type)
 {
     AppleSPMIState *s = APPLE_SPMI(obj);
@@ -451,9 +520,8 @@ static void apple_spmi_init(Object *obj)
     memory_region_init_io(&s->iomems[0], obj, &apple_spmi_queue_reg_ops,
                           s, TYPE_APPLE_SPMI ".queue_reg", sizeof(s->queue_reg));
 
-    memory_region_init_ram_device_ptr(&s->iomems[1], obj,
-                                      TYPE_APPLE_SPMI ".fault_reg",
-                                      sizeof(s->fault_reg), &s->fault_reg);
+    memory_region_init_io(&s->iomems[1], obj, &apple_spmi_fault_ops,
+                          s, TYPE_APPLE_SPMI ".fault_reg", sizeof(s->fault_reg));
 
     memory_region_init_ram_device_ptr(&s->iomems[2], obj,
                                       TYPE_APPLE_SPMI ".fault_counter_reg",
