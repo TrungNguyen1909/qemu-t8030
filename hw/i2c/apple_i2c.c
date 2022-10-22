@@ -1,5 +1,5 @@
 #include "qemu/osdep.h"
-#include "hw/i2c/apple_hw_i2c.h"
+#include "hw/i2c/apple_i2c.h"
 #include "hw/i2c/i2c.h"
 #include "hw/irq.h"
 #include "migration/vmstate.h"

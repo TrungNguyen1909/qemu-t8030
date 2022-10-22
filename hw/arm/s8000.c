@@ -44,7 +44,7 @@
 #include "hw/or-irq.h"
 #include "hw/intc/apple_aic.h"
 #include "hw/gpio/apple_gpio.h"
-#include "hw/i2c/apple_hw_i2c.h"
+#include "hw/i2c/apple_i2c.h"
 #include "hw/usb/apple_otg.h"
 #include "hw/watchdog/apple_wdt.h"
 #include "hw/misc/apple_aes.h"
