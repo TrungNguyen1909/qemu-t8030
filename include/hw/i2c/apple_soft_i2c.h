@@ -6,10 +6,10 @@
 #include "hw/arm/xnu_dtb.h"
 #include "hw/i2c/bitbang_i2c.h"
 
-#define TYPE_APPLE_I2C "apple.i2c"
-OBJECT_DECLARE_SIMPLE_TYPE(AppleI2CState, APPLE_I2C)
+#define TYPE_APPLE_SOFT_I2C "apple.i2c.soft"
+OBJECT_DECLARE_SIMPLE_TYPE(AppleSoftI2CState, APPLE_SOFT_I2C)
 
-struct AppleI2CState {
+struct AppleSoftI2CState {
     /*< private >*/
     SysBusDevice parent_obj;
     bitbang_i2c_interface bitbang;
@@ -22,5 +22,5 @@ struct AppleI2CState {
     qemu_irq out;
 };
 
-DeviceState *apple_i2c_create(DTBNode *node);
+DeviceState *apple_soft_i2c_create(DTBNode *node);
 #endif /* APPLE_SOFT_I2C_H */
